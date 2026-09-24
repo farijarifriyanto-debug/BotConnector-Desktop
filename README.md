@@ -6,7 +6,7 @@ The primary MVP device path is a foreground Node.js CLI. It does not require
 an EXE/MSI installer and does not open an inbound port on the user's computer.
 
 ```powershell
-npx github:farijarifriyanto-debug/BotConnector-Desktop connect
+npx https://app.botconnector.id/device-cli.tgz connect
 ```
 
 Get a pairing code from `app.botconnector.id`, enter it in the terminal, and
@@ -18,7 +18,7 @@ Desktop Commander Remote is deny-by-default for each session. The CLI asks for
 local approval, or the user can make that session permission explicit:
 
 ```powershell
-npx github:farijarifriyanto-debug/BotConnector-Desktop connect --code ABC123 --allow-desktop-commander
+npx https://app.botconnector.id/device-cli.tgz connect --code ABC123 --allow-desktop-commander
 ```
 
 The Windows/Electron desktop build remains an optional legacy path and is not
