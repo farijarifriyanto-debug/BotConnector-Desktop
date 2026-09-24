@@ -3,6 +3,8 @@ name: Build Windows Desktop
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
     tags:
       - "desktop-v*"
 
@@ -49,7 +51,7 @@ jobs:
         run: cargo test --locked
 
       - name: Build Windows installer
-        run: npm run dist
+        run: npm run dist -- --publish never
 
       - name: Show build output
         shell: pwsh
