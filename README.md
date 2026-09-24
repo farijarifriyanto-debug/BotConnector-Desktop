@@ -1,5 +1,30 @@
 # BotConnector
 
+## Connect a device without an installer
+
+The primary MVP device path is a foreground Node.js CLI. It does not require
+an EXE/MSI installer and does not open an inbound port on the user's computer.
+
+```powershell
+npx github:farijarifriyanto-debug/BotConnector-Desktop connect
+```
+
+Get a pairing code from `app.botconnector.id`, enter it in the terminal, and
+keep the process open while the device should remain connected. The pairing
+credential is memory-only for that process. Closing the terminal or pressing
+`Ctrl+C` takes the device offline.
+
+Desktop Commander Remote is deny-by-default for each session. The CLI asks for
+local approval, or the user can make that session permission explicit:
+
+```powershell
+npx github:farijarifriyanto-debug/BotConnector-Desktop connect --code ABC123 --allow-desktop-commander
+```
+
+The Windows/Electron desktop build remains an optional legacy path and is not
+built on normal pushes.
+
+
 BotConnector is a local-first AI workspace built from the AIChat Rust project. One Rust core powers three ways to work: a terminal CLI, a browser workspace, and an Electron desktop app. Model and provider settings stay in the core configuration, so each surface uses the same setup.
 
 ## What works in this foundation
