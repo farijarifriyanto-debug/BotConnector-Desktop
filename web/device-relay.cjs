@@ -1,3 +1,5 @@
+const fs = require('node:fs');
+const path = require('node:path');
 const crypto = require('node:crypto');
 
 const PAIR_TTL_MS = 5 * 60 * 1000;
@@ -16,7 +18,7 @@ function websocketUrl(origin) {
 }
 
 class DeviceRelay {
-  constructor({ appOrigin = 'https://app.botconnector.id', pairTtlMs = PAIR_TTL_MS, requestTimeoutMs = REQUEST_TIMEOUT_MS } = {}) {
+  constructor({ appOrigin = 'https://app.botconnector.id', pairTtlMs = PAIR_TTL_MS, requestTimeoutMs = REQUEST_TIMEOUT_MS, stateFile = null } = {}) {
     this.appOrigin = appOrigin;
     this.pairTtlMs = pairTtlMs;
     this.requestTimeoutMs = requestTimeoutMs;
@@ -24,6 +26,74 @@ class DeviceRelay {
     this.devices = new Map();
     this.pending = new Map();
     this.wss = null;
+    this.stateFile = stateFile ? String(stateFile) : null;
+    this.loadState();
+  }
+
+  loadState() {
+    if (!this.stateFile) return;
+    try {
+      const payload = JSON.parse(fs.readFileSync(this.stateFile, 'utf8'));
+      const records = Array.isArray(payload?.devices) ? payload.devices : [];
+      for (const record of records) {
+        if (!record || typeof record !== 'object') continue;
+        const id = String(record.id || '');
+        const userId = String(record.userId || '');
+        const tokenHash = String(record.tokenHash || '');
+        if (!id || !userId || !/^[0-9a-f]{64}$/i.test(tokenHash)) continue;
+        this.devices.set(id, {
+          id,
+          userId,
+          tokenHash,
+          name: String(record.name || 'BotConnector device').slice(0, 120),
+          platform: String(record.platform || '').slice(0, 40),
+          arch: String(record.arch || '').slice(0, 40),
+          capabilities: Array.isArray(record.capabilities)
+            ? record.capabilities.map(String).slice(0, 50)
+            : [],
+          hardware:
+            record.hardware && typeof record.hardware === 'object' ? record.hardware : null,
+          socket: null,
+          lastSeen: record.lastSeen ? String(record.lastSeen) : null,
+        });
+      }
+    } catch (error) {
+      if (error?.code !== 'ENOENT') {
+        console.error('BotConnector Device Relay: failed to load state:', error.message);
+      }
+    }
+  }
+
+  persistState() {
+    if (!this.stateFile) return true;
+    try {
+      const directory = path.dirname(this.stateFile);
+      fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+      const devices = [...this.devices.values()].map((device) => ({
+        id: device.id,
+        userId: device.userId,
+        tokenHash: device.tokenHash,
+        name: device.name,
+        platform: device.platform,
+        arch: device.arch,
+        capabilities: device.capabilities,
+        hardware: device.hardware,
+        lastSeen: device.lastSeen,
+      }));
+      const temporary = `${this.stateFile}.${process.pid}.tmp`;
+      fs.writeFileSync(
+        temporary,
+        JSON.stringify({ version: 1, devices }, null, 2) + '\n',
+        { mode: 0o600 },
+      );
+      fs.chmodSync(temporary, 0o600);
+      fs.renameSync(temporary, this.stateFile);
+      fs.chmodSync(this.stateFile, 0o600);
+      return true;
+    } catch (error) {
+      console.error('BotConnector Device Relay: failed to persist state:', error.message);
+      return false;
+    }
   }
 
   createPairCode(userId) {
@@ -56,6 +126,7 @@ class DeviceRelay {
       socket: null,
       lastSeen: null,
     });
+    this.persistState();
     return {
       device_id: deviceId,
       device_name: String(deviceName || 'BotConnector device').slice(0, 120),
@@ -83,6 +154,7 @@ class DeviceRelay {
     if (!device || device.userId !== userId) return false;
     try { device.socket?.close(1008, 'Device revoked'); } catch {}
     this.devices.delete(device.id);
+    this.persistState();
     return true;
   }
 
@@ -125,6 +197,7 @@ class DeviceRelay {
         device.capabilities = Array.isArray(message.capabilities) ? message.capabilities.map(String).slice(0, 50) : [];
         device.hardware = message.hardware && typeof message.hardware === 'object' ? message.hardware : null;
         device.lastSeen = new Date().toISOString();
+        this.persistState();
         socket.deviceId = device.id;
         return;
       }
@@ -136,6 +209,7 @@ class DeviceRelay {
       if (device?.socket === socket) {
         device.socket = null;
         device.lastSeen = new Date().toISOString();
+        this.persistState();
       }
     });
   }
@@ -150,7 +224,11 @@ class DeviceRelay {
     else {
       if (waiter.method === 'hardware.get' && message.result && typeof message.result === 'object') {
         const device = this.devices.get(deviceId);
-        if (device) { device.hardware = message.result; device.lastSeen = new Date().toISOString(); }
+        if (device) {
+          device.hardware = message.result;
+          device.lastSeen = new Date().toISOString();
+          this.persistState();
+        }
       }
       waiter.resolve(message.result);
     }
@@ -200,6 +278,7 @@ class DeviceRelay {
       try { device.socket?.close(); } catch {}
       device.socket = null;
     }
+    this.persistState();
     this.wss?.close();
   }
 }

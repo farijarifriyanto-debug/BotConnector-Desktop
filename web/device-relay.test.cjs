@@ -1,5 +1,8 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { DeviceRelay, websocketUrl } = require('./device-relay.cjs');
 
 test('pairing is one-time and devices are isolated by user', () => {
@@ -47,4 +50,53 @@ test('remote request requires ownership, online socket, and advertised capabilit
 test('websocket URL preserves secure transport', () => {
   assert.equal(websocketUrl('https://app.botconnector.id'), 'wss://app.botconnector.id/api/devices/socket');
   assert.equal(websocketUrl('http://127.0.0.1:8080'), 'ws://127.0.0.1:8080/api/devices/socket');
+});
+
+
+test('paired devices survive relay restart without persisting plaintext device token', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'botconnector-device-relay-'));
+  const stateFile = path.join(directory, 'devices.json');
+  try {
+    const first = new DeviceRelay({
+      appOrigin: 'https://app.botconnector.id',
+      stateFile,
+    });
+    const pair = first.createPairCode('user-a');
+    const paired = first.exchange({
+      code: pair.code,
+      device_name: 'Persistent Laptop',
+      platform: 'win32',
+      arch: 'x64',
+    });
+    first.close();
+
+    const rawState = fs.readFileSync(stateFile, 'utf8');
+    assert.equal(rawState.includes(paired.device_token), false);
+    assert.match(rawState, /"tokenHash"/);
+
+    const second = new DeviceRelay({
+      appOrigin: 'https://app.botconnector.id',
+      stateFile,
+    });
+    const restored = second.list('user-a');
+    assert.equal(restored.length, 1);
+    assert.equal(restored[0].id, paired.device_id);
+    assert.equal(restored[0].online, false);
+    assert.ok(
+      second.verifyHello({ deviceId: paired.device_id, token: paired.device_token }),
+      'restored token hash authenticates the original device token',
+    );
+
+    assert.equal(second.revoke('user-a', paired.device_id), true);
+    second.close();
+
+    const third = new DeviceRelay({
+      appOrigin: 'https://app.botconnector.id',
+      stateFile,
+    });
+    assert.equal(third.list('user-a').length, 0);
+    third.close();
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });
