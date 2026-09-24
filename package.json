@@ -3,12 +3,12 @@
   "version": "0.2.0",
   "private": true,
   "description": "BotConnector local device bridge and optional desktop workspace",
-  "main": "desktop/main.cjs",
+  "main": "cli/botconnector-device.cjs",
   "bin": {
     "botconnector-device": "cli/botconnector-device.cjs"
   },
   "files": [
-    "cli",
+    "cli/botconnector-device.cjs",
     "desktop/local/device-bridge.cjs",
     "desktop/local/hardware.cjs",
     "desktop/local/launcher.cjs"
@@ -24,7 +24,7 @@
     "web:dev": "node web/server.cjs",
     "build:core": "cargo build --release",
     "build:core:debug": "cargo build",
-    "desktop": "npm run build:core:debug && electron .",
+    "desktop": "npm run build:core:debug && electron desktop/main.cjs",
     "dist": "npm run build:core && electron-builder --config electron-builder.config.cjs --publish never",
     "device-relay": "node web/device-relay-service.cjs"
   },
