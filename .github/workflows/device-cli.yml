@@ -40,3 +40,18 @@ jobs:
 
       - name: Verify npm package contents
         run: npm pack --dry-run
+
+      - name: Build installer-free device package
+        run: |
+          mkdir -p dist/device
+          npm pack --pack-destination dist/device
+          mv dist/device/botconnector-device-*.tgz dist/device/device-cli.tgz
+          sha256sum dist/device/device-cli.tgz
+
+      - name: Upload device package
+        uses: actions/upload-artifact@v4
+        with:
+          name: botconnector-device-cli
+          path: dist/device/device-cli.tgz
+          if-no-files-found: error
+          retention-days: 14
