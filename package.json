@@ -1,8 +1,8 @@
 {
-  "name": "botconnector-desktop",
+  "name": "botconnector-device",
   "version": "0.2.0",
   "private": true,
-  "description": "BotConnector local device bridge and optional desktop workspace",
+  "description": "Installer-free BotConnector local device bridge",
   "main": "cli/botconnector-device.cjs",
   "bin": {
     "botconnector-device": "cli/botconnector-device.cjs"
