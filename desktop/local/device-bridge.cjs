@@ -1,0 +1,150 @@
+const os = require('node:os');
+
+function defaultDeviceName() {
+  return os.hostname() || 'BotConnector device';
+}
+
+function wsState(socket) {
+  if (!socket) return 'DISCONNECTED';
+  return ['CONNECTING', 'CONNECTED', 'CLOSING', 'DISCONNECTED'][socket.readyState] || 'DISCONNECTED';
+}
+
+class DeviceBridge {
+  constructor({ settings, detectHardware, tools, launcher, emit = () => {}, seal = value => value, open = value => value, cloudBase = 'https://app.botconnector.id', WebSocketImpl = globalThis.WebSocket } = {}) {
+    this.settings = settings;
+    this.detectHardware = detectHardware;
+    this.tools = tools;
+    this.launcher = launcher;
+    this.emit = emit;
+    this.seal = seal;
+    this.open = open;
+    this.cloudBase = String(cloudBase).replace(/\/$/, '');
+    this.WebSocketImpl = WebSocketImpl;
+    this.socket = null;
+    this.reconnectTimer = null;
+    this.manualClose = false;
+  }
+
+  pairing() {
+    const value = this.settings?.get('devicePairing');
+    return value && typeof value === 'object' ? value : null;
+  }
+  status() {
+    const pairing = this.pairing();
+    return {
+      paired: Boolean(pairing?.deviceId && pairing?.token),
+      deviceId: pairing?.deviceId || null,
+      deviceName: pairing?.deviceName || defaultDeviceName(),
+      connection: wsState(this.socket),
+      launcherProfiles: this.launcher?.list() || [],
+    };
+  }
+
+  async pair(code) {
+    const pairingCode = String(code || '').trim().toUpperCase();
+    if (!/^[A-Z0-9-]{6,32}$/.test(pairingCode)) throw new Error('Kode pairing tidak valid.');
+    const response = await fetch(`${this.cloudBase}/api/devices/pair/exchange`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ code: pairingCode, device_name: defaultDeviceName(), platform: process.platform, arch: process.arch }),
+      signal: AbortSignal.timeout(10000),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.device_token || !payload.device_id || !payload.ws_url) {
+      throw new Error(payload.error?.message || 'Pairing perangkat gagal.');
+    }
+    await this.settings.set('devicePairing', {
+      deviceId: String(payload.device_id),
+      deviceName: String(payload.device_name || defaultDeviceName()),
+      token: this.seal(String(payload.device_token)),
+      wsUrl: String(payload.ws_url),
+    });
+    await this.connect();
+    this.emit('device:changed', this.status());
+    return this.status();
+  }
+
+  async unpair() {
+    this.manualClose = true;
+    clearTimeout(this.reconnectTimer);
+    this.socket?.close();
+    this.socket = null;
+    await this.settings.set('devicePairing', null);
+    this.emit('device:changed', this.status());
+    return this.status();
+  }
+
+  async connect() {
+    const pairing = this.pairing();
+    if (!pairing?.deviceId || !pairing?.token || !pairing?.wsUrl || !this.WebSocketImpl) return this.status();
+    if (this.socket && this.socket.readyState <= 1) return this.status();
+    this.manualClose = false;
+    const token = this.open(pairing.token);
+    const socket = new this.WebSocketImpl(pairing.wsUrl);
+    this.socket = socket;
+    socket.addEventListener('open', async () => {
+      const hardware = await this.detectHardware();
+      socket.send(JSON.stringify({
+        type: 'device.hello',
+        token,
+        deviceId: pairing.deviceId,
+        deviceName: pairing.deviceName || defaultDeviceName(),
+        capabilities: ['hardware.get', 'launcher.list', 'launcher.start', 'launcher.stop', 'tools.list'],
+        hardware,
+      }));
+      this.emit('device:changed', this.status());
+    });
+    socket.addEventListener('message', event => {
+      this.handleMessage(event.data).catch(error => this.emit('device:error', { message: error.message }));
+    });
+    socket.addEventListener('close', () => {
+      if (this.socket === socket) this.socket = null;
+      this.emit('device:changed', this.status());
+      if (!this.manualClose && this.pairing()) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = setTimeout(() => this.connect().catch(() => {}), 3000);
+      }
+    });
+    socket.addEventListener('error', () => this.emit('device:changed', this.status()));
+    return this.status();
+  }
+
+  async handleMessage(raw) {
+    let message;
+    try { message = JSON.parse(typeof raw === 'string' ? raw : Buffer.from(raw).toString('utf8')); }
+    catch { return; }
+    if (message?.type !== 'device.request' || typeof message.id !== 'string') return;
+    let result;
+    try {
+      result = await this.execute(message.method, message.params || {});
+      this.reply(message.id, { ok: true, result });
+    } catch (error) {
+      this.reply(message.id, { ok: false, error: { message: error.message || String(error) } });
+    }
+  }
+  async execute(method, params) {
+    if (method === 'hardware.get') return this.detectHardware();
+    if (method === 'launcher.list') return this.launcher.list();
+    if (method === 'launcher.start') return this.launcher.start(params.id);
+    if (method === 'launcher.stop') return this.launcher.stop(params.id);
+    if (method === 'tools.list') return this.tools.list().map(tool => ({
+      id: tool.id, name: tool.name, source: tool.source,
+      permissionClass: tool.permissionClass, enabled: Boolean(tool.enabled), status: tool.status,
+    }));
+    throw new Error('Kemampuan remote tidak diizinkan.');
+  }
+
+  reply(id, payload) {
+    if (!this.socket || this.socket.readyState !== 1) return;
+    this.socket.send(JSON.stringify({ type: 'device.response', id, ...payload }));
+  }
+
+  close() {
+    this.manualClose = true;
+    clearTimeout(this.reconnectTimer);
+    this.socket?.close();
+    this.socket = null;
+  }
+}
+
+module.exports = { DeviceBridge, defaultDeviceName, wsState };

@@ -1,0 +1,7 @@
+/target
+/tmp
+/.env
+*.log
+/node_modules
+/dist
+/desktop/out
