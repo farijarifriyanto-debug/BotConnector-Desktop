@@ -1,0 +1,42 @@
+name: Verify BotConnector Device CLI
+
+on:
+  push:
+    branches:
+      - main
+      - "feature/**"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  device-cli:
+    name: Installer-free device CLI
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Verify device CLI
+        run: npm run check:device
+
+      - name: Verify CLI help
+        run: node cli/botconnector-device.cjs --help
+
+      - name: Verify npm package contents
+        run: npm pack --dry-run
