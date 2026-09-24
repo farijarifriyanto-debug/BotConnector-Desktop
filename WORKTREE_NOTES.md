@@ -440,3 +440,11 @@ Untuk setiap perubahan pada source, UI, konfigurasi, dependency, dokumentasi, at
 - Run GitHub Actions pertama `36028349910` berhasil melewati JS/device tests dan Rust tests serta menghasilkan NSIS installer, tetapi step packaging berakhir failure setelah `electron-builder` mencoba implicit publish di CI tanpa `GH_TOKEN`.
 - Koreksi: script `npm run dist` sekarang memanggil `electron-builder --publish never`. Distribusi artifact/release tetap dimiliki workflow `.github/workflows/build-windows.yml`, sehingga proses build tidak melakukan implicit publish.
 - Build lokal tetap tidak dijalankan; verifikasi final dilakukan melalui rerun GitHub Actions.
+
+### 2026-09-24 - GitHub Windows build SUCCESS
+
+- GitHub Actions rerun `36029630151` pada commit `42de14af7eeaf4f56b7a2c2ba829beea060db2f6` selesai SUCCESS.
+- Semua tahap utama PASS: JavaScript/device bridge checks, Rust tests, Windows release build, NSIS packaging, output inspection, dan artifact upload.
+- Artifact GitHub: `BotConnector-Windows-x64` (artifact id `10821605478`); run URL: `https://github.com/farijarifriyanto-debug/BotConnector-Desktop/actions/runs/36029630151`.
+- Workflow upload berikutnya dioptimalkan agar hanya mengunggah `*.exe`, `*.blockmap`, dan `*.yml`, bukan seluruh folder `win-unpacked`.
+- Build installer dilakukan seluruhnya di GitHub runner publik; laptop/VPS tidak dipakai untuk compile/package installer.

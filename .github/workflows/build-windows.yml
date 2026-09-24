@@ -64,7 +64,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: BotConnector-Windows-x64
-          path: dist/desktop/**
+          path: |
+            dist/desktop/*.exe
+            dist/desktop/*.blockmap
+            dist/desktop/*.yml
           if-no-files-found: error
           retention-days: 14
 
