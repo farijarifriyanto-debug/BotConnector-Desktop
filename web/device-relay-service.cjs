@@ -87,6 +87,10 @@ function configFrom(options = {}) {
     host: options.host || process.env.BOTCONNECTOR_DEVICE_RELAY_HOST || DEFAULT_HOST,
     port: Number(options.port || process.env.BOTCONNECTOR_DEVICE_RELAY_PORT || DEFAULT_PORT),
     appOrigin: options.appOrigin || process.env.BOTCONNECTOR_DEVICE_APP_ORIGIN || DEFAULT_APP_ORIGIN,
+    stateFile:
+      options.stateFile !== undefined
+        ? String(options.stateFile || '').trim()
+        : String(process.env.BOTCONNECTOR_DEVICE_RELAY_STATE_FILE || '').trim(),
     internalToken,
   };
 }
@@ -105,6 +109,7 @@ function createDeviceRelayServer(options = {}) {
       appOrigin: config.appOrigin,
       pairTtlMs: options.pairTtlMs,
       requestTimeoutMs: options.requestTimeoutMs,
+      stateFile: config.stateFile || null,
     });
 
   const internalAuthorized = (req) =>
