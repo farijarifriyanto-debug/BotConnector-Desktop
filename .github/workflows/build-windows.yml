@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - feature/device-relay-persistence
     tags:
       - "desktop-v*"
 
