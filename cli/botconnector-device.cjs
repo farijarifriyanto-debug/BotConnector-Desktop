@@ -55,9 +55,9 @@ BotConnector Device
 Hubungkan laptop/PC ke app.botconnector.id tanpa installer.
 
 Pemakaian:
-  npx github:farijarifriyanto-debug/BotConnector-Desktop connect
-  npx github:farijarifriyanto-debug/BotConnector-Desktop connect --code ABC123
-  npx github:farijarifriyanto-debug/BotConnector-Desktop connect --code ABC123 --allow-desktop-commander
+  npx https://app.botconnector.id/device-cli.tgz connect
+  npx https://app.botconnector.id/device-cli.tgz connect --code ABC123
+  npx https://app.botconnector.id/device-cli.tgz connect --code ABC123 --allow-desktop-commander
 
 Opsi:
   --code <kode>                  Kode pairing dari app.botconnector.id
