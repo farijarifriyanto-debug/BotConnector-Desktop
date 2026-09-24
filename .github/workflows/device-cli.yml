@@ -55,3 +55,27 @@ jobs:
           path: dist/device/device-cli.tgz
           if-no-files-found: error
           retention-days: 14
+
+
+  windows-hardware:
+    name: Windows hardware detection
+    runs-on: windows-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Detect Windows hardware
+        shell: pwsh
+        run: |
+          node -e "require('./desktop/local/hardware.cjs').detectHardware().then(h => { console.log(JSON.stringify(h, null, 2)); if (!h.cpu || !h.ramGb || h.platform !== 'win32') process.exit(1); })"
