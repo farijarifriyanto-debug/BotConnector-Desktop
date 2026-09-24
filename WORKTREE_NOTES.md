@@ -434,3 +434,9 @@ Untuk setiap perubahan pada source, UI, konfigurasi, dependency, dokumentasi, at
 - Repo publik dedicated dibuat: `https://github.com/farijarifriyanto-debug/BotConnector-Desktop`.
 - Pre-publish secret scan: tidak ada .env/key/credential yang tracked atau untracked untuk dipublikasikan; root `.env` ter-ignore.
 - Verifikasi sebelum publikasi: `npm run check` 42/42 PASS. Build installer lokal sengaja tidak dijalankan; build installer dialihkan ke GitHub Actions.
+
+### 2026-09-24 - GitHub Actions Windows build retry fix
+
+- Run GitHub Actions pertama `36028349910` berhasil melewati JS/device tests dan Rust tests serta menghasilkan NSIS installer, tetapi step packaging berakhir failure setelah `electron-builder` mencoba implicit publish di CI tanpa `GH_TOKEN`.
+- Koreksi: script `npm run dist` sekarang memanggil `electron-builder --publish never`. Distribusi artifact/release tetap dimiliki workflow `.github/workflows/build-windows.yml`, sehingga proses build tidak melakukan implicit publish.
+- Build lokal tetap tidak dijalankan; verifikasi final dilakukan melalui rerun GitHub Actions.

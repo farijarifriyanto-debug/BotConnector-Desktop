@@ -14,7 +14,7 @@
     "build:core": "cargo build --release",
     "build:core:debug": "cargo build",
     "desktop": "npm run build:core:debug && electron .",
-    "dist": "npm run build:core && electron-builder --config electron-builder.config.cjs"
+    "dist": "npm run build:core && electron-builder --config electron-builder.config.cjs --publish never"
   },
   "devDependencies": {
     "electron": "44.3.0",
