@@ -165,3 +165,61 @@ test('Local UI catalog search and recommendations use detected hardware', async 
   assert.equal(recPayload.models[0].compatibility.level, 'great');
   assert.ok(calls.some((call) => call.kind === 'details' && call.hardware.ramGb === 16));
 });
+
+
+test('OpenAI-compatible local API lists runnable models and chats without cloud fallback', async (t) => {
+  const localAi = runtimeFixture();
+  localAi.listModels = async () => [
+    {
+      id: 'local-runnable',
+      name: 'Runnable Local',
+      path: 'device:test:local-runnable',
+      runtime: 'test',
+      runnable: true,
+      source: 'fixture',
+    },
+    {
+      id: 'local-unavailable',
+      name: 'Unavailable Local',
+      path: 'device:test:local-unavailable',
+      runtime: 'test',
+      runnable: false,
+      source: 'fixture',
+    },
+  ];
+  localAi.chat = async ({ model, runtime, messages }) => ({
+    content: 'offline:' + String(messages?.[0]?.content || ''),
+    model,
+    runtime,
+  });
+
+  const server = await startOfflineServer({
+    localAi,
+    detectHardware: async () => ({ cpu: 'Test CPU', ramGb: 16 }),
+    port: 0,
+    open: false,
+  });
+  t.after(() => server.close());
+
+  const auth = { Authorization: 'Bearer ' + server.token };
+
+  const modelsResponse = await fetch(server.url + '/v1/models', { headers: auth });
+  assert.equal(modelsResponse.status, 200);
+  const modelsPayload = await modelsResponse.json();
+  assert.equal(modelsPayload.object, 'list');
+  assert.equal(modelsPayload.data.length, 1);
+  assert.equal(modelsPayload.data[0].name, 'Runnable Local');
+
+  const chatResponse = await fetch(server.url + '/v1/chat/completions', {
+    method: 'POST',
+    headers: { ...auth, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model: modelsPayload.data[0].id,
+      messages: [{ role: 'user', content: 'hello' }],
+    }),
+  });
+  assert.equal(chatResponse.status, 200);
+  const chatPayload = await chatResponse.json();
+  assert.equal(chatPayload.object, 'chat.completion');
+  assert.equal(chatPayload.choices[0].message.content, 'offline:hello');
+});
