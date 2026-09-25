@@ -17,6 +17,8 @@ const ALLOWED_METHODS = new Set([
   'launcher.stop',
   'tools.list',
   'runtime.status',
+  'runtime.start',
+  'runtime.stop',
   'models.list',
   'models.pull.start',
   'models.pull.status',
