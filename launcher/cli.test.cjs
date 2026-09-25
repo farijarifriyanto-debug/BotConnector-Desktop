@@ -8,8 +8,9 @@ const {
   parseManifest,
   readState,
   writeState,
-  npxCommand,
   buildNpxArgs,
+  buildNpmExecArgs,
+  resolveNpmInvocation,
 } = require('./cli.cjs');
 
 test('accepts an immutable package URL matching the manifest version', () => {
@@ -49,8 +50,40 @@ test('builds online and offline npx invocations without version hardcoding', () 
     'botconnector-device',
     'offline',
   ]);
-  assert.equal(npxCommand('win32'), 'npx.cmd');
-  assert.equal(npxCommand('linux'), 'npx');
+});
+
+test('uses npm CLI through node when npm_execpath is available', () => {
+  const url = 'https://app.botconnector.id/device-cli-v0.4.6.tgz';
+  const invocation = resolveNpmInvocation(url, ['--version'], {
+    platform: 'win32',
+    env: { npm_execpath: 'C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js' },
+    execPath: 'C:\\Program Files\\nodejs\\node.exe',
+    exists: () => true,
+  });
+  assert.equal(invocation.command, 'C:\\Program Files\\nodejs\\node.exe');
+  assert.deepEqual(invocation.args, [
+    'C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js',
+    ...buildNpmExecArgs(url, ['--version']),
+  ]);
+  assert.equal(invocation.via, 'npm-cli');
+});
+
+test('uses cmd.exe for npx.cmd fallback on Windows instead of spawning .cmd directly', () => {
+  const url = 'https://app.botconnector.id/device-cli-v0.4.6.tgz';
+  const invocation = resolveNpmInvocation(url, ['--version'], {
+    platform: 'win32',
+    env: { ComSpec: 'C:\\Windows\\System32\\cmd.exe' },
+    exists: () => false,
+  });
+  assert.equal(invocation.command, 'C:\\Windows\\System32\\cmd.exe');
+  assert.deepEqual(invocation.args, [
+    '/d',
+    '/s',
+    '/c',
+    'npx.cmd',
+    ...buildNpxArgs(url, ['--version']),
+  ]);
+  assert.equal(invocation.via, 'cmd.exe');
 });
 
 test('persists the last resolved immutable release for cold offline starts', () => {
