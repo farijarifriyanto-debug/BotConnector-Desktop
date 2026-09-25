@@ -92,11 +92,36 @@ class LocalAiRuntime {
     }
 
     const models = await this.listModels(runtime);
+    let loadedModels = [];
+
+    if (runtime.kind === 'ollama') {
+      try {
+        const running = await this.fetchJson(`${OLLAMA_BASE}/api/ps`, { method: 'GET' }, 3000);
+        loadedModels = (Array.isArray(running?.models) ? running.models : [])
+          .map((model) => String(model?.name || model?.model || ''))
+          .filter(Boolean);
+      } catch {}
+    } else {
+      try {
+        const health = await this.fetchJson(`${LEMONADE_BASE}/v1/health`, { method: 'GET' }, 3000);
+        const primary = String(health?.model_loaded || '');
+        loadedModels = [
+          ...(primary ? [primary] : []),
+          ...(Array.isArray(health?.all_models_loaded)
+            ? health.all_models_loaded.map((row) => String(row?.model_name || '')).filter(Boolean)
+            : []),
+        ];
+        loadedModels = [...new Set(loadedModels)];
+      } catch {}
+    }
+
     return {
       available: true,
       runtime: runtime.kind,
       baseUrl: runtime.baseUrl,
       models: models.length,
+      activeModel: loadedModels[0] || null,
+      loadedModels,
     };
   }
 
@@ -338,6 +363,7 @@ class LocalAiRuntime {
       };
     }
 
+    await this.loadModel(modelName, 'lemonade');
     const payload = await this.fetchJson(`${LEMONADE_BASE}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
