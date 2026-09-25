@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   device-cli:
@@ -82,6 +82,31 @@ jobs:
             dist/device/device-cli-launcher.tgz
           if-no-files-found: error
           retention-days: 14
+
+      - name: Prepare immutable release manifest
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          tag="device-v${version}"
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/device-cli.tgz"
+          printf '{"version":"%s","url":"%s","tag":"%s"}\n' "$version" "$url" "$tag" > dist/device/device-cli.json
+
+      - name: Publish immutable Device CLI release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          tag="device-v${version}"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $tag already exists; leaving immutable release unchanged."
+            exit 0
+          fi
+          gh release create "$tag"             dist/device/device-cli.tgz             dist/device/device-cli-launcher.tgz             dist/device/device-cli.json             --repo "$GITHUB_REPOSITORY"             --target "$GITHUB_SHA"             --title "BotConnector Device CLI v${version}"             --notes "Installer-free BotConnector Local release with expanded local model discovery and verified Windows/offline gates."
 
 
   windows-hardware:
