@@ -99,6 +99,8 @@ class DeviceBridge {
           ...(this.localAi?.enabled
             ? [
                 'runtime.status',
+                'runtime.start',
+                'runtime.stop',
                 'models.list',
                 'models.pull.start',
                 'models.pull.status',
@@ -153,6 +155,16 @@ class DeviceBridge {
       permissionClass: tool.permissionClass, enabled: Boolean(tool.enabled), status: tool.status,
     }));
     if (method === 'runtime.status') return this.localAi.status();
+    if (method === 'runtime.start') {
+      const runtime = String(params.runtime || 'ollama').toLowerCase();
+      if (runtime !== 'ollama') throw new Error('Only Ollama can be started by Device CLI.');
+      return this.launcher.start('ollama-serve');
+    }
+    if (method === 'runtime.stop') {
+      const runtime = String(params.runtime || 'ollama').toLowerCase();
+      if (runtime !== 'ollama') throw new Error('Only Ollama can be stopped by Device CLI.');
+      return this.launcher.stop('ollama-serve');
+    }
     if (method === 'models.list') return this.localAi.listModels();
     if (method === 'models.pull.start') return this.localAi.startPull(params.model);
     if (method === 'models.pull.status') return this.localAi.jobStatus(params.id);
