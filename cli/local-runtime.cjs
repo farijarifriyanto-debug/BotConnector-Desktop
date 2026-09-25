@@ -93,6 +93,11 @@ class LocalAiRuntime {
     this.modelsDir = path.join(this.dataDir, 'models');
     this.managedProcess = null;
     this.managedModel = null;
+    this.idleMs = Math.max(
+      60_000,
+      Number(process.env.BOTCONNECTOR_LOCAL_AI_IDLE_MS || 5 * 60 * 1000),
+    );
+    this.idleTimer = null;
 
     this.runtimeManager = new RuntimeManager({
       baseDir: this.runtimeDir,
@@ -107,6 +112,20 @@ class LocalAiRuntime {
 
   assertEnabled() {
     if (!this.enabled) throw new Error('Local AI access is not allowed for this session.');
+  }
+
+  clearIdleTimer() {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = null;
+  }
+
+  scheduleIdleUnload(runtime, model) {
+    this.clearIdleTimer();
+    if (!runtime || !model) return;
+    this.idleTimer = setTimeout(() => {
+      this.unloadModel(model, runtime).catch(() => {});
+    }, this.idleMs);
+    this.idleTimer.unref?.();
   }
 
   async fetchJson(url, init = {}, timeoutMs = 15_000) {
@@ -644,6 +663,7 @@ class LocalAiRuntime {
         }
       });
       await this.waitManagedReady();
+      this.scheduleIdleUnload(runtime, modelName);
       return { loaded: true, model: modelName, runtime };
     }
 
@@ -673,11 +693,13 @@ class LocalAiRuntime {
         10 * 60 * 1000,
       );
     }
+    this.scheduleIdleUnload(runtime, modelName);
     return { loaded: true, model: modelName, runtime };
   }
 
   async unloadModel(model, runtimeHint = '') {
     this.assertEnabled();
+    this.clearIdleTimer();
     const runtime = runtimeHint || (await this.detect())?.kind;
     if (!runtime) return { loaded: false, model: String(model || ''), runtime: null };
 
@@ -724,6 +746,7 @@ class LocalAiRuntime {
     const normalized = normalizeMessages(messages);
     const runtime = runtimeHint || (await this.detect())?.kind;
     if (!runtime) throw new Error('No supported local AI runtime is available.');
+    this.clearIdleTimer();
 
     const id = String(requestId || crypto.randomUUID());
     const controller = new AbortController();
@@ -734,6 +757,7 @@ class LocalAiRuntime {
       if (!this.managedRunning() || this.managedModel !== modelName) {
         await this.loadModel(modelName, 'llamacpp');
       }
+      this.clearIdleTimer();
       const payload = await this.fetchJson(
         `${MANAGED_LLAMA_BASE}/v1/chat/completions`,
         {
@@ -749,12 +773,14 @@ class LocalAiRuntime {
         },
         15 * 60 * 1000,
       );
-      return {
+      const result = {
         content: String(payload?.choices?.[0]?.message?.content || ''),
         model: modelName,
         runtime: 'llamacpp',
         usage: payload?.usage,
       };
+      this.scheduleIdleUnload('llamacpp', modelName);
+      return result;
     }
 
     if (runtime === 'ollama') {
@@ -767,7 +793,7 @@ class LocalAiRuntime {
             model: modelName,
             messages: normalized,
             stream: false,
-            keep_alive: options?.keep_alive || '10m',
+            keep_alive: options?.keep_alive || '5m',
             options: options?.num_ctx
               ? {
                   num_ctx: Math.max(
@@ -781,7 +807,7 @@ class LocalAiRuntime {
         },
         15 * 60 * 1000,
       );
-      return {
+      const result = {
         content: String(payload?.message?.content || ''),
         model: modelName,
         runtime: 'ollama',
@@ -790,9 +816,12 @@ class LocalAiRuntime {
           completion_tokens: Number(payload?.eval_count || 0),
         },
       };
+      this.scheduleIdleUnload('ollama', modelName);
+      return result;
     }
 
     await this.loadModel(modelName, 'lemonade');
+    this.clearIdleTimer();
     const payload = await this.fetchJson(
       `${LEMONADE_BASE}/v1/chat/completions`,
       {
@@ -803,12 +832,14 @@ class LocalAiRuntime {
       },
       15 * 60 * 1000,
     );
-    return {
+    const result = {
       content: String(payload?.choices?.[0]?.message?.content || ''),
       model: modelName,
       runtime: 'lemonade',
       usage: payload?.usage,
     };
+    this.scheduleIdleUnload('lemonade', modelName);
+    return result;
     } finally {
       this.chatControllers.delete(id);
     }
@@ -825,6 +856,7 @@ class LocalAiRuntime {
   }
 
   close() {
+    this.clearIdleTimer();
     for (const job of this.jobs.values()) {
       try {
         job.controller?.abort();
