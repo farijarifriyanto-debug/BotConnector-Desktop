@@ -135,7 +135,7 @@ async function connect(options) {
   const settings = new SessionSettings({
     launcherProfiles: {
       'desktop-commander-remote': allowDesktopCommander,
-      'ollama-serve': false,
+      'ollama-serve': allowLocalAi,
     },
   });
 
