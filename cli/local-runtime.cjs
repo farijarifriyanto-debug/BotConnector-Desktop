@@ -547,6 +547,9 @@ class LocalAiRuntime {
     const listOllama = async () => {
       try {
         const payload = await this.fetchJson(`${OLLAMA_BASE}/api/tags`, { method: 'GET' }, 1800);
+        const localRows = await scanOllamaStore();
+        const localIds = new Set(localRows.map((row) => row.id));
+
         return (Array.isArray(payload?.models) ? payload.models : [])
           .map((model) => ({
             id: String(model?.name || model?.model || ''),
@@ -560,7 +563,7 @@ class LocalAiRuntime {
             deletable: true,
             runnable: true,
           }))
-          .filter((model) => model.id);
+          .filter((model) => model.id && localIds.has(model.id));
       } catch {
         return scanOllamaStore();
       }
