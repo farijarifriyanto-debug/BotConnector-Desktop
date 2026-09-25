@@ -58,10 +58,10 @@ BotConnector Device
 Connect a laptop or PC to app.botconnector.id without an installer.
 
 Usage:
-  npx https://app.botconnector.id/device-cli.tgz connect
-  npx https://app.botconnector.id/device-cli.tgz connect --code ABC123
-  npx https://app.botconnector.id/device-cli.tgz connect --code ABC123 --allow-local-ai
-  npx https://app.botconnector.id/device-cli.tgz connect --code ABC123 --allow-local-ai --allow-desktop-commander
+  npx https://app.botconnector.id/device-cli-v0.3.0.tgz connect
+  npx https://app.botconnector.id/device-cli-v0.3.0.tgz connect --code ABC123
+  npx https://app.botconnector.id/device-cli-v0.3.0.tgz connect --code ABC123 --allow-local-ai
+  npx https://app.botconnector.id/device-cli-v0.3.0.tgz connect --code ABC123 --allow-local-ai --allow-desktop-commander
 
 Options:
   --code <code>                  Pairing code from app.botconnector.id
