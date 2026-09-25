@@ -68,27 +68,38 @@ function printHelp() {
   console.log(`
 BotConnector Device
 
-Connect a laptop or PC to app.botconnector.id without an installer.
+Use BotConnector Local AI from Chrome/Firefox with or without cloud connectivity.
 
 Usage:
-  npx https://app.botconnector.id/device-cli-v0.3.0.tgz connect
-  npx https://app.botconnector.id/device-cli-v0.3.0.tgz connect --code ABC123
-  npx https://app.botconnector.id/device-cli-v0.3.0.tgz connect --code ABC123 --allow-local-ai
-  npx https://app.botconnector.id/device-cli-v0.3.0.tgz connect --code ABC123 --allow-local-ai --allow-desktop-commander
+  npx ${PUBLIC_PACKAGE_URL} connect --code ABC123
+  npx ${PUBLIC_PACKAGE_URL} connect --code ABC123 --allow-local-ai
+  npx ${PUBLIC_PACKAGE_URL} offline --allow-local-ai
+  npx --offline ${PUBLIC_PACKAGE_URL} offline --allow-local-ai
+
+Modes:
+  connect   Pair with app.botconnector.id. When Local AI is allowed, localhost
+            UI is also available as an offline fallback.
+  offline   No pairing or cloud connection. Opens the local browser UI only.
 
 Options:
   --code <code>                  Pairing code from app.botconnector.id
   --allow-desktop-commander     Allow this session to run Desktop Commander Remote
   --allow-local-ai              Allow model management and local inference for this session
+  --port <1-65535>              Local UI port (default: ${DEFAULT_PORT})
+  --no-browser                  Do not open the local browser UI automatically
   --origin <url>                 Override the BotConnector origin
   --no-prompt                    Disable interactive prompts
   -h, --help                     Show help
   -v, --version                  Show version
 
+Offline cold start:
+  Run the versioned package once while online so npm can cache it. Afterwards,
+  the "npx --offline ... offline" command can reuse the cached package.
+
 Security:
-  - Does not open an inbound port on this device.
-  - Pairing credentials are kept in process memory for this session only.
-  - Close the terminal or press Ctrl+C to disconnect.
+  - Local UI binds only to 127.0.0.1.
+  - Local API requires a random in-memory session token and same-origin checks.
+  - Pairing credentials stay in process memory for the online session only.
   - Local AI model management and inference require explicit session approval.
   - Arbitrary remote shell access is not available.
 `.trim());
