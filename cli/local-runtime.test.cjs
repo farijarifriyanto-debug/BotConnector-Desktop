@@ -15,6 +15,7 @@ const {
   scanOllamaStore,
   ollamaBaseCandidates,
   lemonadeRowsFromMetadata,
+  localModelRoots,
 } = require('./local-runtime.cjs');
 
 function jsonResponse(status, body) {
@@ -267,6 +268,21 @@ test('aggregates verified local Ollama and Lemonade models instead of hiding sec
   }
 });
 
+
+test('includes common third-party local GGUF model stores in discovery roots', () => {
+  const roots = localModelRoots(path.join(os.tmpdir(), 'bc-root-test'));
+  const expected = [
+    path.join(os.homedir(), '.lmstudio', 'models'),
+    path.join(os.homedir(), '.cache', 'lm-studio', 'models'),
+    path.join(os.homedir(), 'jan', 'models'),
+    path.join(os.homedir(), '.jan', 'models'),
+    path.join(os.homedir(), '.cache', 'gpt4all'),
+  ].map((value) => path.resolve(value));
+
+  for (const root of expected) {
+    assert.ok(roots.includes(root), 'missing discovery root: ' + root);
+  }
+});
 
 test('discovers existing GGUF files outside the BotConnector managed model directory', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bc-existing-gguf-'));
