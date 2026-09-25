@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { startOfflineServer } = require('./offline-server.cjs');
+const { startOfflineServer, browserLaunchSpec } = require('./offline-server.cjs');
 
 function runtimeFixture() {
   return {
@@ -96,4 +96,13 @@ test('offline API rejects foreign origin and accepts same-origin local chat', as
   const result = await response.json();
   assert.equal(result.content, 'local:hello offline');
   assert.equal(result.request_id, 'req-1');
+});
+
+
+test('uses the native Windows shell launcher for localhost UI', () => {
+  const spec = browserLaunchSpec('http://127.0.0.1:18765', 'win32');
+  assert.deepEqual(spec, {
+    command: 'explorer.exe',
+    args: ['http://127.0.0.1:18765'],
+  });
 });
