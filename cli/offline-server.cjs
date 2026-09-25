@@ -392,8 +392,6 @@ async function startOfflineServer({
         return;
       }
 
-      
-      const actualPort = typeof address === 'object' && address ? address.port : port;
       requireLocalApi(req, token, host, actualPort);
 
       if (req.method === 'GET' && url.pathname === '/api/status') {
