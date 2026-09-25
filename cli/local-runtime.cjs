@@ -128,9 +128,25 @@ function localModelRoots(dataDir) {
   add(path.join(os.homedir(), '.cache', 'huggingface', 'hub'));
   add(path.join(os.homedir(), '.cache', 'lemonade'));
   add(path.join(os.homedir(), '.lemonade'));
+
+  // Discover common third-party local model stores too. These roots are
+  // scanned read-only for GGUF files; BotConnector never deletes models that
+  // belong to another application.
+  add(path.join(os.homedir(), '.lmstudio', 'models'));
+  add(path.join(os.homedir(), '.cache', 'lm-studio', 'models'));
+  add(path.join(os.homedir(), 'jan', 'models'));
+  add(path.join(os.homedir(), '.jan', 'models'));
+  add(path.join(os.homedir(), '.local', 'share', 'jan', 'models'));
+  add(path.join(os.homedir(), '.cache', 'gpt4all'));
+  add(path.join(os.homedir(), '.local', 'share', 'nomic.ai', 'GPT4All'));
+
   add(process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Lemonade'));
   add(process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'lemonade'));
   add(process.env.APPDATA && path.join(process.env.APPDATA, 'Lemonade'));
+  add(process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'LM Studio', 'models'));
+  add(process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Jan', 'data', 'models'));
+  add(process.env.APPDATA && path.join(process.env.APPDATA, 'Jan', 'data', 'models'));
+  add(process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'nomic.ai', 'GPT4All'));
 
   for (const entry of String(process.env.BOTCONNECTOR_LOCAL_MODEL_DIRS || '')
     .split(path.delimiter)
