@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - "poc/open-webui-local-ui-action"
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       upstream_ref:
