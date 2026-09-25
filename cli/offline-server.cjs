@@ -56,6 +56,52 @@ async function readJson(req) {
   }
 }
 
+function openAiModelId(model) {
+  const runtime = String(model?.runtime || '').trim();
+  const id = String(model?.id || '').trim();
+  if (!runtime || !id) return '';
+  return Buffer.from(JSON.stringify({ runtime, id }), 'utf8').toString('base64url');
+}
+
+function decodeOpenAiModelId(value) {
+  try {
+    const parsed = JSON.parse(Buffer.from(String(value || ''), 'base64url').toString('utf8'));
+    const runtime = String(parsed?.runtime || '').trim();
+    const id = String(parsed?.id || '').trim();
+    if (!runtime || !id) throw new Error('invalid');
+    return { runtime, id };
+  } catch {
+    const error = new Error('Unknown local model.');
+    error.status = 404;
+    throw error;
+  }
+}
+
+function requireOpenAiLocalApi(req, token, host, port) {
+  const expectedHosts = new Set([host + ':' + port, 'localhost:' + port]);
+  if (!expectedHosts.has(String(req.headers.host || ''))) {
+    const error = new Error('Invalid local host.');
+    error.status = 403;
+    throw error;
+  }
+  const auth = String(req.headers.authorization || '');
+  const supplied = auth.toLowerCase().startsWith('bearer ')
+    ? auth.slice(7).trim()
+    : String(req.headers['x-botconnector-local-token'] || '');
+  if (!supplied || supplied.length !== token.length) {
+    const error = new Error('Local API key is required.');
+    error.status = 401;
+    throw error;
+  }
+  const a = Buffer.from(supplied);
+  const b = Buffer.from(token);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    const error = new Error('Local API key is invalid.');
+    error.status = 401;
+    throw error;
+  }
+}
+
 function requireLocalApi(req, token, host, port) {
   const expectedHosts = new Set([host + ':' + port, 'localhost:' + port]);
   if (!expectedHosts.has(String(req.headers.host || ''))) {
@@ -284,12 +330,69 @@ async function startOfflineServer({
         sendHtml(res, offlineHtml({ token, host, port: actualPort }));
         return;
       }
+      const address = server.address();
+      const actualPort = typeof address === 'object' && address ? address.port : port;
+
+      if (url.pathname.startsWith('/v1/')) {
+        requireOpenAiLocalApi(req, token, host, actualPort);
+
+        if (req.method === 'GET' && url.pathname === '/v1/models') {
+          const rows = await localAi.listModels();
+          sendJson(res, 200, {
+            object: 'list',
+            data: rows
+              .filter((model) => model?.runnable !== false)
+              .map((model) => ({
+                id: openAiModelId(model),
+                object: 'model',
+                created: 0,
+                owned_by: 'botconnector-local',
+                name: model.name || model.id,
+                botconnector: {
+                  runtime: model.runtime,
+                  source: model.source || model.recipe || 'local',
+                },
+              })),
+          });
+          return;
+        }
+
+        if (req.method === 'POST' && url.pathname === '/v1/chat/completions') {
+          const body = await readJson(req);
+          const model = decodeOpenAiModelId(body.model);
+          const result = await localAi.chat({
+            model: model.id,
+            runtime: model.runtime,
+            messages: Array.isArray(body.messages) ? body.messages : [],
+            request_id: String(body.request_id || crypto.randomUUID()),
+          });
+          sendJson(res, 200, {
+            id: 'chatcmpl-' + crypto.randomUUID(),
+            object: 'chat.completion',
+            created: Math.floor(Date.now() / 1000),
+            model: body.model,
+            choices: [
+              {
+                index: 0,
+                message: { role: 'assistant', content: String(result?.content || '') },
+                finish_reason: 'stop',
+              },
+            ],
+            usage: result?.usage || undefined,
+          });
+          return;
+        }
+
+        sendJson(res, 404, { error: { message: 'OpenAI-compatible endpoint not found.' } });
+        return;
+      }
+
       if (!url.pathname.startsWith('/api/')) {
         sendJson(res, 404, { error: { message: 'Not found.' } });
         return;
       }
 
-      const address = server.address();
+      
       const actualPort = typeof address === 'object' && address ? address.port : port;
       requireLocalApi(req, token, host, actualPort);
 
@@ -433,4 +536,7 @@ module.exports = {
   browserLaunchSpec,
   offlineHtml,
   requireLocalApi,
+  requireOpenAiLocalApi,
+  openAiModelId,
+  decodeOpenAiModelId,
 };
