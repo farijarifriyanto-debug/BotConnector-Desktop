@@ -53,6 +53,17 @@ jobs:
           grep -Eqi "BSD|Redistribution and use in source and binary forms" upstream/open-webui/LICENSE
           cp upstream/open-webui/LICENSE upstream/open-webui/UPSTREAM_LICENSE.txt
 
+      - name: Apply BotConnector Local branding
+        run: python3 local-ui-poc/rebrand_open_webui_v065.py
+
+      - name: Verify branding patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q "APP_NAME = 'BotConnector Local'" upstream/open-webui/src/lib/constants.ts
+          grep -q "<title>BotConnector Local</title>" upstream/open-webui/src/app.html
+          grep -q "<ShortName>BotConnector Local</ShortName>" upstream/open-webui/static/opensearch.xml
+
       - name: Install frontend dependencies
         working-directory: upstream/open-webui
         run: npm ci --force
