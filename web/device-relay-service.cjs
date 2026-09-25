@@ -16,6 +16,16 @@ const ALLOWED_METHODS = new Set([
   'launcher.start',
   'launcher.stop',
   'tools.list',
+  'runtime.status',
+  'models.list',
+  'models.pull.start',
+  'models.pull.status',
+  'models.pull.list',
+  'models.pull.cancel',
+  'models.delete',
+  'model.load',
+  'model.unload',
+  'chat.completions',
 ]);
 
 function json(res, status, value) {
