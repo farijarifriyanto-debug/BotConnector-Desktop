@@ -24,7 +24,7 @@ test('parses pairing and explicit session permission', () => {
 });
 
 test('rejects unknown arguments', () => {
-  assert.throws(() => parseArgs(['connect', '--shell']), /Argumen tidak dikenal/);
+  assert.throws(() => parseArgs(['connect', '--shell']), /Unknown argument/);
 });
 
 test('session settings are memory-only', async () => {
