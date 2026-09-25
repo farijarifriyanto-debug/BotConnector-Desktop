@@ -106,3 +106,62 @@ test('uses the native Windows shell launcher for localhost UI', () => {
     args: ['http://127.0.0.1:18765'],
   });
 });
+
+
+test('Local UI catalog search and recommendations use detected hardware', async (t) => {
+  const calls = [];
+  const catalog = {
+    searchCatalog: async (args) => {
+      calls.push({ kind: 'search', args });
+      return {
+        source: 'https://botconnector.id',
+        models: [
+          { id: 'Example/Fast-GGUF', downloads: 1000 },
+          { id: 'Example/Heavy-GGUF', downloads: 5000 },
+        ],
+      };
+    },
+    modelDetails: async (id, hardware) => {
+      calls.push({ kind: 'details', id, hardware });
+      return {
+        id,
+        capabilities: { chat: true },
+        compatibility: {
+          level: id.includes('Fast') ? 'great' : 'warn',
+          estimatedQ4Gb: id.includes('Fast') ? 2.5 : 18,
+        },
+      };
+    },
+  };
+
+  const server = await startOfflineServer({
+    localAi: runtimeFixture(),
+    detectHardware: async () => ({ cpu: 'Test CPU', ramGb: 16, nvidia: [] }),
+    catalog,
+    port: 0,
+    open: false,
+  });
+  t.after(() => server.close());
+
+  const headers = {
+    'content-type': 'application/json',
+    'x-botconnector-local-token': server.token,
+  };
+
+  const search = await fetch(server.url + '/api/catalog/search?q=qwen&limit=20', { headers });
+  assert.equal(search.status, 200);
+  const searchPayload = await search.json();
+  assert.equal(searchPayload.models.length, 2);
+
+  const recs = await fetch(server.url + '/api/catalog/recommendations', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ query: 'chat', limit: 8 }),
+  });
+  assert.equal(recs.status, 200);
+  const recPayload = await recs.json();
+  assert.equal(recPayload.hardware.ramGb, 16);
+  assert.equal(recPayload.models[0].id, 'Example/Fast-GGUF');
+  assert.equal(recPayload.models[0].compatibility.level, 'great');
+  assert.ok(calls.some((call) => call.kind === 'details' && call.hardware.ramGb === 16));
+});
