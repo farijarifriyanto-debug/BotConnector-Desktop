@@ -4,6 +4,8 @@ const crypto = require('node:crypto');
 
 const PAIR_TTL_MS = 5 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 20_000;
+const LOCAL_AI_REQUEST_TIMEOUT_MS = 15 * 60 * 1000;
+const LONG_LOCAL_AI_METHODS = new Set(['chat.completions', 'model.load', 'model.unload']);
 
 function hashToken(value) {
   return crypto.createHash('sha256').update(String(value || '')).digest('hex');
@@ -253,10 +255,13 @@ class DeviceRelay {
     }
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
+      const timeoutMs = LONG_LOCAL_AI_METHODS.has(String(method))
+        ? Math.max(this.requestTimeoutMs, LOCAL_AI_REQUEST_TIMEOUT_MS)
+        : this.requestTimeoutMs;
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(Object.assign(new Error('Permintaan ke perangkat melewati batas waktu.'), { status: 504 }));
-      }, this.requestTimeoutMs);
+        reject(Object.assign(new Error('Device request timed out.'), { status: 504 }));
+      }, timeoutMs);
       this.pending.set(id, { deviceId: device.id, method: String(method), resolve, reject, timer });
       try {
         device.socket.send(JSON.stringify({ type: 'device.request', id, method: String(method), params: params && typeof params === 'object' ? params : {} }));
@@ -283,4 +288,11 @@ class DeviceRelay {
   }
 }
 
-module.exports = { DeviceRelay, hashToken, websocketUrl, PAIR_TTL_MS, REQUEST_TIMEOUT_MS };
+module.exports = {
+  DeviceRelay,
+  hashToken,
+  websocketUrl,
+  PAIR_TTL_MS,
+  REQUEST_TIMEOUT_MS,
+  LOCAL_AI_REQUEST_TIMEOUT_MS,
+};
