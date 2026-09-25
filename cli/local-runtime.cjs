@@ -173,6 +173,178 @@ async function scanExternalGguf(roots, managedRoot, { maxFiles = 128, maxDepth =
   return out;
 }
 
+
+function ollamaModelsRoot() {
+  const configured = String(process.env.OLLAMA_MODELS || '').trim();
+  return path.resolve(configured || path.join(os.homedir(), '.ollama', 'models'));
+}
+
+async function scanOllamaStore(root = ollamaModelsRoot(), { maxFiles = 256 } = {}) {
+  const manifestsRoot = path.join(root, 'manifests');
+  const out = [];
+  const stack = [{ dir: manifestsRoot, depth: 0 }];
+
+  while (stack.length && out.length < maxFiles) {
+    const current = stack.pop();
+    let entries = [];
+    try {
+      entries = await fsp.readdir(current.dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      if (out.length >= maxFiles) break;
+      const full = path.join(current.dir, entry.name);
+      if (entry.isDirectory()) {
+        if (current.depth < 5) stack.push({ dir: full, depth: current.depth + 1 });
+        continue;
+      }
+      if (!entry.isFile()) continue;
+
+      let manifest;
+      try {
+        const stat = await fsp.stat(full);
+        if (stat.size <= 0 || stat.size > 2 * 1024 * 1024) continue;
+        manifest = JSON.parse(await fsp.readFile(full, 'utf8'));
+      } catch {
+        continue;
+      }
+
+      const relative = path.relative(manifestsRoot, full);
+      const parts = relative.split(path.sep).filter(Boolean);
+      if (parts.length < 4) continue;
+      const tag = parts.pop();
+      const model = parts.pop();
+      const namespace = parts.pop();
+      const registry = parts.join('/');
+      const id = namespace === 'library' ? `${model}:${tag}` : `${namespace}/${model}:${tag}`;
+      const layers = [
+        ...(Array.isArray(manifest?.layers) ? manifest.layers : []),
+        ...(manifest?.config ? [manifest.config] : []),
+      ];
+      const size = layers.reduce((sum, layer) => sum + Number(layer?.size || 0), 0);
+
+      out.push({
+        id,
+        name: id,
+        size: size || undefined,
+        runtime: 'ollama',
+        path: `device:ollama:${id}`,
+        source: 'Ollama local store',
+        registry,
+        deletable: false,
+        runnable: false,
+        offlineDiscovered: true,
+      });
+    }
+  }
+
+  return out;
+}
+
+function lemonadeMetadataRoots() {
+  const roots = new Set();
+  const add = (value) => {
+    const text = String(value || '').trim();
+    if (text) roots.add(path.resolve(text));
+  };
+  add(path.join(os.homedir(), '.cache', 'lemonade'));
+  add(path.join(os.homedir(), '.lemonade'));
+  add(process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Lemonade'));
+  add(process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'lemonade'));
+  add(process.env.APPDATA && path.join(process.env.APPDATA, 'Lemonade'));
+  return [...roots];
+}
+
+function lemonadeRowsFromMetadata(value) {
+  const rows = [];
+  const visit = (item, depth = 0) => {
+    if (depth > 4 || item == null) return;
+    if (Array.isArray(item)) {
+      for (const child of item.slice(0, 512)) visit(child, depth + 1);
+      return;
+    }
+    if (typeof item !== 'object') return;
+
+    const id = String(
+      item.id || item.model_id || item.modelId || item.model_name || item.modelName || '',
+    ).trim();
+    const recipe = String(item.recipe || item.backend || '').trim();
+    const checkpoint = String(item.checkpoint || item.repo_id || item.repoId || '').trim();
+
+    if (id && id.length <= 256 && (recipe || checkpoint || item.downloaded != null)) {
+      rows.push({
+        id,
+        name: id,
+        runtime: 'lemonade',
+        path: `device:lemonade:${id}`,
+        recipe: recipe || undefined,
+        repoId: checkpoint || undefined,
+        source: 'Lemonade local metadata',
+        deletable: false,
+        runnable: false,
+        offlineDiscovered: true,
+      });
+    }
+
+    for (const key of ['models', 'data', 'installed', 'items', 'entries']) {
+      if (item[key] != null) visit(item[key], depth + 1);
+    }
+  };
+  visit(value);
+  return rows;
+}
+
+async function scanLemonadeStore(roots = lemonadeMetadataRoots(), { maxFiles = 96 } = {}) {
+  const out = [];
+  const seen = new Set();
+  for (const root of roots) {
+    const stack = [{ dir: root, depth: 0 }];
+    while (stack.length && seen.size < maxFiles) {
+      const current = stack.pop();
+      let entries = [];
+      try {
+        entries = await fsp.readdir(current.dir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const entry of entries) {
+        if (seen.size >= maxFiles) break;
+        const full = path.join(current.dir, entry.name);
+        if (entry.isDirectory()) {
+          if (current.depth < 6 && !/^(node_modules|\.git)$/i.test(entry.name)) {
+            stack.push({ dir: full, depth: current.depth + 1 });
+          }
+          continue;
+        }
+        if (!entry.isFile() || !/^(models?|manifest|metadata|index).*\.json$/i.test(entry.name)) {
+          continue;
+        }
+        let parsed;
+        try {
+          const stat = await fsp.stat(full);
+          if (stat.size <= 0 || stat.size > 2 * 1024 * 1024) continue;
+          parsed = JSON.parse(await fsp.readFile(full, 'utf8'));
+        } catch {
+          continue;
+        }
+        seen.add(full);
+        out.push(...lemonadeRowsFromMetadata(parsed));
+      }
+    }
+  }
+
+  const unique = [];
+  const ids = new Set();
+  for (const row of out) {
+    if (ids.has(row.id)) continue;
+    ids.add(row.id);
+    unique.push(row);
+  }
+  return unique;
+}
+
 class LocalAiRuntime {
   constructor({
     enabled = false,
@@ -362,6 +534,9 @@ class LocalAiRuntime {
         recipe: 'llama.cpp',
         quant: model.quant || undefined,
         repoId: model.repoId || undefined,
+        source: 'BotConnector managed llama.cpp',
+        deletable: true,
+        runnable: true,
       }));
     };
 
@@ -377,10 +552,13 @@ class LocalAiRuntime {
             digest: model?.digest || undefined,
             runtime: 'ollama',
             path: `device:ollama:${String(model?.name || model?.model || '')}`,
+            source: 'Ollama',
+            deletable: true,
+            runnable: true,
           }))
           .filter((model) => model.id);
       } catch {
-        return [];
+        return scanOllamaStore();
       }
     };
 
@@ -401,9 +579,15 @@ class LocalAiRuntime {
             recipe: model?.recipe || undefined,
             downloaded: model?.downloaded !== false,
           }))
+          .map((model) => ({
+            ...model,
+            source: 'Lemonade',
+            deletable: true,
+            runnable: true,
+          }))
           .filter((model) => model.downloaded !== false);
       } catch {
-        return [];
+        return scanLemonadeStore();
       }
     };
 
@@ -441,6 +625,8 @@ class LocalAiRuntime {
         source: 'existing local GGUF',
         sourceRoot: model.sourceRoot,
         modifiedAt: model.modifiedAt,
+        deletable: false,
+        runnable: true,
       };
     });
     this.externalScanCache = { at: now, models: mapped };
@@ -1080,4 +1266,9 @@ module.exports = {
   localModelRoots,
   isPathInside,
   scanExternalGguf,
+  ollamaModelsRoot,
+  scanOllamaStore,
+  lemonadeMetadataRoots,
+  lemonadeRowsFromMetadata,
+  scanLemonadeStore,
 };
