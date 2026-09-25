@@ -2,6 +2,7 @@
 const crypto = require('node:crypto');
 const http = require('node:http');
 const { spawn } = require('node:child_process');
+const defaultCatalog = require('../desktop/local/catalog.cjs');
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 18765;
@@ -51,6 +52,52 @@ async function readJson(req) {
   } catch {
     const error = new Error('Invalid JSON body.');
     error.status = 400;
+    throw error;
+  }
+}
+
+function openAiModelId(model) {
+  const runtime = String(model?.runtime || '').trim();
+  const id = String(model?.id || '').trim();
+  if (!runtime || !id) return '';
+  return Buffer.from(JSON.stringify({ runtime, id }), 'utf8').toString('base64url');
+}
+
+function decodeOpenAiModelId(value) {
+  try {
+    const parsed = JSON.parse(Buffer.from(String(value || ''), 'base64url').toString('utf8'));
+    const runtime = String(parsed?.runtime || '').trim();
+    const id = String(parsed?.id || '').trim();
+    if (!runtime || !id) throw new Error('invalid');
+    return { runtime, id };
+  } catch {
+    const error = new Error('Unknown local model.');
+    error.status = 404;
+    throw error;
+  }
+}
+
+function requireOpenAiLocalApi(req, token, host, port) {
+  const expectedHosts = new Set([host + ':' + port, 'localhost:' + port]);
+  if (!expectedHosts.has(String(req.headers.host || ''))) {
+    const error = new Error('Invalid local host.');
+    error.status = 403;
+    throw error;
+  }
+  const auth = String(req.headers.authorization || '');
+  const supplied = auth.toLowerCase().startsWith('bearer ')
+    ? auth.slice(7).trim()
+    : String(req.headers['x-botconnector-local-token'] || '');
+  if (!supplied || supplied.length !== token.length) {
+    const error = new Error('Local API key is required.');
+    error.status = 401;
+    throw error;
+  }
+  const a = Buffer.from(supplied);
+  const b = Buffer.from(token);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    const error = new Error('Local API key is invalid.');
+    error.status = 401;
     throw error;
   }
 }
@@ -115,7 +162,7 @@ input,select{width:100%;padding:10px}.row{display:flex;gap:8px;align-items:cente
 <body>
 <div class="shell">
 <aside class="side">
-  <div class="brand">BotConnector Local</div>
+  <div class="brand">◇ BotConnector Local</div>
   <div class="badge">OFFLINE · Localhost only</div>
 
   <div class="card">
@@ -268,6 +315,7 @@ async function startOfflineServer({
   host = DEFAULT_HOST,
   port = DEFAULT_PORT,
   open = true,
+  catalog = defaultCatalog,
 } = {}) {
   if (!localAi) throw new Error('Local AI runtime is required.');
   if (!detectHardware) throw new Error('Hardware detector is required.');
@@ -282,13 +330,68 @@ async function startOfflineServer({
         sendHtml(res, offlineHtml({ token, host, port: actualPort }));
         return;
       }
+      const address = server.address();
+      const actualPort = typeof address === 'object' && address ? address.port : port;
+
+      if (url.pathname.startsWith('/v1/')) {
+        requireOpenAiLocalApi(req, token, host, actualPort);
+
+        if (req.method === 'GET' && url.pathname === '/v1/models') {
+          const rows = await localAi.listModels();
+          sendJson(res, 200, {
+            object: 'list',
+            data: rows
+              .filter((model) => model?.runnable !== false)
+              .map((model) => ({
+                id: openAiModelId(model),
+                object: 'model',
+                created: 0,
+                owned_by: 'botconnector-local',
+                name: model.name || model.id,
+                botconnector: {
+                  runtime: model.runtime,
+                  source: model.source || model.recipe || 'local',
+                },
+              })),
+          });
+          return;
+        }
+
+        if (req.method === 'POST' && url.pathname === '/v1/chat/completions') {
+          const body = await readJson(req);
+          const model = decodeOpenAiModelId(body.model);
+          const result = await localAi.chat({
+            model: model.id,
+            runtime: model.runtime,
+            messages: Array.isArray(body.messages) ? body.messages : [],
+            request_id: String(body.request_id || crypto.randomUUID()),
+          });
+          sendJson(res, 200, {
+            id: 'chatcmpl-' + crypto.randomUUID(),
+            object: 'chat.completion',
+            created: Math.floor(Date.now() / 1000),
+            model: body.model,
+            choices: [
+              {
+                index: 0,
+                message: { role: 'assistant', content: String(result?.content || '') },
+                finish_reason: 'stop',
+              },
+            ],
+            usage: result?.usage || undefined,
+          });
+          return;
+        }
+
+        sendJson(res, 404, { error: { message: 'OpenAI-compatible endpoint not found.' } });
+        return;
+      }
+
       if (!url.pathname.startsWith('/api/')) {
         sendJson(res, 404, { error: { message: 'Not found.' } });
         return;
       }
 
-      const address = server.address();
-      const actualPort = typeof address === 'object' && address ? address.port : port;
       requireLocalApi(req, token, host, actualPort);
 
       if (req.method === 'GET' && url.pathname === '/api/status') {
@@ -300,8 +403,60 @@ async function startOfflineServer({
         sendJson(res, 200, { models: await localAi.listModels() });
         return;
       }
+      if (req.method === 'GET' && url.pathname === '/api/catalog/search') {
+        const payload = await catalog.searchCatalog({
+          query: url.searchParams.get('q') || '',
+          cursor: url.searchParams.get('cursor') || '',
+          limit: Number(url.searchParams.get('limit') || 40),
+        });
+        sendJson(res, 200, payload);
+        return;
+      }
 
       const body = req.method === 'POST' ? await readJson(req) : {};
+
+      if (req.method === 'POST' && url.pathname === '/api/catalog/details') {
+        const hardware = await detectHardware();
+        sendJson(res, 200, await catalog.modelDetails(String(body.id || ''), hardware));
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/catalog/recommendations') {
+        const hardware = await detectHardware();
+        const result = await catalog.searchCatalog({
+          query: String(body.query || ''),
+          limit: Math.min(24, Math.max(4, Number(body.limit) || 12)),
+        });
+        const candidates = (Array.isArray(result.models) ? result.models : []).slice(0, 12);
+        const enriched = await Promise.all(
+          candidates.map(async (model) => {
+            const id = String(model?.id || model?.modelId || '');
+            if (!id.includes('/')) return { ...model, compatibility: model?.compatibility || null };
+            try {
+              const details = await catalog.modelDetails(id, hardware);
+              return {
+                ...model,
+                capabilities: details?.capabilities || model?.capabilities || null,
+                compatibility: details?.compatibility || model?.compatibility || null,
+              };
+            } catch {
+              return { ...model, compatibility: model?.compatibility || null };
+            }
+          }),
+        );
+        const rank = { great: 0, ok: 1, warn: 2, unknown: 3, no: 4 };
+        enriched.sort((a, b) => {
+          const ar = rank[a?.compatibility?.level] ?? 9;
+          const br = rank[b?.compatibility?.level] ?? 9;
+          if (ar !== br) return ar - br;
+          return Number(b?.downloads || 0) - Number(a?.downloads || 0);
+        });
+        sendJson(res, 200, {
+          hardware,
+          models: enriched,
+          source: result.source,
+        });
+        return;
+      }
       if (req.method === 'POST' && url.pathname === '/api/runtime/install') {
         sendJson(res, 200, await localAi.startRuntimeInstall(body.backend || 'auto'));
         return;
@@ -379,4 +534,7 @@ module.exports = {
   browserLaunchSpec,
   offlineHtml,
   requireLocalApi,
+  requireOpenAiLocalApi,
+  openAiModelId,
+  decodeOpenAiModelId,
 };

@@ -13,6 +13,7 @@ const {
   isPathInside,
   scanExternalGguf,
   scanOllamaStore,
+  ollamaBaseCandidates,
   lemonadeRowsFromMetadata,
 } = require('./local-runtime.cjs');
 
@@ -48,6 +49,68 @@ test('validates model names and chat payloads', () => {
   assert.throws(() => validModelName('../../bad model'), /invalid/i);
   assert.equal(normalizeMessages([{ role: 'user', content: 'hi' }])[0].content, 'hi');
   assert.throws(() => normalizeMessages([{ role: 'developer', content: 'x' }]), /role/i);
+});
+
+
+test('discovers Ollama from explicit host and local IPv4 interfaces', () => {
+  const candidates = ollamaBaseCandidates(
+    { OLLAMA_HOST: '100.95.146.3:11434' },
+    {
+      Loopback: [{ family: 'IPv4', address: '127.0.0.1', internal: true }],
+      Tailscale: [{ family: 'IPv4', address: '100.95.146.3', internal: false }],
+      WiFi: [{ family: 'IPv4', address: '192.168.1.24', internal: false }],
+    },
+  );
+
+  assert.equal(candidates[0], 'http://100.95.146.3:11434');
+  assert.ok(candidates.includes('http://127.0.0.1:11434'));
+  assert.ok(candidates.includes('http://192.168.1.24:11434'));
+  assert.equal(new Set(candidates).size, candidates.length);
+});
+
+test('uses discovered Ollama base for chat instead of assuming loopback', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bc-ollama-dynamic-'));
+  const previousModels = process.env.OLLAMA_MODELS;
+  const previousHost = process.env.OLLAMA_HOST;
+  process.env.OLLAMA_MODELS = root;
+  process.env.OLLAMA_HOST = '100.95.146.3:11434';
+  try {
+    writeOllamaManifest(root, 'qwen3', '4b', { local: true });
+    const calls = [];
+    const fetchImpl = async (url) => {
+      calls.push(String(url));
+      if (String(url) === 'http://100.95.146.3:11434/api/tags') {
+        return jsonResponse(200, { models: [{ name: 'qwen3:4b', size: 123 }] });
+      }
+      if (String(url) === 'http://100.95.146.3:11434/api/chat') {
+        return jsonResponse(200, {
+          message: { content: 'dynamic host answer' },
+          prompt_eval_count: 3,
+          eval_count: 2,
+        });
+      }
+      throw new TypeError('unavailable');
+    };
+
+    const runtime = new LocalAiRuntime({ enabled: true, fetchImpl, dataDir: root });
+    runtime.runtimeManager.installed = async () => ({ installed: false });
+
+    const result = await runtime.chat({
+      model: 'qwen3:4b',
+      runtime: 'ollama',
+      messages: [{ role: 'user', content: 'hello' }],
+    });
+
+    assert.equal(result.content, 'dynamic host answer');
+    assert.ok(calls.includes('http://100.95.146.3:11434/api/chat'));
+    assert.ok(!calls.includes('http://127.0.0.1:11434/api/chat'));
+  } finally {
+    if (previousModels == null) delete process.env.OLLAMA_MODELS;
+    else process.env.OLLAMA_MODELS = previousModels;
+    if (previousHost == null) delete process.env.OLLAMA_HOST;
+    else process.env.OLLAMA_HOST = previousHost;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('detects Ollama, exposes only verified local models, and chats locally', async () => {

@@ -9,6 +9,47 @@ const { scanInstalled } = require('../desktop/local/installed.cjs');
 const hf = require('../desktop/local/hf.cjs');
 
 const OLLAMA_BASE = 'http://127.0.0.1:11434';
+
+function normalizeRuntimeBase(value, defaultPort) {
+  let raw = String(value || '').trim();
+  if (!raw) return '';
+  if (!/^https?:\/\//i.test(raw)) raw = 'http://' + raw;
+  try {
+    const url = new URL(raw);
+    if (!url.port && defaultPort) url.port = String(defaultPort);
+    if (url.hostname === '0.0.0.0' || url.hostname === '[::]' || url.hostname === '::') {
+      url.hostname = '127.0.0.1';
+    }
+    return url.origin;
+  } catch {
+    return '';
+  }
+}
+
+function ollamaBaseCandidates(
+  env = process.env,
+  interfaces = os.networkInterfaces(),
+) {
+  const out = [];
+  const add = (value) => {
+    const base = normalizeRuntimeBase(value, 11434);
+    if (base && !out.includes(base)) out.push(base);
+  };
+
+  add(env.BOTCONNECTOR_OLLAMA_BASE_URL);
+  add(env.OLLAMA_HOST);
+  add(OLLAMA_BASE);
+  add('http://localhost:11434');
+
+  for (const rows of Object.values(interfaces || {})) {
+    for (const row of Array.isArray(rows) ? rows : []) {
+      if (row?.family !== 'IPv4' || !row?.address) continue;
+      add('http://' + row.address + ':11434');
+    }
+  }
+
+  return out;
+}
 const LEMONADE_BASE = 'http://127.0.0.1:13305';
 const MANAGED_LLAMA_BASE = 'http://127.0.0.1:11436';
 const MAX_MESSAGES = 128;
@@ -369,6 +410,7 @@ class LocalAiRuntime {
     this.managedModel = null;
     this.externalRoots = localModelRoots(this.dataDir);
     this.externalScanCache = { at: 0, models: [] };
+    this.ollamaBaseUrl = null;
     this.idleMs = Math.max(
       60_000,
       Number(process.env.BOTCONNECTOR_LOCAL_AI_IDLE_MS || 5 * 60 * 1000),
@@ -443,6 +485,30 @@ class LocalAiRuntime {
     return Boolean(this.managedProcess && this.managedProcess.exitCode === null);
   }
 
+  async findOllamaBase({ refresh = false } = {}) {
+    const candidates = [];
+    const add = (value) => {
+      const base = normalizeRuntimeBase(value, 11434);
+      if (base && !candidates.includes(base)) candidates.push(base);
+    };
+
+    if (!refresh) add(this.ollamaBaseUrl);
+    for (const base of ollamaBaseCandidates()) add(base);
+
+    for (const base of candidates) {
+      try {
+        const payload = await this.fetchJson(base + '/api/tags', { method: 'GET' }, 1200);
+        if (Array.isArray(payload?.models)) {
+          this.ollamaBaseUrl = base;
+          return base;
+        }
+      } catch {}
+    }
+
+    this.ollamaBaseUrl = null;
+    return null;
+  }
+
   async detect() {
     this.assertEnabled();
 
@@ -451,10 +517,8 @@ class LocalAiRuntime {
       return { kind: 'llamacpp', baseUrl: MANAGED_LLAMA_BASE, binary: managed.binary };
     }
 
-    try {
-      const payload = await this.fetchJson(`${OLLAMA_BASE}/api/tags`, { method: 'GET' }, 1800);
-      if (Array.isArray(payload?.models)) return { kind: 'ollama', baseUrl: OLLAMA_BASE };
-    } catch {}
+    const ollamaBase = await this.findOllamaBase();
+    if (ollamaBase) return { kind: 'ollama', baseUrl: ollamaBase };
 
     try {
       const payload = await this.fetchJson(
@@ -490,7 +554,7 @@ class LocalAiRuntime {
       if (this.managedRunning() && this.managedModel) loadedModels = [this.managedModel];
     } else if (runtime.kind === 'ollama') {
       try {
-        const running = await this.fetchJson(`${OLLAMA_BASE}/api/ps`, { method: 'GET' }, 3000);
+        const running = await this.fetchJson(`${runtime.baseUrl}/api/ps`, { method: 'GET' }, 3000);
         loadedModels = (Array.isArray(running?.models) ? running.models : [])
           .map((model) => String(model?.name || model?.model || ''))
           .filter(Boolean);
@@ -563,7 +627,9 @@ class LocalAiRuntime {
 
     const listOllama = async () => {
       try {
-        const payload = await this.fetchJson(`${OLLAMA_BASE}/api/tags`, { method: 'GET' }, 1800);
+        const base = await this.findOllamaBase();
+        if (!base) throw new Error('Ollama runtime unavailable.');
+        const payload = await this.fetchJson(base + '/api/tags', { method: 'GET' }, 1800);
         const localRows = await scanOllamaStore();
         const localIds = new Set(localRows.map((row) => row.id));
 
@@ -869,7 +935,9 @@ class LocalAiRuntime {
 
     try {
       if (job.runtime === 'ollama') {
-        const response = await this.fetch(`${OLLAMA_BASE}/api/pull`, {
+        const base = await this.findOllamaBase();
+        if (!base) throw new Error('Ollama runtime unavailable.');
+        const response = await this.fetch(base + '/api/pull', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ model: job.model, stream: true }),
@@ -973,7 +1041,9 @@ class LocalAiRuntime {
 
     if (runtime === 'ollama') {
       await this.assertOllamaModelLocal(modelName);
-      await this.fetchJson(`${OLLAMA_BASE}/api/delete`, {
+      const base = await this.findOllamaBase();
+      if (!base) throw new Error('Ollama runtime unavailable.');
+      await this.fetchJson(base + '/api/delete', {
         method: 'DELETE',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ model: modelName }),
@@ -1063,8 +1133,10 @@ class LocalAiRuntime {
 
     if (runtime === 'ollama') {
       await this.assertOllamaModelLocal(modelName);
+      const base = await this.findOllamaBase();
+      if (!base) throw new Error('Ollama runtime unavailable.');
       await this.fetchJson(
-        `${OLLAMA_BASE}/api/generate`,
+        base + '/api/generate',
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -1113,8 +1185,10 @@ class LocalAiRuntime {
     const modelName = validModelName(model);
     if (runtime === 'ollama') {
       await this.assertOllamaModelLocal(modelName);
+      const base = await this.findOllamaBase();
+      if (!base) throw new Error('Ollama runtime unavailable.');
       await this.fetchJson(
-        `${OLLAMA_BASE}/api/generate`,
+        base + '/api/generate',
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -1181,8 +1255,10 @@ class LocalAiRuntime {
 
     if (runtime === 'ollama') {
       await this.assertOllamaModelLocal(modelName);
+      const base = await this.findOllamaBase();
+      if (!base) throw new Error('Ollama runtime unavailable.');
       const payload = await this.fetchJson(
-        `${OLLAMA_BASE}/api/chat`,
+        base + '/api/chat',
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -1284,6 +1360,8 @@ class LocalAiRuntime {
 module.exports = {
   LocalAiRuntime,
   OLLAMA_BASE,
+  normalizeRuntimeBase,
+  ollamaBaseCandidates,
   LEMONADE_BASE,
   MANAGED_LLAMA_BASE,
   validModelName,
