@@ -38,6 +38,26 @@ replace("static/opensearch.xml", [
     ("http://localhost:5137/favicon.png", "http://localhost:5137/static/botconnector-mark.svg"),
 ])
 
+# Hide upstream/admin/settings surfaces from the BotConnector Local user shell.
+for rel in [
+    "src/lib/components/layout/Sidebar.svelte",
+    "src/lib/components/app/AppSidebar.svelte",
+]:
+    p = root / rel
+    if p.exists():
+        text = p.read_text(encoding="utf-8")
+        for token in [
+            "Settings",
+            "Admin Panel",
+            "Workspace",
+            "Connections",
+            "About",
+            "Account",
+            "Profile",
+        ]:
+            text = text.replace(token, "")
+        p.write_text(text, encoding="utf-8")
+
 # Reduce the upstream feel: tailor the visible Local UI shell for BotConnector.
 replace("src/lib/components/layout/Sidebar.svelte", [
     ("Open WebUI", "BotConnector Local"),
