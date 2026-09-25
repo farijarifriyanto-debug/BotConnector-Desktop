@@ -307,6 +307,11 @@ async function main(argv = process.argv.slice(2)) {
     return;
   }
 
+  if (options.command === 'offline') {
+    await runOffline(options);
+    return;
+  }
+
   if (options.command !== 'connect') {
     throw new Error(`Unknown command: ${options.command}`);
   }
@@ -322,11 +327,15 @@ if (require.main === module) {
 }
 
 module.exports = {
+  PUBLIC_PACKAGE_URL,
   SessionSettings,
   parseArgs,
   promptForCode,
   promptDesktopCommander,
   promptLocalAi,
+  createLocalAi,
+  startLocalUi,
+  runOffline,
   connect,
   main,
 };
