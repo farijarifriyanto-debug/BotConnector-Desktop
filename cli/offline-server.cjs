@@ -162,7 +162,7 @@ input,select{width:100%;padding:10px}.row{display:flex;gap:8px;align-items:cente
 <body>
 <div class="shell">
 <aside class="side">
-  <div class="brand">BotConnector Local</div>
+  <div class="brand">◇ BotConnector Local</div>
   <div class="badge">OFFLINE · Localhost only</div>
 
   <div class="card">
