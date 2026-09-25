@@ -87,6 +87,7 @@ class LocalAiRuntime {
     this.emit = emit;
     this.jobs = new Map();
     this.runtimeJobs = new Map();
+    this.chatControllers = new Map();
     this.dataDir = path.resolve(dataDir);
     this.runtimeDir = path.join(this.dataDir, 'runtime');
     this.modelsDir = path.join(this.dataDir, 'models');
@@ -717,13 +718,18 @@ class LocalAiRuntime {
     return { loaded: false, model: modelName, runtime };
   }
 
-  async chat({ model, messages, runtime: runtimeHint = '', options = {} } = {}) {
+  async chat({ model, messages, runtime: runtimeHint = '', options = {}, request_id: requestId = '' } = {}) {
     this.assertEnabled();
     const modelName = validModelName(model);
     const normalized = normalizeMessages(messages);
     const runtime = runtimeHint || (await this.detect())?.kind;
     if (!runtime) throw new Error('No supported local AI runtime is available.');
 
+    const id = String(requestId || crypto.randomUUID());
+    const controller = new AbortController();
+    this.chatControllers.set(id, controller);
+
+    try {
     if (runtime === 'llamacpp') {
       if (!this.managedRunning() || this.managedModel !== modelName) {
         await this.loadModel(modelName, 'llamacpp');
@@ -739,6 +745,7 @@ class LocalAiRuntime {
             stream: false,
             temperature: 0.7,
           }),
+          signal: controller.signal,
         },
         15 * 60 * 1000,
       );
@@ -770,6 +777,7 @@ class LocalAiRuntime {
                 }
               : undefined,
           }),
+          signal: controller.signal,
         },
         15 * 60 * 1000,
       );
@@ -791,6 +799,7 @@ class LocalAiRuntime {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ model: modelName, messages: normalized, stream: false }),
+        signal: controller.signal,
       },
       15 * 60 * 1000,
     );
@@ -800,6 +809,19 @@ class LocalAiRuntime {
       runtime: 'lemonade',
       usage: payload?.usage,
     };
+    } finally {
+      this.chatControllers.delete(id);
+    }
+  }
+
+  cancelChat(id) {
+    this.assertEnabled();
+    const key = String(id || '');
+    const controller = this.chatControllers.get(key);
+    if (!controller) return { cancelled: false, id: key };
+    controller.abort();
+    this.chatControllers.delete(key);
+    return { cancelled: true, id: key };
   }
 
   close() {
@@ -813,6 +835,12 @@ class LocalAiRuntime {
         job.controller?.abort();
       } catch {}
     }
+    for (const controller of this.chatControllers.values()) {
+      try {
+        controller.abort();
+      } catch {}
+    }
+    this.chatControllers.clear();
     const child = this.managedProcess;
     this.managedProcess = null;
     this.managedModel = null;
