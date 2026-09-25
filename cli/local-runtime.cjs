@@ -405,11 +405,19 @@ class LocalAiRuntime {
   }
 
   async fetchJson(url, init = {}, timeoutMs = 15_000) {
-    const response = await this.fetch(url, {
-      ...init,
-      cache: 'no-store',
-      signal: init.signal || AbortSignal.timeout(timeoutMs),
-    });
+    let response;
+    try {
+      response = await this.fetch(url, {
+        ...init,
+        cache: 'no-store',
+        signal: init.signal || AbortSignal.timeout(timeoutMs),
+      });
+    } catch (error) {
+      if (error?.name === 'AbortError' || error?.name === 'TimeoutError') {
+        throw new Error('Local runtime request timed out. Start or restart the runtime and try again.');
+      }
+      throw new Error('Local runtime is unavailable. Start or restart its local runtime and try again.');
+    }
     const body = await responseJson(response);
     if (!response.ok) {
       throw new Error(
@@ -420,6 +428,15 @@ class LocalAiRuntime {
       );
     }
     return body;
+  }
+
+  async assertOllamaModelLocal(model) {
+    const modelName = validModelName(model);
+    const rows = await scanOllamaStore();
+    if (!rows.some((row) => row.id === modelName)) {
+      throw new Error('This Ollama model is not installed locally. Cloud-only Ollama entries are blocked in offline mode.');
+    }
+    return modelName;
   }
 
   managedRunning() {
@@ -955,6 +972,7 @@ class LocalAiRuntime {
     }
 
     if (runtime === 'ollama') {
+      await this.assertOllamaModelLocal(modelName);
       await this.fetchJson(`${OLLAMA_BASE}/api/delete`, {
         method: 'DELETE',
         headers: { 'content-type': 'application/json' },
@@ -1044,6 +1062,7 @@ class LocalAiRuntime {
     }
 
     if (runtime === 'ollama') {
+      await this.assertOllamaModelLocal(modelName);
       await this.fetchJson(
         `${OLLAMA_BASE}/api/generate`,
         {
@@ -1093,6 +1112,7 @@ class LocalAiRuntime {
 
     const modelName = validModelName(model);
     if (runtime === 'ollama') {
+      await this.assertOllamaModelLocal(modelName);
       await this.fetchJson(
         `${OLLAMA_BASE}/api/generate`,
         {
@@ -1160,6 +1180,7 @@ class LocalAiRuntime {
     }
 
     if (runtime === 'ollama') {
+      await this.assertOllamaModelLocal(modelName);
       const payload = await this.fetchJson(
         `${OLLAMA_BASE}/api/chat`,
         {
