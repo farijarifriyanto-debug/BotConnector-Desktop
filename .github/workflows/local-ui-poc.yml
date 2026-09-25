@@ -1,6 +1,9 @@
 name: Build Local UI POC
 
 on:
+  push:
+    branches:
+      - "poc/open-webui-local-ui-action"
   workflow_dispatch:
     inputs:
       upstream_ref:
