@@ -48,6 +48,19 @@ jobs:
           mv dist/device/botconnector-device-*.tgz dist/device/device-cli.tgz
           sha256sum dist/device/device-cli.tgz
 
+      - name: Verify fresh TGZ install
+        shell: bash
+        run: |
+          set -euo pipefail
+          fresh="${RUNNER_TEMP}/botconnector-device-fresh"
+          rm -rf "$fresh"
+          mkdir -p "$fresh"
+          npm install --prefix "$fresh" "$GITHUB_WORKSPACE/dist/device/device-cli.tgz" --ignore-scripts
+          expected="$(node -p "require('./package.json').version")"
+          actual="$(node "$fresh/node_modules/botconnector-device/cli/botconnector-device.cjs" --version)"
+          test "$actual" = "$expected"
+          node "$fresh/node_modules/botconnector-device/cli/botconnector-device.cjs" --help >/dev/null
+
       - name: Upload device package
         uses: actions/upload-artifact@v4
         with:
