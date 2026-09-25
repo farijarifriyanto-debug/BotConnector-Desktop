@@ -10,7 +10,7 @@ const { LocalLauncher } = require('../desktop/local/launcher.cjs');
 const { LocalAiRuntime } = require('./local-runtime.cjs');
 const { startOfflineServer, DEFAULT_PORT } = require('./offline-server.cjs');
 
-const PUBLIC_PACKAGE_URL = 'https://app.botconnector.id/device-cli-v0.4.1.tgz';
+const PUBLIC_PACKAGE_URL = 'https://app.botconnector.id/device-cli-v0.4.2.tgz';
 
 class SessionSettings {
   constructor(seed = {}) {
