@@ -113,6 +113,7 @@ class DeviceBridge {
                 'model.load',
                 'model.unload',
                 'chat.completions',
+                'chat.cancel',
               ]
             : []),
         ],
@@ -180,6 +181,7 @@ class DeviceBridge {
     if (method === 'model.load') return this.localAi.loadModel(params.model, params.runtime);
     if (method === 'model.unload') return this.localAi.unloadModel(params.model, params.runtime);
     if (method === 'chat.completions') return this.localAi.chat(params);
+    if (method === 'chat.cancel') return this.localAi.cancelChat(params.id);
     throw new Error('Remote capability is not allowed.');
   }
 
