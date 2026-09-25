@@ -246,7 +246,9 @@ async function startOfflineServer({
     try {
       const url = new URL(req.url || '/', 'http://' + host + ':' + port);
       if (req.method === 'GET' && url.pathname === '/') {
-        sendHtml(res, offlineHtml({ token, host, port }));
+        const address = server.address();
+        const actualPort = typeof address === 'object' && address ? address.port : port;
+        sendHtml(res, offlineHtml({ token, host, port: actualPort }));
         return;
       }
       if (!url.pathname.startsWith('/api/')) {
@@ -254,7 +256,9 @@ async function startOfflineServer({
         return;
       }
 
-      requireLocalApi(req, token, host, port);
+      const address = server.address();
+      const actualPort = typeof address === 'object' && address ? address.port : port;
+      requireLocalApi(req, token, host, actualPort);
 
       if (req.method === 'GET' && url.pathname === '/api/status') {
         const [runtime, hardware] = await Promise.all([localAi.status(), detectHardware()]);
@@ -321,12 +325,14 @@ async function startOfflineServer({
     });
   });
 
-  const url = 'http://' + host + ':' + port;
+  const address = server.address();
+  const actualPort = typeof address === 'object' && address ? address.port : port;
+  const url = 'http://' + host + ':' + actualPort;
   if (open) openBrowser(url);
 
   return {
     host,
-    port,
+    port: actualPort,
     url,
     token,
     close: () => new Promise((resolve) => server.close(() => resolve())),
