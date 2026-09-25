@@ -101,6 +101,9 @@ class DeviceBridge {
                 'runtime.status',
                 'runtime.start',
                 'runtime.stop',
+                'runtime.install.start',
+                'runtime.install.status',
+                'runtime.install.list',
                 'models.list',
                 'models.pull.start',
                 'models.pull.status',
@@ -165,6 +168,9 @@ class DeviceBridge {
       if (runtime !== 'ollama') throw new Error('Only Ollama can be stopped by Device CLI.');
       return this.launcher.stop('ollama-serve');
     }
+    if (method === 'runtime.install.start') return this.localAi.startRuntimeInstall(params.backend);
+    if (method === 'runtime.install.status') return this.localAi.runtimeJobStatus(params.id);
+    if (method === 'runtime.install.list') return this.localAi.listRuntimeJobs();
     if (method === 'models.list') return this.localAi.listModels();
     if (method === 'models.pull.start') return this.localAi.startPull(params.model);
     if (method === 'models.pull.status') return this.localAi.jobStatus(params.id);
