@@ -10,7 +10,7 @@ const { LocalLauncher } = require('../desktop/local/launcher.cjs');
 const { LocalAiRuntime } = require('./local-runtime.cjs');
 const { startOfflineServer, DEFAULT_PORT } = require('./offline-server.cjs');
 
-const PUBLIC_PACKAGE_URL = 'https://app.botconnector.id/device-cli-v0.4.5.tgz';
+const PUBLIC_PACKAGE_URL = 'https://app.botconnector.id/device-cli.tgz';
 
 class SessionSettings {
   constructor(seed = {}) {
@@ -93,7 +93,7 @@ Options:
   -v, --version                  Show version
 
 Offline cold start:
-  Run the versioned package once while online so npm can cache it. Afterwards,
+  Run the current package once while online so npm can cache it. Afterwards,
   the "npx --offline ... offline" command can reuse the cached package.
 
 Security:
