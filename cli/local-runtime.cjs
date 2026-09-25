@@ -235,10 +235,22 @@ class LocalAiRuntime {
 
   async listModels(runtimeOverride = null) {
     this.assertEnabled();
-    const runtime = runtimeOverride || (await this.detect());
-    if (!runtime) return [];
 
-    if (runtime.kind === 'llamacpp') {
+    const results = [];
+
+    const pushUnique = (rows) => {
+      for (const row of Array.isArray(rows) ? rows : []) {
+        if (!row?.id || !row?.runtime) continue;
+        const key = `${row.runtime}:${row.id}`;
+        if (!results.some((item) => `${item.runtime}:${item.id}` === key)) {
+          results.push(row);
+        }
+      }
+    };
+
+    const listManaged = async () => {
+      const managed = await this.runtimeManager.installed().catch(() => ({ installed: false }));
+      if (!managed?.installed) return [];
       await fsp.mkdir(this.modelsDir, { recursive: true });
       const installed = await scanInstalled(this.modelsDir);
       return installed.map((model) => ({
@@ -251,39 +263,61 @@ class LocalAiRuntime {
         quant: model.quant || undefined,
         repoId: model.repoId || undefined,
       }));
+    };
+
+    const listOllama = async () => {
+      try {
+        const payload = await this.fetchJson(`${OLLAMA_BASE}/api/tags`, { method: 'GET' }, 1800);
+        return (Array.isArray(payload?.models) ? payload.models : [])
+          .map((model) => ({
+            id: String(model?.name || model?.model || ''),
+            name: String(model?.name || model?.model || ''),
+            size: Number(model?.size || 0) || undefined,
+            modifiedAt: model?.modified_at || undefined,
+            digest: model?.digest || undefined,
+            runtime: 'ollama',
+            path: `device:ollama:${String(model?.name || model?.model || '')}`,
+          }))
+          .filter((model) => model.id);
+      } catch {
+        return [];
+      }
+    };
+
+    const listLemonade = async () => {
+      try {
+        const payload = await this.fetchJson(`${LEMONADE_BASE}/v1/models`, { method: 'GET' }, 1800);
+        return (Array.isArray(payload?.data) ? payload.data : [])
+          .filter((model) => model?.id)
+          .map((model) => ({
+            id: String(model.id),
+            name: String(model.id),
+            size:
+              typeof model?.size === 'number'
+                ? Math.round(model.size * 1024 ** 3)
+                : undefined,
+            runtime: 'lemonade',
+            path: `device:lemonade:${String(model.id)}`,
+            recipe: model?.recipe || undefined,
+            downloaded: model?.downloaded !== false,
+          }))
+          .filter((model) => model.downloaded !== false);
+      } catch {
+        return [];
+      }
+    };
+
+    if (runtimeOverride?.kind) {
+      if (runtimeOverride.kind === 'llamacpp') pushUnique(await listManaged());
+      if (runtimeOverride.kind === 'ollama') pushUnique(await listOllama());
+      if (runtimeOverride.kind === 'lemonade') pushUnique(await listLemonade());
     }
 
-    if (runtime.kind === 'ollama') {
-      const payload = await this.fetchJson(`${OLLAMA_BASE}/api/tags`);
-      return (Array.isArray(payload?.models) ? payload.models : [])
-        .map((model) => ({
-          id: String(model?.name || model?.model || ''),
-          name: String(model?.name || model?.model || ''),
-          size: Number(model?.size || 0) || undefined,
-          modifiedAt: model?.modified_at || undefined,
-          digest: model?.digest || undefined,
-          runtime: 'ollama',
-          path: `device:ollama:${String(model?.name || model?.model || '')}`,
-        }))
-        .filter((model) => model.id);
-    }
+    pushUnique(await listManaged());
+    pushUnique(await listOllama());
+    pushUnique(await listLemonade());
 
-    const payload = await this.fetchJson(`${LEMONADE_BASE}/v1/models`);
-    return (Array.isArray(payload?.data) ? payload.data : [])
-      .filter((model) => model?.id)
-      .map((model) => ({
-        id: String(model.id),
-        name: String(model.id),
-        size:
-          typeof model?.size === 'number'
-            ? Math.round(model.size * 1024 ** 3)
-            : undefined,
-        runtime: 'lemonade',
-        path: `device:lemonade:${String(model.id)}`,
-        recipe: model?.recipe || undefined,
-        downloaded: model?.downloaded !== false,
-      }))
-      .filter((model) => model.downloaded !== false);
+    return results;
   }
 
   publicJob(job) {
