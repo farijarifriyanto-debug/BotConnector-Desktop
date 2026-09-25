@@ -9,6 +9,7 @@
   },
   "files": [
     "cli/botconnector-device.cjs",
+    "cli/local-runtime.cjs",
     "desktop/local/device-bridge.cjs",
     "desktop/local/hardware.cjs",
     "desktop/local/launcher.cjs"
@@ -18,7 +19,7 @@
   },
   "scripts": {
     "check": "node --check assets/botconnector/app.js && node --check desktop/main.cjs && node --check desktop/local/catalog.cjs && node --check desktop/local/downloads.cjs && node --check desktop/local/hardware.cjs && node --check desktop/local/installed.cjs && node --check desktop/local/launcher.cjs && node --check desktop/local/device-bridge.cjs && node --check desktop/local/llama-swap.cjs && node --check desktop/local/runtime-manager.cjs && node --check desktop/local/settings.cjs && node --check desktop/local/sidecars.cjs && node --check desktop/local/web-server.cjs && node --check desktop/local/tools.cjs && node --check desktop/local/mcp-fixture.cjs && node --check web/build.cjs && node --check web/device-relay.cjs && node --check web/device-relay-service.cjs && node --check web/device-relay-service.test.cjs && node --check web/server.cjs && node --check web/web.test.cjs && node --check desktop/local/launcher.test.cjs && node --check desktop/local/llama-swap.test.cjs && node --check desktop/local/tools.test.cjs && node --check web/device-relay.test.cjs && node --check cli/botconnector-device.cjs && node --check cli/botconnector-device.test.cjs && node --test desktop/local/web-server.test.cjs desktop/local/launcher.test.cjs desktop/local/llama-swap.test.cjs desktop/local/tools.test.cjs web/device-relay.test.cjs web/device-relay-service.test.cjs web/web.test.cjs cli/botconnector-device.test.cjs",
-    "check:device": "node --check cli/botconnector-device.cjs && node --check desktop/local/device-bridge.cjs && node --check desktop/local/hardware.cjs && node --check desktop/local/launcher.cjs && node --test cli/botconnector-device.test.cjs desktop/local/launcher.test.cjs",
+    "check:device": "node --check cli/botconnector-device.cjs && node --check cli/local-runtime.cjs && node --check desktop/local/device-bridge.cjs && node --check desktop/local/hardware.cjs && node --check desktop/local/launcher.cjs && node --test cli/botconnector-device.test.cjs cli/local-runtime.test.cjs desktop/local/launcher.test.cjs",
     "device": "node cli/botconnector-device.cjs connect",
     "web:build": "node web/build.cjs",
     "web:dev": "node web/server.cjs",
