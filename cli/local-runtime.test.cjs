@@ -94,6 +94,14 @@ test('detects Ollama, exposes only verified local models, and chats locally', as
     });
     assert.equal(result.content, 'local answer');
     assert.equal(result.runtime, 'ollama');
+    await assert.rejects(
+      () =>
+        runtime.chat({
+          model: 'remote-only:cloud',
+          messages: [{ role: 'user', content: 'should stay offline' }],
+        }),
+      /not installed locally|cloud-only/i,
+    );
     assert.ok(
       calls.some(
         (call) =>
