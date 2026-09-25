@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { createDeviceRelayServer } = require('./device-relay-service.cjs');
+const { createDeviceRelayServer, ALLOWED_METHODS } = require('./device-relay-service.cjs');
 
 const TOKEN = 'test-device-relay-secret';
 const USER_A = '11111111-1111-4111-8111-111111111111';
@@ -36,6 +36,24 @@ async function internal(base, path, init = {}) {
     },
   });
 }
+
+test('relay allowlist exposes local AI without arbitrary shell', () => {
+  for (const method of [
+    'runtime.status',
+    'runtime.install.start',
+    'runtime.install.status',
+    'models.list',
+    'models.pull.start',
+    'models.pull.status',
+    'models.delete',
+    'model.load',
+    'model.unload',
+    'chat.completions',
+  ]) {
+    assert.equal(ALLOWED_METHODS.has(method), true, method);
+  }
+  assert.equal(ALLOWED_METHODS.has('shell.exec'), false);
+});
 
 test('relay refuses to start without internal authentication', () => {
   assert.throws(
