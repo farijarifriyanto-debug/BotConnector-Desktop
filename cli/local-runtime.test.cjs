@@ -1,6 +1,16 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { LocalAiRuntime, normalizeMessages, validModelName } = require('./local-runtime.cjs');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const {
+  LocalAiRuntime,
+  normalizeMessages,
+  validModelName,
+  encodeManagedModel,
+  decodeManagedModel,
+  chooseGgufGroup,
+} = require('./local-runtime.cjs');
 
 function jsonResponse(status, body) {
   return {
@@ -68,4 +78,34 @@ test('falls back to Lemonade when Ollama is unavailable', async () => {
   assert.equal(status.runtime, 'lemonade');
   const models = await runtime.listModels();
   assert.equal(models[0].path, 'device:lemonade:Qwen-Test-GGUF');
+});
+
+
+test('managed model ids stay confined to the BotConnector model directory', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bc-device-model-'));
+  try {
+    const modelDir = path.join(root, 'models');
+    const file = path.join(modelDir, 'repo', 'Q4_K_M', 'model.gguf');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, 'test');
+
+    const id = encodeManagedModel(file);
+    assert.equal(decodeManagedModel(id, modelDir), path.resolve(file));
+
+    const outside = encodeManagedModel(path.join(root, 'outside.gguf'));
+    assert.throws(() => decodeManagedModel(outside, modelDir), /outside/i);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('managed GGUF download prefers Q4_K_M', () => {
+  const group = chooseGgufGroup({
+    files: [
+      { quant: 'Q8_0', size: 8, parts: [{ path: 'q8.gguf' }] },
+      { quant: 'Q4_K_M', size: 4, parts: [{ path: 'q4.gguf' }] },
+      { quant: 'Q3_K_M', size: 3, parts: [{ path: 'q3.gguf' }] },
+    ],
+  });
+  assert.equal(group.quant, 'Q4_K_M');
 });
