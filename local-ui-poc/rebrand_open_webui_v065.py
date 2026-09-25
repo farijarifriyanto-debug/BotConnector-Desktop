@@ -38,6 +38,31 @@ replace("static/opensearch.xml", [
     ("http://localhost:5137/favicon.png", "http://localhost:5137/static/botconnector-mark.svg"),
 ])
 
+# Reduce the upstream feel: tailor the visible Local UI shell for BotConnector.
+replace("src/lib/components/layout/Sidebar.svelte", [
+    ("Open WebUI", "BotConnector Local"),
+])
+replace("src/lib/components/app/AppSidebar.svelte", [
+    ("Open WebUI", "BotConnector Local"),
+])
+replace("src/lib/components/chat/Settings/About.svelte", [
+    ("Open WebUI", "BotConnector Local"),
+])
+
+# Prefer a compact BotConnector-local navigation vocabulary.
+for rel in [
+    "src/lib/i18n/locales/en-US/translation.json",
+    "src/lib/i18n/locales/id-ID/translation.json",
+]:
+    p = root / rel
+    if p.exists():
+        text = p.read_text(encoding="utf-8")
+        text = text.replace('"Workspace":', '"Local Workspace":')
+        text = text.replace('"Admin Panel":', '"Local Settings":')
+        text = text.replace('"Models":', '"Local Models":')
+        text = text.replace('"Knowledge":', '"Local Knowledge":')
+        p.write_text(text, encoding="utf-8")
+
 # Disable upstream first-run changelog and update notices in BotConnector Local.
 layout = root / "src" / "routes" / "(app)" / "+layout.svelte"
 layout_text = layout.read_text(encoding="utf-8")
