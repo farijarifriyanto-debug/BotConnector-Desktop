@@ -4,15 +4,16 @@ import json
 
 root = Path("upstream/open-webui")
 
-def replace(path, pairs):
+def replace(path, pairs, *, required=True):
     p = root / path
     text = p.read_text(encoding="utf-8")
     original = text
     for old, new in pairs:
         text = text.replace(old, new)
-    if text == original:
+    if text == original and required:
         raise SystemExit(f"expected branding token not found in {path}")
-    p.write_text(text, encoding="utf-8")
+    if text != original:
+        p.write_text(text, encoding="utf-8")
 
 replace("src/lib/constants.ts", [
     ("export const APP_NAME = 'Open WebUI';", "export const APP_NAME = 'BotConnector Local';"),
@@ -61,13 +62,13 @@ for rel in [
 # Reduce the upstream feel: tailor the visible Local UI shell for BotConnector.
 replace("src/lib/components/layout/Sidebar.svelte", [
     ("Open WebUI", "BotConnector Local"),
-])
+], required=False)
 replace("src/lib/components/app/AppSidebar.svelte", [
     ("Open WebUI", "BotConnector Local"),
-])
+], required=False)
 replace("src/lib/components/chat/Settings/About.svelte", [
     ("Open WebUI", "BotConnector Local"),
-])
+], required=False)
 
 # Prefer a compact BotConnector-local navigation vocabulary.
 for rel in [
