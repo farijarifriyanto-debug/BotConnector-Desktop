@@ -116,7 +116,7 @@ input,select{width:100%;padding:10px}.row{display:flex;gap:8px;align-items:cente
 <div class="shell">
 <aside class="side">
   <div class="brand">BotConnector Local</div>
-  <div class="badge">Offline-capable browser mode</div>
+  <div class="badge">OFFLINE · Localhost only</div>
 
   <div class="card">
     <div class="label">Runtime</div><div id="runtimeValue" class="value">Checking…</div>
@@ -130,10 +130,18 @@ input,select{width:100%;padding:10px}.row{display:flex;gap:8px;align-items:cente
   </div>
 
   <div class="card">
-    <div class="label">Installed model</div>
+    <div class="label">Installed models</div>
     <select id="modelSelect"><option value="">No model installed</option></select>
+    <div id="modelSource" class="small" style="margin-top:6px"></div>
     <div id="modelStatus" class="status"></div>
-    <div class="row" style="margin-top:10px"><button id="loadModel" class="grow">Load</button><button id="unloadModel">Unload</button></div>
+    <div class="row" style="margin-top:10px">
+      <button id="refreshModels" class="grow">Refresh models</button>
+      <button id="deleteModel">Delete model</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="loadModel" class="grow">Load</button>
+      <button id="unloadModel">Unload</button>
+    </div>
   </div>
 
   <div class="card">
@@ -154,7 +162,7 @@ input,select{width:100%;padding:10px}.row{display:flex;gap:8px;align-items:cente
 </aside>
 
 <main class="main">
-  <div class="top"><h1>Local Chat</h1><div class="small">No cloud AI provider is used for local inference.</div></div>
+  <div class="top"><h1>Local Chat · OFFLINE</h1><div class="small">Localhost only · no cloud AI provider is used for inference.</div></div>
   <div id="chat" class="chat"><div class="empty">Choose an installed model, then start chatting locally.</div></div>
   <div class="composer">
     <textarea id="prompt" placeholder="Message your local model…"></textarea>
@@ -172,6 +180,12 @@ const q=id=>document.getElementById(id);
 function status(id,text,kind=''){const el=q(id);el.textContent=text||'';el.className='status '+kind}
 async function api(path,init={}){const response=await fetch(path,{...init,headers:{...headers,...(init.headers||{})},cache:'no-store'});const payload=await response.json().catch(()=>({}));if(!response.ok)throw new Error(payload?.error?.message||payload?.message||('HTTP '+response.status));return payload}
 function selected(){return models.find(m=>m.path===q('modelSelect').value)||null}
+function updateSelectedModel(){
+  const current=selected();
+  q('modelSource').textContent=current?('Source: '+(current.runtime||current.recipe||'local')):'';
+  q('deleteModel').disabled=!current||current.runtime==='external-gguf';
+  q('deleteModel').title=current?.runtime==='external-gguf'?'External GGUF is read-only in BotConnector.':'';
+}
 function render(){const chat=q('chat');chat.innerHTML='';if(!messages.length){const e=document.createElement('div');e.className='empty';e.textContent='Choose an installed model, then start chatting locally.';chat.appendChild(e);return}for(const m of messages){const e=document.createElement('div');e.className='msg '+m.role;e.textContent=m.content||'';chat.appendChild(e)}chat.scrollTop=chat.scrollHeight}
 async function refresh(){
   try{
@@ -179,8 +193,12 @@ async function refresh(){
     q('runtimeValue').textContent=r.available?(r.runtime||'Local runtime'):'Not ready';status('runtimeStatus',r.available?'Ready':(r.message||'Runtime is not prepared.'),r.available?'oktext':'');
     q('hardwareValue').textContent=h.cpu||'Unknown CPU';const gpu=[...(h.nvidia||[]),...(h.amd||[]),...(h.intel||[])][0];q('hardwareExtra').textContent=[h.ramGb?h.ramGb+' GB RAM':'',gpu?.name||'',h.npu?.name?'NPU: '+h.npu.name:''].filter(Boolean).join(' · ');
     models=Array.isArray(mp.models)?mp.models:[];const sel=q('modelSelect');const prev=sel.value;sel.innerHTML='';
-    if(!models.length){const o=document.createElement('option');o.value='';o.textContent='No model installed';sel.appendChild(o)}else for(const m of models){const o=document.createElement('option');o.value=m.path;o.textContent=m.name||m.id||m.path;sel.appendChild(o)}
-    if(models.some(m=>m.path===prev))sel.value=prev;status('modelStatus',models.length?models.length+' model(s) installed':'No local model installed yet.');
+    if(!models.length){const o=document.createElement('option');o.value='';o.textContent='No model installed';sel.appendChild(o)}else for(const m of models){const o=document.createElement('option');o.value=m.path;const src=m.runtime||m.recipe||'local';o.textContent=(m.name||m.id||m.path)+' · '+src;sel.appendChild(o)}
+    if(models.some(m=>m.path===prev))sel.value=prev;
+    const current=selected();q('modelSource').textContent=current?('Source: '+(current.runtime||current.recipe||'local')):'';
+    q('deleteModel').disabled=!current||current.runtime==='external-gguf';
+    q('deleteModel').title=current?.runtime==='external-gguf'?'External GGUF is read-only in BotConnector.':'';
+    status('modelStatus',models.length?models.length+' model(s) detected':'No local model detected yet.');
   }catch(e){status('runtimeStatus',String(e.message||e),'danger')}
 }
 async function prepareRuntime(){
@@ -198,10 +216,18 @@ async function downloadModel(){
   }catch(e){status('downloadStatus',String(e.message||e),'danger')}finally{q('downloadModel').disabled=false}
 }
 async function modelAction(action){const m=selected();if(!m)return;status('modelStatus',(action==='load'?'Loading':'Unloading')+' model…');try{await api('/api/models/'+action,{method:'POST',body:JSON.stringify({model:m.id,runtime:m.runtime})});status('modelStatus',action==='load'?'Model loaded.':'Model unloaded.','oktext');await refresh()}catch(e){status('modelStatus',String(e.message||e),'danger')}}
+async function deleteSelectedModel(){
+  const m=selected();if(!m)return;
+  if(m.runtime==='external-gguf'){status('modelStatus','External GGUF models are read-only.','danger');return}
+  if(!confirm('Delete '+(m.name||m.id)+' from '+(m.runtime||'local runtime')+'?'))return;
+  q('deleteModel').disabled=true;status('modelStatus','Deleting model…');
+  try{await api('/api/models/delete',{method:'POST',body:JSON.stringify({model:m.id,runtime:m.runtime})});status('modelStatus','Model deleted.','oktext');await refresh()}
+  catch(e){status('modelStatus',String(e.message||e),'danger')}
+}
 async function send(){if(busy)return;const m=selected();const text=q('prompt').value.trim();if(!m||!text)return;busy=true;q('send').disabled=true;q('stop').disabled=false;q('prompt').value='';messages.push({role:'user',content:text});render();activeRequestId=crypto.randomUUID();status('chatStatus','Generating locally…');
   try{const result=await api('/api/chat',{method:'POST',body:JSON.stringify({model:m.id,runtime:m.runtime,messages,request_id:activeRequestId})});messages.push({role:'assistant',content:String(result.content||'')});render();status('chatStatus','Local response complete.','oktext')}catch(e){status('chatStatus',String(e.message||e),'danger')}finally{busy=false;activeRequestId='';q('send').disabled=false;q('stop').disabled=true}}
 async function stop(){if(!activeRequestId)return;try{await api('/api/chat/cancel',{method:'POST',body:JSON.stringify({id:activeRequestId})})}catch{}status('chatStatus','Generation cancelled.')}
-q('refresh').onclick=refresh;q('prepareRuntime').onclick=prepareRuntime;q('downloadModel').onclick=downloadModel;q('recommended').onchange=()=>{if(q('recommended').value)q('downloadModelId').value=q('recommended').value};q('loadModel').onclick=()=>modelAction('load');q('unloadModel').onclick=()=>modelAction('unload');q('send').onclick=send;q('stop').onclick=stop;q('prompt').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}});refresh();
+q('refresh').onclick=refresh;q('refreshModels').onclick=refresh;q('prepareRuntime').onclick=prepareRuntime;q('downloadModel').onclick=downloadModel;q('recommended').onchange=()=>{if(q('recommended').value)q('downloadModelId').value=q('recommended').value};q('modelSelect').onchange=updateSelectedModel;q('loadModel').onclick=()=>modelAction('load');q('unloadModel').onclick=()=>modelAction('unload');q('deleteModel').onclick=deleteSelectedModel;q('send').onclick=send;q('stop').onclick=stop;q('prompt').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}});refresh();
 </script>
 </body>
 </html>`
