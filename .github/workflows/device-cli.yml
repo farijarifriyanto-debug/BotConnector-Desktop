@@ -84,3 +84,8 @@ jobs:
         shell: pwsh
         run: |
           node -e "const os=require('node:os'); const path=require('node:path'); const {LocalAiRuntime}=require('./cli/local-runtime.cjs'); new LocalAiRuntime({enabled:true,dataDir:path.join(os.tmpdir(),'botconnector-device-ci')}).status().then(s=>{console.log(JSON.stringify(s,null,2)); if(typeof s.available!=='boolean') process.exit(1);})"
+
+      - name: Smoke test Windows offline browser UI
+        shell: pwsh
+        run: |
+          node --test cli/offline-server.test.cjs
