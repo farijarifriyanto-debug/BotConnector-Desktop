@@ -219,10 +219,14 @@ async function scanOllamaStore(root = ollamaModelsRoot(), { maxFiles = 256 } = {
       const namespace = parts.pop();
       const registry = parts.join('/');
       const id = namespace === 'library' ? `${model}:${tag}` : `${namespace}/${model}:${tag}`;
-      const layers = [
-        ...(Array.isArray(manifest?.layers) ? manifest.layers : []),
-        ...(manifest?.config ? [manifest.config] : []),
-      ];
+      const modelLayers = (Array.isArray(manifest?.layers) ? manifest.layers : []).filter((layer) =>
+        String(layer?.mediaType || '').includes('application/vnd.ollama.image.model'),
+      );
+      // Ollama cloud models can leave lightweight manifests in the local store
+      // with config metadata but no local model layer. Do not present those as
+      // installed/offline models when the Ollama daemon is unavailable.
+      if (modelLayers.length === 0) continue;
+      const layers = [...modelLayers, ...(manifest?.config ? [manifest.config] : [])];
       const size = layers.reduce((sum, layer) => sum + Number(layer?.size || 0), 0);
 
       out.push({
