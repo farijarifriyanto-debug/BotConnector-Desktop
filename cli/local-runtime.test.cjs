@@ -109,3 +109,40 @@ test('managed GGUF download prefers Q4_K_M', () => {
   });
   assert.equal(group.quant, 'Q4_K_M');
 });
+
+
+test('aggregates managed, Ollama, and Lemonade models instead of hiding secondary runtimes', async () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bc-aggregate-'));
+  try {
+    const fetchImpl = async (url) => {
+      if (url.endsWith('/api/tags')) {
+        return jsonResponse(200, { models: [{ name: 'ollama-model:latest', size: 111 }] });
+      }
+      if (url.endsWith('/v1/models')) {
+        return jsonResponse(200, {
+          data: [{ id: 'lemonade-model', downloaded: true, recipe: 'llamacpp' }],
+        });
+      }
+      if (url.endsWith('/v1/health')) {
+        return jsonResponse(200, { status: 'ok' });
+      }
+      throw new Error('Unexpected URL ' + url);
+    };
+
+    const runtime = new LocalAiRuntime({ enabled: true, fetchImpl, dataDir: root });
+    runtime.runtimeManager.installed = async () => ({ installed: false });
+
+    const models = await runtime.listModels();
+    assert.deepEqual(
+      models.map((model) => model.runtime).sort(),
+      ['lemonade', 'ollama'],
+    );
+    assert.ok(models.some((model) => model.id === 'ollama-model:latest'));
+    assert.ok(models.some((model) => model.id === 'lemonade-model'));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
