@@ -12,6 +12,7 @@
     "cli/local-runtime.cjs",
     "cli/offline-server.cjs",
     "desktop/local/device-bridge.cjs",
+    "desktop/local/catalog.cjs",
     "desktop/local/hardware.cjs",
     "desktop/local/launcher.cjs",
     "desktop/local/runtime-manager.cjs",
