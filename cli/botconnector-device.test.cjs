@@ -11,7 +11,7 @@ test('defaults to connect and production BotConnector origin', () => {
   assert.equal(parsed.allowLocalAi, false);
   assert.equal(parsed.port, 18765);
   assert.equal(parsed.noBrowser, false);
-  assert.equal(PUBLIC_PACKAGE_URL, 'https://app.botconnector.id/device-cli-v0.4.0.tgz');
+  assert.equal(PUBLIC_PACKAGE_URL, 'https://app.botconnector.id/device-cli-v0.4.1.tgz');
 });
 
 test('parses pairing and explicit session permission', () => {

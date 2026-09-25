@@ -75,6 +75,104 @@ function chooseGgufGroup(details) {
   return preferred;
 }
 
+
+function localModelRoots(dataDir) {
+  const roots = new Set();
+  const add = (value) => {
+    const text = String(value || '').trim();
+    if (text) roots.add(path.resolve(text));
+  };
+
+  add(path.join(dataDir, 'models'));
+  add(path.join(os.homedir(), '.cache', 'huggingface', 'hub'));
+  add(path.join(os.homedir(), '.cache', 'lemonade'));
+  add(path.join(os.homedir(), '.lemonade'));
+  add(process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Lemonade'));
+  add(process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'lemonade'));
+  add(process.env.APPDATA && path.join(process.env.APPDATA, 'Lemonade'));
+
+  for (const entry of String(process.env.BOTCONNECTOR_LOCAL_MODEL_DIRS || '')
+    .split(path.delimiter)
+    .map((item) => item.trim())
+    .filter(Boolean)) {
+    add(entry);
+  }
+
+  return [...roots];
+}
+
+async function isPathInside(targetPath, roots) {
+  const resolvedTarget = path.resolve(targetPath);
+  for (const root of roots) {
+    const resolvedRoot = path.resolve(root);
+    const relative = path.relative(resolvedRoot, resolvedTarget);
+    if (relative && relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function scanExternalGguf(roots, managedRoot, { maxFiles = 128, maxDepth = 8 } = {}) {
+  const out = [];
+  const managed = path.resolve(managedRoot);
+  const seen = new Set();
+
+  for (const root of roots) {
+    const resolvedRoot = path.resolve(root);
+    if (resolvedRoot === managed) continue;
+    const stack = [{ dir: resolvedRoot, depth: 0 }];
+
+    while (stack.length && out.length < maxFiles) {
+      const current = stack.pop();
+      let entries = [];
+      try {
+        entries = await fsp.readdir(current.dir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+
+      for (const entry of entries) {
+        if (out.length >= maxFiles) break;
+        const full = path.join(current.dir, entry.name);
+
+        if (entry.isDirectory()) {
+          if (current.depth < maxDepth && !/^(node_modules|\.git)$/i.test(entry.name)) {
+            stack.push({ dir: full, depth: current.depth + 1 });
+          }
+          continue;
+        }
+
+        if (!/\.gguf$/i.test(entry.name) || /(mmproj|projector)/i.test(entry.name)) continue;
+
+        let stat;
+        try {
+          stat = await fsp.stat(full);
+        } catch {
+          continue;
+        }
+        if (!stat.isFile()) continue;
+
+        const key = path.resolve(full).toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        const quantMatch = entry.name.match(/Q\d(?:_[A-Za-z0-9]+)*/i);
+        out.push({
+          path: path.resolve(full),
+          name: entry.name,
+          size: stat.size,
+          quant: quantMatch?.[0] || undefined,
+          sourceRoot: resolvedRoot,
+          modifiedAt: stat.mtime.toISOString(),
+        });
+      }
+    }
+  }
+
+  return out;
+}
+
 class LocalAiRuntime {
   constructor({
     enabled = false,
@@ -93,6 +191,8 @@ class LocalAiRuntime {
     this.modelsDir = path.join(this.dataDir, 'models');
     this.managedProcess = null;
     this.managedModel = null;
+    this.externalRoots = localModelRoots(this.dataDir);
+    this.externalScanCache = { at: 0, models: [] };
     this.idleMs = Math.max(
       60_000,
       Number(process.env.BOTCONNECTOR_LOCAL_AI_IDLE_MS || 5 * 60 * 1000),
@@ -316,8 +416,50 @@ class LocalAiRuntime {
     pushUnique(await listManaged());
     pushUnique(await listOllama());
     pushUnique(await listLemonade());
+    pushUnique(await this.listExternalGguf());
 
     return results;
+  }
+
+  async listExternalGguf() {
+    const now = Date.now();
+    if (now - this.externalScanCache.at < 15_000) {
+      return this.externalScanCache.models;
+    }
+
+    const rows = await scanExternalGguf(this.externalRoots, this.modelsDir);
+    const mapped = rows.map((model) => {
+      const id = encodeManagedModel(model.path);
+      return {
+        id,
+        name: model.name,
+        size: model.size,
+        runtime: 'external-gguf',
+        path: `device:external-gguf:${id}`,
+        recipe: 'llama.cpp',
+        quant: model.quant,
+        source: 'existing local GGUF',
+        sourceRoot: model.sourceRoot,
+        modifiedAt: model.modifiedAt,
+      };
+    });
+    this.externalScanCache = { at: now, models: mapped };
+    return mapped;
+  }
+
+  async externalModelPath(id) {
+    const token = validModelName(id);
+    let decoded;
+    try {
+      decoded = Buffer.from(token, 'base64url').toString('utf8');
+    } catch {
+      throw new Error('Invalid external model id.');
+    }
+    if (!(await isPathInside(decoded, this.externalRoots))) {
+      throw new Error('External model path is outside approved local model directories.');
+    }
+    await fsp.access(decoded);
+    return path.resolve(decoded);
   }
 
   publicJob(job) {
@@ -608,6 +750,10 @@ class LocalAiRuntime {
     const runtime = runtimeHint || (await this.detect())?.kind;
     if (!runtime) throw new Error('No supported local AI runtime is available.');
 
+    if (runtime === 'external-gguf') {
+      throw new Error('Existing external GGUF models are read-only in BotConnector.');
+    }
+
     if (runtime === 'llamacpp') {
       const modelPath = decodeManagedModel(modelName, this.modelsDir);
       if (this.managedModel === modelName) await this.unloadModel(modelName, 'llamacpp');
@@ -652,8 +798,11 @@ class LocalAiRuntime {
     const runtime = runtimeHint || (await this.detect())?.kind;
     if (!runtime) throw new Error('No supported local AI runtime is available.');
 
-    if (runtime === 'llamacpp') {
-      const modelPath = decodeManagedModel(modelName, this.modelsDir);
+    if (runtime === 'llamacpp' || runtime === 'external-gguf') {
+      const modelPath =
+        runtime === 'llamacpp'
+          ? decodeManagedModel(modelName, this.modelsDir)
+          : await this.externalModelPath(modelName);
       const installed = await this.runtimeManager.installed();
       if (!installed?.binary) throw new Error('Managed llama.cpp runtime is not installed.');
       await fsp.access(modelPath);
@@ -737,7 +886,7 @@ class LocalAiRuntime {
     const runtime = runtimeHint || (await this.detect())?.kind;
     if (!runtime) return { loaded: false, model: String(model || ''), runtime: null };
 
-    if (runtime === 'llamacpp') {
+    if (runtime === 'llamacpp' || runtime === 'external-gguf') {
       const child = this.managedProcess;
       this.managedProcess = null;
       this.managedModel = null;
@@ -787,9 +936,9 @@ class LocalAiRuntime {
     this.chatControllers.set(id, controller);
 
     try {
-    if (runtime === 'llamacpp') {
+    if (runtime === 'llamacpp' || runtime === 'external-gguf') {
       if (!this.managedRunning() || this.managedModel !== modelName) {
-        await this.loadModel(modelName, 'llamacpp');
+        await this.loadModel(modelName, runtime);
       }
       this.clearIdleTimer();
       const payload = await this.fetchJson(
@@ -810,10 +959,10 @@ class LocalAiRuntime {
       const result = {
         content: String(payload?.choices?.[0]?.message?.content || ''),
         model: modelName,
-        runtime: 'llamacpp',
+        runtime,
         usage: payload?.usage,
       };
-      this.scheduleIdleUnload('llamacpp', modelName);
+      this.scheduleIdleUnload(runtime, modelName);
       return result;
     }
 
@@ -928,4 +1077,7 @@ module.exports = {
   encodeManagedModel,
   decodeManagedModel,
   chooseGgufGroup,
+  localModelRoots,
+  isPathInside,
+  scanExternalGguf,
 };
