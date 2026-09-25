@@ -8,6 +8,9 @@ const { DeviceBridge } = require('../desktop/local/device-bridge.cjs');
 const { detectHardware } = require('../desktop/local/hardware.cjs');
 const { LocalLauncher } = require('../desktop/local/launcher.cjs');
 const { LocalAiRuntime } = require('./local-runtime.cjs');
+const { startOfflineServer, DEFAULT_PORT } = require('./offline-server.cjs');
+
+const PUBLIC_PACKAGE_URL = 'https://app.botconnector.id/device-cli-v0.4.0.tgz';
 
 class SessionSettings {
   constructor(seed = {}) {
@@ -34,6 +37,8 @@ function parseArgs(argv) {
     allowDesktopCommander: false,
     allowLocalAi: false,
     noPrompt: false,
+    noBrowser: false,
+    port: DEFAULT_PORT,
   };
 
   while (args.length) {
@@ -43,6 +48,14 @@ function parseArgs(argv) {
     else if (arg === '--allow-desktop-commander') options.allowDesktopCommander = true;
     else if (arg === '--allow-local-ai') options.allowLocalAi = true;
     else if (arg === '--no-prompt') options.noPrompt = true;
+    else if (arg === '--no-browser') options.noBrowser = true;
+    else if (arg === '--port') {
+      const value = Number(args.shift());
+      if (!Number.isInteger(value) || value < 1 || value > 65535) {
+        throw new Error('Invalid --port value. Use 1-65535.');
+      }
+      options.port = value;
+    }
     else if (arg === '--help' || arg === '-h') options.command = 'help';
     else if (arg === '--version' || arg === '-v') options.command = 'version';
     else throw new Error(`Unknown argument: ${arg}`);
@@ -55,27 +68,38 @@ function printHelp() {
   console.log(`
 BotConnector Device
 
-Connect a laptop or PC to app.botconnector.id without an installer.
+Use BotConnector Local AI from Chrome/Firefox with or without cloud connectivity.
 
 Usage:
-  npx https://app.botconnector.id/device-cli-v0.3.0.tgz connect
-  npx https://app.botconnector.id/device-cli-v0.3.0.tgz connect --code ABC123
-  npx https://app.botconnector.id/device-cli-v0.3.0.tgz connect --code ABC123 --allow-local-ai
-  npx https://app.botconnector.id/device-cli-v0.3.0.tgz connect --code ABC123 --allow-local-ai --allow-desktop-commander
+  npx ${PUBLIC_PACKAGE_URL} connect --code ABC123
+  npx ${PUBLIC_PACKAGE_URL} connect --code ABC123 --allow-local-ai
+  npx ${PUBLIC_PACKAGE_URL} offline --allow-local-ai
+  npx --offline ${PUBLIC_PACKAGE_URL} offline --allow-local-ai
+
+Modes:
+  connect   Pair with app.botconnector.id. When Local AI is allowed, localhost
+            UI is also available as an offline fallback.
+  offline   No pairing or cloud connection. Opens the local browser UI only.
 
 Options:
   --code <code>                  Pairing code from app.botconnector.id
   --allow-desktop-commander     Allow this session to run Desktop Commander Remote
   --allow-local-ai              Allow model management and local inference for this session
+  --port <1-65535>              Local UI port (default: ${DEFAULT_PORT})
+  --no-browser                  Do not open the local browser UI automatically
   --origin <url>                 Override the BotConnector origin
   --no-prompt                    Disable interactive prompts
   -h, --help                     Show help
   -v, --version                  Show version
 
+Offline cold start:
+  Run the versioned package once while online so npm can cache it. Afterwards,
+  the "npx --offline ... offline" command can reuse the cached package.
+
 Security:
-  - Does not open an inbound port on this device.
-  - Pairing credentials are kept in process memory for this session only.
-  - Close the terminal or press Ctrl+C to disconnect.
+  - Local UI binds only to 127.0.0.1.
+  - Local API requires a random in-memory session token and same-origin checks.
+  - Pairing credentials stay in process memory for the online session only.
   - Local AI model management and inference require explicit session approval.
   - Arbitrary remote shell access is not available.
 `.trim());
@@ -127,6 +151,64 @@ async function promptLocalAi(options) {
   }
 }
 
+function createLocalAi(enabled) {
+  return new LocalAiRuntime({
+    enabled,
+    emit(event, payload) {
+      if (event === 'local-ai:download') {
+        const percent = Number.isFinite(payload?.percent) ? ` ${payload.percent}%` : '';
+        console.log(
+          `[BotConnector] Model download ${payload?.model || ''}: ${payload?.status || 'unknown'}${percent}`,
+        );
+      } else if (event === 'local-ai:runtime-install') {
+        const percent = Number.isFinite(payload?.percent) ? ` ${payload.percent}%` : '';
+        console.log(
+          `[BotConnector] Runtime install: ${payload?.status || 'unknown'}${percent}`,
+        );
+      }
+    },
+  });
+}
+
+async function startLocalUi(localAi, options) {
+  const localServer = await startOfflineServer({
+    localAi,
+    detectHardware,
+    port: options.port,
+    open: !options.noBrowser,
+  });
+  console.log(`[BotConnector] Local browser UI: ${localServer.url}`);
+  console.log(
+    '[BotConnector] This localhost UI keeps working if the internet connection drops.',
+  );
+  return localServer;
+}
+
+async function runOffline(options) {
+  const allowLocalAi = await promptLocalAi(options);
+  if (!allowLocalAi) {
+    throw new Error('Offline mode requires Local AI permission for this session.');
+  }
+
+  const localAi = createLocalAi(true);
+  const localServer = await startLocalUi(localAi, options);
+
+  const shutdown = () => {
+    void localServer.close();
+    localAi.close();
+    console.log('\n[BotConnector] Local offline session stopped.');
+    process.exit(0);
+  };
+  process.once('SIGINT', shutdown);
+  process.once('SIGTERM', shutdown);
+
+  console.log(
+    '[BotConnector] Offline mode is ready. No BotConnector cloud pairing is active.',
+  );
+  const hold = setInterval(() => {}, 60_000);
+  hold.unref();
+}
+
 async function connect(options) {
   const code = await promptForCode(options);
   const allowLocalAi = await promptLocalAi(options);
@@ -140,16 +222,20 @@ async function connect(options) {
   });
 
   const launcher = new LocalLauncher({ settings });
-  const localAi = new LocalAiRuntime({
-    enabled: allowLocalAi,
-    emit(event, payload) {
-      if (event === 'local-ai:download') {
-        const percent = Number.isFinite(payload?.percent) ? ` ${payload.percent}%` : '';
-        console.log(`[BotConnector] Model download ${payload?.model || ''}: ${payload?.status || 'unknown'}${percent}`);
-      }
-    },
-  });
+  const localAi = createLocalAi(allowLocalAi);
   const tools = { list: () => [] };
+
+  let localServer = null;
+  if (allowLocalAi) {
+    try {
+      localServer = await startLocalUi(localAi, options);
+    } catch (error) {
+      console.error(
+        `[BotConnector] Local browser UI could not start: ${error?.message || error}`,
+      );
+      console.error('[BotConnector] Online Device mode will continue.');
+    }
+  }
 
   let lastState = '';
   const bridge = new DeviceBridge({
@@ -179,13 +265,16 @@ async function connect(options) {
           console.log('[BotConnector] Desktop Commander Remote is allowed for this session.');
         }
       } else if (state === 'DISCONNECTED') {
-        console.log('[BotConnector] Disconnected. Reconnecting while this process remains running...');
+        console.log(
+          '[BotConnector] Cloud connection lost. Local browser mode remains available.',
+        );
       }
     },
   });
 
   const shutdown = () => {
     bridge.close();
+    if (localServer) void localServer.close();
     localAi.close();
     launcher.stopAll();
     console.log('\n[BotConnector] Device offline.');
@@ -218,6 +307,11 @@ async function main(argv = process.argv.slice(2)) {
     return;
   }
 
+  if (options.command === 'offline') {
+    await runOffline(options);
+    return;
+  }
+
   if (options.command !== 'connect') {
     throw new Error(`Unknown command: ${options.command}`);
   }
@@ -233,11 +327,15 @@ if (require.main === module) {
 }
 
 module.exports = {
+  PUBLIC_PACKAGE_URL,
   SessionSettings,
   parseArgs,
   promptForCode,
   promptDesktopCommander,
   promptLocalAi,
+  createLocalAi,
+  startLocalUi,
+  runOffline,
   connect,
   main,
 };
