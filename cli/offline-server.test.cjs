@@ -46,7 +46,7 @@ test('offline UI serves localhost HTML and protects local API with a session tok
   assert.equal(page.status, 200);
   const html = await page.text();
   assert.match(html, /BotConnector Local/);
-  assert.match(html, /Offline-capable browser mode/);
+  assert.match(html, /OFFLINE · Localhost only/);
 
   const anonymous = await fetch(server.url + '/api/status');
   assert.equal(anonymous.status, 401);

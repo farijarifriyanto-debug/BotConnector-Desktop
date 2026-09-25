@@ -12,6 +12,8 @@ const {
   chooseGgufGroup,
   isPathInside,
   scanExternalGguf,
+  scanOllamaStore,
+  lemonadeRowsFromMetadata,
 } = require('./local-runtime.cjs');
 
 function jsonResponse(status, body) {
@@ -209,4 +211,55 @@ test('listModels includes existing local GGUF even when external runtimes are st
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+
+test('discovers Ollama manifests even when Ollama daemon is stopped', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bc-ollama-store-'));
+  try {
+    const manifestDir = path.join(
+      root,
+      'manifests',
+      'registry.ollama.ai',
+      'library',
+      'qwen3',
+    );
+    fs.mkdirSync(manifestDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(manifestDir, '4b'),
+      JSON.stringify({
+        config: { size: 10 },
+        layers: [{ size: 100 }, { size: 200 }],
+      }),
+    );
+
+    const rows = await scanOllamaStore(root);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].id, 'qwen3:4b');
+    assert.equal(rows[0].runtime, 'ollama');
+    assert.equal(rows[0].source, 'Ollama local store');
+    assert.equal(rows[0].deletable, false);
+    assert.equal(rows[0].runnable, false);
+    assert.equal(rows[0].size, 310);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('extracts Lemonade model metadata without requiring the Lemonade server', () => {
+  const rows = lemonadeRowsFromMetadata({
+    data: [
+      {
+        id: 'Qwen3-0.6B-NPU',
+        recipe: 'ryzenai-llm',
+        checkpoint: 'Example/Qwen3-0.6B',
+        downloaded: true,
+      },
+    ],
+  });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].id, 'Qwen3-0.6B-NPU');
+  assert.equal(rows[0].runtime, 'lemonade');
+  assert.equal(rows[0].source, 'Lemonade local metadata');
+  assert.equal(rows[0].deletable, false);
 });
