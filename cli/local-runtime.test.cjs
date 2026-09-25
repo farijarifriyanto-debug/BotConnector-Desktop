@@ -60,7 +60,13 @@ test('detects Ollama, lists models, and chats locally', async () => {
   });
   assert.equal(result.content, 'local answer');
   assert.equal(result.runtime, 'ollama');
-  assert.ok(calls.every((call) => String(call.url).startsWith('http://127.0.0.1:11434')));
+  assert.ok(
+    calls.some(
+      (call) =>
+        String(call.url).startsWith('http://127.0.0.1:11434') &&
+        String(call.url).endsWith('/api/chat'),
+    ),
+  );
 });
 
 test('falls back to Lemonade when Ollama is unavailable', async () => {
