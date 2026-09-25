@@ -42,7 +42,7 @@ function parseArgs(argv) {
     else if (arg === '--no-prompt') options.noPrompt = true;
     else if (arg === '--help' || arg === '-h') options.command = 'help';
     else if (arg === '--version' || arg === '-v') options.command = 'version';
-    else throw new Error(`Argumen tidak dikenal: ${arg}`);
+    else throw new Error(`Unknown argument: ${arg}`);
   }
 
   return options;
@@ -52,40 +52,40 @@ function printHelp() {
   console.log(`
 BotConnector Device
 
-Hubungkan laptop/PC ke app.botconnector.id tanpa installer.
+Connect a laptop or PC to app.botconnector.id without an installer.
 
-Pemakaian:
+Usage:
   npx https://app.botconnector.id/device-cli.tgz connect
   npx https://app.botconnector.id/device-cli.tgz connect --code ABC123
   npx https://app.botconnector.id/device-cli.tgz connect --code ABC123 --allow-desktop-commander
 
-Opsi:
-  --code <kode>                  Kode pairing dari app.botconnector.id
-  --allow-desktop-commander     Izinkan sesi ini menjalankan Desktop Commander Remote
-  --origin <url>                 Override origin BotConnector
-  --no-prompt                    Jangan tampilkan prompt interaktif
-  -h, --help                     Tampilkan bantuan
-  -v, --version                  Tampilkan versi
+Options:
+  --code <kode>                  Pairing code from app.botconnector.id
+  --allow-desktop-commander     Allow this session to run Desktop Commander Remote
+  --origin <url>                 Override the BotConnector origin
+  --no-prompt                    Disable interactive prompts
+  -h, --help                     Show help
+  -v, --version                  Show version
 
-Keamanan:
-  - Tidak membuka inbound port di laptop.
-  - Credential pairing hanya disimpan di memori proses untuk sesi ini.
-  - Tutup terminal / Ctrl+C untuk memutus akses.
-  - Remote shell arbitrer tidak tersedia.
+Security:
+  - Does not open an inbound port on this device.
+  - Pairing credentials are kept in process memory for this session only.
+  - Close the terminal or press Ctrl+C to disconnect.
+  - Arbitrary remote shell access is not available.
 `.trim());
 }
 
 async function promptForCode(options) {
   if (options.code) return options.code;
   if (options.noPrompt || !stdin.isTTY || !stdout.isTTY) {
-    throw new Error('Kode pairing diperlukan. Gunakan --code <kode>.');
+    throw new Error('A pairing code is required. Use --code <code>.');
   }
 
-  console.log('\nBuka https://app.botconnector.id lalu pilih Devices > Hubungkan perangkat.');
-  console.log('Masukkan kode pairing yang ditampilkan di sana.\n');
+  console.log('\nOpen https://app.botconnector.id and choose Devices > Connect a device.');
+  console.log('Enter the pairing code shown there.\n');
   const rl = readline.createInterface({ input: stdin, output: stdout });
   try {
-    return String(await rl.question('Kode pairing: ')).trim();
+    return String(await rl.question('Pairing code: ')).trim();
   } finally {
     rl.close();
   }
@@ -98,7 +98,7 @@ async function promptDesktopCommander(options) {
   const rl = readline.createInterface({ input: stdin, output: stdout });
   try {
     const answer = String(await rl.question(
-      'Izinkan BotConnector menjalankan Desktop Commander Remote selama sesi ini? [y/N] '
+      'Allow BotConnector to run Desktop Commander Remote for this session? [y/N] '
     )).trim().toLowerCase();
     return answer === 'y' || answer === 'yes' || answer === 'ya';
   } finally {
@@ -138,13 +138,13 @@ async function connect(options) {
       if (state === lastState) return;
       lastState = state;
       if (state === 'CONNECTED') {
-        console.log(`[BotConnector] Online sebagai ${payload.deviceName} (${payload.deviceId}).`);
-        console.log('[BotConnector] Tutup terminal / Ctrl+C untuk disconnect.');
+        console.log(`[BotConnector] Online as ${payload.deviceName} (${payload.deviceId}).`);
+        console.log('[BotConnector] Close the terminal or press Ctrl+C to disconnect.');
         if (allowDesktopCommander) {
-          console.log('[BotConnector] Desktop Commander Remote diizinkan untuk sesi ini.');
+          console.log('[BotConnector] Desktop Commander Remote is allowed for this session.');
         }
       } else if (state === 'DISCONNECTED') {
-        console.log('[BotConnector] Terputus. Mencoba reconnect selama proses tetap berjalan...');
+        console.log('[BotConnector] Disconnected. Reconnecting while this process remains running...');
       }
     },
   });
@@ -158,9 +158,9 @@ async function connect(options) {
   process.once('SIGINT', shutdown);
   process.once('SIGTERM', shutdown);
 
-  console.log(`[BotConnector] Pairing ke ${options.origin}...`);
+  console.log(`[BotConnector] Pairing with ${options.origin}...`);
   const status = await bridge.pair(code);
-  console.log(`[BotConnector] Pairing diterima. Device ID: ${status.deviceId}`);
+  console.log(`[BotConnector] Pairing accepted. Device ID: ${status.deviceId}`);
 
   // Keep this foreground process alive. The WebSocket itself also holds the
   // event loop, while this timer makes the intended session lifetime explicit.
@@ -183,7 +183,7 @@ async function main(argv = process.argv.slice(2)) {
   }
 
   if (options.command !== 'connect') {
-    throw new Error(`Perintah tidak dikenal: ${options.command}`);
+    throw new Error(`Unknown command: ${options.command}`);
   }
 
   await connect(options);
