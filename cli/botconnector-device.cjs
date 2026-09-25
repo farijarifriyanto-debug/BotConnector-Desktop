@@ -186,6 +186,7 @@ async function connect(options) {
 
   const shutdown = () => {
     bridge.close();
+    localAi.close();
     launcher.stopAll();
     console.log('\n[BotConnector] Device offline.');
     process.exit(0);
