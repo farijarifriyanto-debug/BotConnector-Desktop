@@ -240,21 +240,21 @@ q('refresh').onclick=refresh;q('refreshModels').onclick=refresh;q('prepareRuntim
     .replace('__LOCAL_URL__', localUrl);
 }
 
+function browserLaunchSpec(url, platform = process.platform) {
+  if (platform === 'win32') return { command: 'explorer.exe', args: [url] };
+  if (platform === 'darwin') return { command: 'open', args: [url] };
+  return { command: 'xdg-open', args: [url] };
+}
+
 function openBrowser(url) {
   try {
-    let command;
-    let args;
-    if (process.platform === 'win32') {
-      command = 'cmd.exe';
-      args = ['/d', '/s', '/c', 'start', '""', url];
-    } else if (process.platform === 'darwin') {
-      command = 'open';
-      args = [url];
-    } else {
-      command = 'xdg-open';
-      args = [url];
-    }
-    const child = spawn(command, args, { detached: true, stdio: 'ignore', windowsHide: true });
+    const { command, args } = browserLaunchSpec(url);
+    const child = spawn(command, args, {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    child.on('error', () => {});
     child.unref();
     return true;
   } catch {
@@ -376,6 +376,7 @@ module.exports = {
   MAX_BODY_BYTES,
   startOfflineServer,
   openBrowser,
+  browserLaunchSpec,
   offlineHtml,
   requireLocalApi,
 };
