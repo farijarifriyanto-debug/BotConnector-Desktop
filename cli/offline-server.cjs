@@ -2,6 +2,7 @@
 const crypto = require('node:crypto');
 const http = require('node:http');
 const { spawn } = require('node:child_process');
+const defaultCatalog = require('../desktop/local/catalog.cjs');
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 18765;
@@ -268,6 +269,7 @@ async function startOfflineServer({
   host = DEFAULT_HOST,
   port = DEFAULT_PORT,
   open = true,
+  catalog = defaultCatalog,
 } = {}) {
   if (!localAi) throw new Error('Local AI runtime is required.');
   if (!detectHardware) throw new Error('Hardware detector is required.');
@@ -300,8 +302,60 @@ async function startOfflineServer({
         sendJson(res, 200, { models: await localAi.listModels() });
         return;
       }
+      if (req.method === 'GET' && url.pathname === '/api/catalog/search') {
+        const payload = await catalog.searchCatalog({
+          query: url.searchParams.get('q') || '',
+          cursor: url.searchParams.get('cursor') || '',
+          limit: Number(url.searchParams.get('limit') || 40),
+        });
+        sendJson(res, 200, payload);
+        return;
+      }
 
       const body = req.method === 'POST' ? await readJson(req) : {};
+
+      if (req.method === 'POST' && url.pathname === '/api/catalog/details') {
+        const hardware = await detectHardware();
+        sendJson(res, 200, await catalog.modelDetails(String(body.id || ''), hardware));
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/catalog/recommendations') {
+        const hardware = await detectHardware();
+        const result = await catalog.searchCatalog({
+          query: String(body.query || ''),
+          limit: Math.min(24, Math.max(4, Number(body.limit) || 12)),
+        });
+        const candidates = (Array.isArray(result.models) ? result.models : []).slice(0, 12);
+        const enriched = await Promise.all(
+          candidates.map(async (model) => {
+            const id = String(model?.id || model?.modelId || '');
+            if (!id.includes('/')) return { ...model, compatibility: model?.compatibility || null };
+            try {
+              const details = await catalog.modelDetails(id, hardware);
+              return {
+                ...model,
+                capabilities: details?.capabilities || model?.capabilities || null,
+                compatibility: details?.compatibility || model?.compatibility || null,
+              };
+            } catch {
+              return { ...model, compatibility: model?.compatibility || null };
+            }
+          }),
+        );
+        const rank = { great: 0, ok: 1, warn: 2, unknown: 3, no: 4 };
+        enriched.sort((a, b) => {
+          const ar = rank[a?.compatibility?.level] ?? 9;
+          const br = rank[b?.compatibility?.level] ?? 9;
+          if (ar !== br) return ar - br;
+          return Number(b?.downloads || 0) - Number(a?.downloads || 0);
+        });
+        sendJson(res, 200, {
+          hardware,
+          models: enriched,
+          source: result.source,
+        });
+        return;
+      }
       if (req.method === 'POST' && url.pathname === '/api/runtime/install') {
         sendJson(res, 200, await localAi.startRuntimeInstall(body.backend || 'auto'));
         return;
