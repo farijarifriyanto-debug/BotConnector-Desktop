@@ -1,0 +1,15 @@
+{
+  "name": "botconnector-device-launcher",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Stable version-resolving launcher for BotConnector Device CLI",
+  "bin": {
+    "botconnector-device": "cli.cjs"
+  },
+  "files": [
+    "cli.cjs"
+  ],
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}
