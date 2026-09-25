@@ -222,16 +222,20 @@ async function connect(options) {
   });
 
   const launcher = new LocalLauncher({ settings });
-  const localAi = new LocalAiRuntime({
-    enabled: allowLocalAi,
-    emit(event, payload) {
-      if (event === 'local-ai:download') {
-        const percent = Number.isFinite(payload?.percent) ? ` ${payload.percent}%` : '';
-        console.log(`[BotConnector] Model download ${payload?.model || ''}: ${payload?.status || 'unknown'}${percent}`);
-      }
-    },
-  });
+  const localAi = createLocalAi(allowLocalAi);
   const tools = { list: () => [] };
+
+  let localServer = null;
+  if (allowLocalAi) {
+    try {
+      localServer = await startLocalUi(localAi, options);
+    } catch (error) {
+      console.error(
+        `[BotConnector] Local browser UI could not start: ${error?.message || error}`,
+      );
+      console.error('[BotConnector] Online Device mode will continue.');
+    }
+  }
 
   let lastState = '';
   const bridge = new DeviceBridge({
@@ -261,13 +265,16 @@ async function connect(options) {
           console.log('[BotConnector] Desktop Commander Remote is allowed for this session.');
         }
       } else if (state === 'DISCONNECTED') {
-        console.log('[BotConnector] Disconnected. Reconnecting while this process remains running...');
+        console.log(
+          '[BotConnector] Cloud connection lost. Local browser mode remains available.',
+        );
       }
     },
   });
 
   const shutdown = () => {
     bridge.close();
+    if (localServer) void localServer.close();
     localAi.close();
     launcher.stopAll();
     console.log('\n[BotConnector] Device offline.');
