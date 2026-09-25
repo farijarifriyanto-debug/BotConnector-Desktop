@@ -229,7 +229,17 @@ test('discovers Ollama manifests even when Ollama daemon is stopped', async () =
       path.join(manifestDir, '4b'),
       JSON.stringify({
         config: { size: 10 },
-        layers: [{ size: 100 }, { size: 200 }],
+        layers: [
+          { mediaType: 'application/vnd.ollama.image.model', size: 100 },
+          { mediaType: 'application/vnd.ollama.image.template', size: 200 },
+        ],
+      }),
+    );
+    fs.writeFileSync(
+      path.join(manifestDir, 'cloud'),
+      JSON.stringify({
+        config: { size: 326 },
+        layers: [],
       }),
     );
 
@@ -240,7 +250,7 @@ test('discovers Ollama manifests even when Ollama daemon is stopped', async () =
     assert.equal(rows[0].source, 'Ollama local store');
     assert.equal(rows[0].deletable, false);
     assert.equal(rows[0].runnable, false);
-    assert.equal(rows[0].size, 310);
+    assert.equal(rows[0].size, 110);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
