@@ -71,15 +71,6 @@ jobs:
           npm pack ./launcher --pack-destination dist/device
           mv dist/device/botconnector-device-launcher-*.tgz dist/device/device-cli-launcher.tgz
           tar -tzf dist/device/device-cli-launcher.tgz | grep -q '^package/cli.cjs
-        uses: actions/upload-artifact@v4
-        with:
-          name: botconnector-device-cli
-          path: |
-            dist/device/device-cli.tgz
-            dist/device/device-cli-launcher.tgz
-          if-no-files-found: error
-          retention-days: 14
-
 
   windows-hardware:
     name: Windows hardware detection
@@ -116,11 +107,13 @@ jobs:
 
           sha256sum dist/device/device-cli-launcher.tgz
 
-      - name: Upload device package
+      - name: Upload device packages
         uses: actions/upload-artifact@v4
         with:
           name: botconnector-device-cli
-          path: dist/device/device-cli.tgz
+          path: |
+            dist/device/device-cli.tgz
+            dist/device/device-cli-launcher.tgz
           if-no-files-found: error
           retention-days: 14
 
