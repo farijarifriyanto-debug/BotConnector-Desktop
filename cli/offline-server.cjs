@@ -182,9 +182,16 @@ async function api(path,init={}){const response=await fetch(path,{...init,header
 function selected(){return models.find(m=>m.path===q('modelSelect').value)||null}
 function updateSelectedModel(){
   const current=selected();
+  const unavailable=!current||current.runnable===false;
   q('modelSource').textContent=current?('Source: '+(current.source||current.runtime||current.recipe||'local')):'';
   q('deleteModel').disabled=!current||current.deletable===false;
   q('deleteModel').title=current?.deletable===false?'This model is read-only until its source runtime is available.':'';
+  q('loadModel').disabled=unavailable;
+  q('unloadModel').disabled=unavailable;
+  q('send').disabled=unavailable;
+  q('prompt').disabled=unavailable;
+  q('loadModel').title=current?.runnable===false?'Start the source runtime before loading this model.':'';
+  q('send').title=current?.runnable===false?'Start the source runtime before chatting with this model.':'';
 }
 function render(){const chat=q('chat');chat.innerHTML='';if(!messages.length){const e=document.createElement('div');e.className='empty';e.textContent='Choose an installed model, then start chatting locally.';chat.appendChild(e);return}for(const m of messages){const e=document.createElement('div');e.className='msg '+m.role;e.textContent=m.content||'';chat.appendChild(e)}chat.scrollTop=chat.scrollHeight}
 async function refresh(){
@@ -195,10 +202,8 @@ async function refresh(){
     models=Array.isArray(mp.models)?mp.models:[];const sel=q('modelSelect');const prev=sel.value;sel.innerHTML='';
     if(!models.length){const o=document.createElement('option');o.value='';o.textContent='No model installed';sel.appendChild(o)}else for(const m of models){const o=document.createElement('option');o.value=m.path;const src=m.source||m.runtime||m.recipe||'local';o.textContent=(m.name||m.id||m.path)+' · '+src;sel.appendChild(o)}
     if(models.some(m=>m.path===prev))sel.value=prev;
-    const current=selected();q('modelSource').textContent=current?('Source: '+(current.runtime||current.recipe||'local')):'';
-    q('deleteModel').disabled=!current||current.deletable===false;
-    q('deleteModel').title=current?.deletable===false?'This model is read-only until its source runtime is available.':'';
-    status('modelStatus',models.length?models.length+' model(s) detected':'No local model detected yet.');
+    updateSelectedModel();
+    status('modelStatus',models.length?models.length+' local model(s) detected':'No local model detected yet.');
   }catch(e){status('runtimeStatus',String(e.message||e),'danger')}
 }
 async function prepareRuntime(){
@@ -215,7 +220,7 @@ async function downloadModel(){
     q('downloadModelId').value='';q('recommended').value='';await refresh();status('downloadStatus','Download completed.','oktext')
   }catch(e){status('downloadStatus',String(e.message||e),'danger')}finally{q('downloadModel').disabled=false}
 }
-async function modelAction(action){const m=selected();if(!m)return;status('modelStatus',(action==='load'?'Loading':'Unloading')+' model…');try{await api('/api/models/'+action,{method:'POST',body:JSON.stringify({model:m.id,runtime:m.runtime})});status('modelStatus',action==='load'?'Model loaded.':'Model unloaded.','oktext');await refresh()}catch(e){status('modelStatus',String(e.message||e),'danger')}}
+async function modelAction(action){const m=selected();if(!m)return;if(m.runnable===false){status('modelStatus','Start the source runtime before using this model.','danger');return}status('modelStatus',(action==='load'?'Loading':'Unloading')+' model…');try{await api('/api/models/'+action,{method:'POST',body:JSON.stringify({model:m.id,runtime:m.runtime})});status('modelStatus',action==='load'?'Model loaded.':'Model unloaded.','oktext');await refresh()}catch(e){status('modelStatus',String(e.message||e),'danger')}}
 async function deleteSelectedModel(){
   const m=selected();if(!m)return;
   if(m.deletable===false){status('modelStatus','This model is read-only until its source runtime is available.','danger');return}
@@ -224,8 +229,8 @@ async function deleteSelectedModel(){
   try{await api('/api/models/delete',{method:'POST',body:JSON.stringify({model:m.id,runtime:m.runtime})});status('modelStatus','Model deleted.','oktext');await refresh()}
   catch(e){status('modelStatus',String(e.message||e),'danger')}
 }
-async function send(){if(busy)return;const m=selected();const text=q('prompt').value.trim();if(!m||!text)return;busy=true;q('send').disabled=true;q('stop').disabled=false;q('prompt').value='';messages.push({role:'user',content:text});render();activeRequestId=crypto.randomUUID();status('chatStatus','Generating locally…');
-  try{const result=await api('/api/chat',{method:'POST',body:JSON.stringify({model:m.id,runtime:m.runtime,messages,request_id:activeRequestId})});messages.push({role:'assistant',content:String(result.content||'')});render();status('chatStatus','Local response complete.','oktext')}catch(e){status('chatStatus',String(e.message||e),'danger')}finally{busy=false;activeRequestId='';q('send').disabled=false;q('stop').disabled=true}}
+async function send(){if(busy)return;const m=selected();const text=q('prompt').value.trim();if(!m||!text)return;if(m.runnable===false){status('chatStatus','Start the source runtime before chatting with this model.','danger');return}busy=true;q('send').disabled=true;q('stop').disabled=false;q('prompt').value='';messages.push({role:'user',content:text});render();activeRequestId=crypto.randomUUID();status('chatStatus','Generating locally…');
+  try{const result=await api('/api/chat',{method:'POST',body:JSON.stringify({model:m.id,runtime:m.runtime,messages,request_id:activeRequestId})});messages.push({role:'assistant',content:String(result.content||'')});render();status('chatStatus','Local response complete.','oktext')}catch(e){status('chatStatus',String(e.message||e),'danger')}finally{busy=false;activeRequestId='';q('stop').disabled=true;updateSelectedModel()}}
 async function stop(){if(!activeRequestId)return;try{await api('/api/chat/cancel',{method:'POST',body:JSON.stringify({id:activeRequestId})})}catch{}status('chatStatus','Generation cancelled.')}
 q('refresh').onclick=refresh;q('refreshModels').onclick=refresh;q('prepareRuntime').onclick=prepareRuntime;q('downloadModel').onclick=downloadModel;q('recommended').onchange=()=>{if(q('recommended').value)q('downloadModelId').value=q('recommended').value};q('modelSelect').onchange=updateSelectedModel;q('loadModel').onclick=()=>modelAction('load');q('unloadModel').onclick=()=>modelAction('unload');q('deleteModel').onclick=deleteSelectedModel;q('send').onclick=send;q('stop').onclick=stop;q('prompt').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}});refresh();
 </script>

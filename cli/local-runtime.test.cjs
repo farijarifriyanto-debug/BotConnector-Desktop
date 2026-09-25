@@ -24,6 +24,20 @@ function jsonResponse(status, body) {
   };
 }
 
+function writeOllamaManifest(root, model, tag = 'latest', { local = true } = {}) {
+  const dir = path.join(root, 'manifests', 'registry.ollama.ai', 'library', model);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, tag),
+    JSON.stringify({
+      config: { size: 10 },
+      layers: local
+        ? [{ mediaType: 'application/vnd.ollama.image.model', size: 100 }]
+        : [],
+    }),
+  );
+}
+
 test('local AI is deny-by-default', async () => {
   const runtime = new LocalAiRuntime();
   await assert.rejects(() => runtime.status(), /not allowed/i);
@@ -36,41 +50,70 @@ test('validates model names and chat payloads', () => {
   assert.throws(() => normalizeMessages([{ role: 'developer', content: 'x' }]), /role/i);
 });
 
-test('detects Ollama, lists models, and chats locally', async () => {
-  const calls = [];
-  const fetchImpl = async (url, init = {}) => {
-    calls.push({ url, init });
-    if (url.endsWith('/api/tags')) {
-      return jsonResponse(200, { models: [{ name: 'qwen3:4b', size: 123 }] });
-    }
-    if (url.endsWith('/api/chat')) {
-      return jsonResponse(200, {
-        message: { content: 'local answer' },
-        prompt_eval_count: 10,
-        eval_count: 4,
-      });
-    }
-    throw new Error('Unexpected URL ' + url);
-  };
+test('detects Ollama, exposes only verified local models, and chats locally', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bc-ollama-api-'));
+  const previous = process.env.OLLAMA_MODELS;
+  process.env.OLLAMA_MODELS = root;
+  try {
+    writeOllamaManifest(root, 'qwen3', '4b', { local: true });
+    writeOllamaManifest(root, 'remote-only', 'cloud', { local: false });
 
-  const runtime = new LocalAiRuntime({ enabled: true, fetchImpl });
-  const status = await runtime.status();
-  assert.equal(status.runtime, 'ollama');
-  const models = await runtime.listModels();
-  assert.equal(models[0].path, 'device:ollama:qwen3:4b');
-  const result = await runtime.chat({
-    model: 'qwen3:4b',
-    messages: [{ role: 'user', content: 'hello' }],
-  });
-  assert.equal(result.content, 'local answer');
-  assert.equal(result.runtime, 'ollama');
-  assert.ok(
-    calls.some(
-      (call) =>
-        String(call.url).startsWith('http://127.0.0.1:11434') &&
-        String(call.url).endsWith('/api/chat'),
-    ),
-  );
+    const calls = [];
+    const fetchImpl = async (url, init = {}) => {
+      calls.push({ url, init });
+      if (url.endsWith('/api/tags')) {
+        return jsonResponse(200, {
+          models: [
+            { name: 'qwen3:4b', size: 123 },
+            { name: 'remote-only:cloud', size: 10 },
+          ],
+        });
+      }
+      if (url.endsWith('/api/chat')) {
+        return jsonResponse(200, {
+          message: { content: 'local answer' },
+          prompt_eval_count: 10,
+          eval_count: 4,
+        });
+      }
+      if (url.endsWith('/api/ps')) return jsonResponse(200, { models: [] });
+      throw new Error('Unexpected URL ' + url);
+    };
+
+    const runtime = new LocalAiRuntime({ enabled: true, fetchImpl });
+    const status = await runtime.status();
+    assert.equal(status.runtime, 'ollama');
+    const models = await runtime.listModels();
+    assert.deepEqual(
+      models.filter((model) => model.runtime === 'ollama').map((model) => model.id),
+      ['qwen3:4b'],
+    );
+    const result = await runtime.chat({
+      model: 'qwen3:4b',
+      messages: [{ role: 'user', content: 'hello' }],
+    });
+    assert.equal(result.content, 'local answer');
+    assert.equal(result.runtime, 'ollama');
+    await assert.rejects(
+      () =>
+        runtime.chat({
+          model: 'remote-only:cloud',
+          messages: [{ role: 'user', content: 'should stay offline' }],
+        }),
+      /not installed locally|cloud-only/i,
+    );
+    assert.ok(
+      calls.some(
+        (call) =>
+          String(call.url).startsWith('http://127.0.0.1:11434') &&
+          String(call.url).endsWith('/api/chat'),
+      ),
+    );
+  } finally {
+    if (previous == null) delete process.env.OLLAMA_MODELS;
+    else process.env.OLLAMA_MODELS = previous;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('falls back to Lemonade when Ollama is unavailable', async () => {
@@ -121,12 +164,14 @@ test('managed GGUF download prefers Q4_K_M', () => {
 });
 
 
-test('aggregates managed, Ollama, and Lemonade models instead of hiding secondary runtimes', async () => {
-  const fs = require('node:fs');
-  const os = require('node:os');
-  const path = require('node:path');
+test('aggregates verified local Ollama and Lemonade models instead of hiding secondary runtimes', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bc-aggregate-'));
+  const ollamaRoot = path.join(root, 'ollama-models');
+  const previous = process.env.OLLAMA_MODELS;
+  process.env.OLLAMA_MODELS = ollamaRoot;
   try {
+    writeOllamaManifest(ollamaRoot, 'ollama-model', 'latest', { local: true });
+
     const fetchImpl = async (url) => {
       if (url.endsWith('/api/tags')) {
         return jsonResponse(200, { models: [{ name: 'ollama-model:latest', size: 111 }] });
@@ -153,6 +198,8 @@ test('aggregates managed, Ollama, and Lemonade models instead of hiding secondar
     assert.ok(models.some((model) => model.id === 'ollama-model:latest'));
     assert.ok(models.some((model) => model.id === 'lemonade-model'));
   } finally {
+    if (previous == null) delete process.env.OLLAMA_MODELS;
+    else process.env.OLLAMA_MODELS = previous;
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

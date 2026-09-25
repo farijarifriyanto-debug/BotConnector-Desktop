@@ -6,7 +6,7 @@ The primary MVP device path is a foreground Node.js CLI. It does not require
 an EXE/MSI installer and does not open an inbound port on the user's computer.
 
 ```powershell
-npx https://app.botconnector.id/device-cli-v0.4.3.tgz connect
+npx https://app.botconnector.id/device-cli-v0.4.4.tgz connect
 ```
 
 Get a pairing code from `app.botconnector.id`, enter it in the terminal, and
@@ -18,7 +18,7 @@ Desktop Commander Remote is deny-by-default for each session. The CLI asks for
 local approval, or the user can make that session permission explicit:
 
 ```powershell
-npx https://app.botconnector.id/device-cli-v0.4.3.tgz connect --code ABC123 --allow-desktop-commander
+npx https://app.botconnector.id/device-cli-v0.4.4.tgz connect --code ABC123 --allow-desktop-commander
 ```
 
 The Windows/Electron desktop build remains an optional legacy path and is not
@@ -108,12 +108,12 @@ Production reverse proxy perlu menerapkan header dari `dist/web/security-headers
 
 ## Full offline browser mode
 
-BotConnector Device CLI v0.4.3 can serve a self-contained local browser UI on
+BotConnector Device CLI v0.4.4 can serve a self-contained local browser UI on
 `127.0.0.1`. The UI, model selector, runtime controls, and local chat do not
 depend on `app.botconnector.id` once the CLI process is running.
 
 ```powershell
-npx https://app.botconnector.id/device-cli-v0.4.3.tgz offline --allow-local-ai
+npx https://app.botconnector.id/device-cli-v0.4.4.tgz offline --allow-local-ai
 ```
 
 The local UI opens at:
@@ -125,7 +125,7 @@ http://127.0.0.1:18765
 Online Device mode can expose the same localhost UI as a fallback:
 
 ```powershell
-npx https://app.botconnector.id/device-cli-v0.4.3.tgz connect --code <PAIR_CODE> --allow-local-ai
+npx https://app.botconnector.id/device-cli-v0.4.4.tgz connect --code <PAIR_CODE> --allow-local-ai
 ```
 
 If internet connectivity drops after the session starts, the localhost UI and
@@ -133,7 +133,7 @@ already-downloaded local models continue to work. For a cold start without
 network access, npm can reuse the versioned package after it has been cached:
 
 ```powershell
-npx --offline https://app.botconnector.id/device-cli-v0.4.3.tgz offline --allow-local-ai
+npx --offline https://app.botconnector.id/device-cli-v0.4.4.tgz offline --allow-local-ai
 ```
 
 The local server binds only to `127.0.0.1` and protects API calls with an
