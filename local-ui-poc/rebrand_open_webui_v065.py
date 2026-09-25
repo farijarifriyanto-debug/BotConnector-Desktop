@@ -38,6 +38,41 @@ replace("static/opensearch.xml", [
     ("http://localhost:5137/favicon.png", "http://localhost:5137/static/botconnector-mark.svg"),
 ])
 
+# Disable upstream first-run changelog and update notices in BotConnector Local.
+layout = root / "src" / "routes" / "(app)" / "+layout.svelte"
+layout_text = layout.read_text(encoding="utf-8")
+layout_text = layout_text.replace(
+    """			if ($user?.role === 'admin' && ($settings?.showChangelog ?? true)) {
+				showChangelog.set($settings?.version !== $config.version);
+			}""",
+    """			showChangelog.set(false);"""
+)
+layout_text = layout_text.replace(
+    """			// Check for version updates
+			if ($user?.role === 'admin') {
+				// Check if the user has dismissed the update toast in the last 24 hours
+				if (localStorage.dismissedUpdateToast) {
+					const dismissedUpdateToast = new Date(Number(localStorage.dismissedUpdateToast));
+					const now = new Date();
+
+					if (now - dismissedUpdateToast > 24 * 60 * 60 * 1000) {
+						checkForVersionUpdates();
+					}
+				} else {
+					checkForVersionUpdates();
+				}
+			}""",
+    """			// BotConnector Local is release-managed by BotConnector, not Open WebUI.
+			showChangelog.set(false);"""
+)
+layout_text = layout_text.replace("<ChangelogModal bind:show={$showChangelog} />", "")
+start = layout_text.find("{#if version && compareVersion(version.latest, version.current)")
+if start >= 0:
+    end = layout_text.find("{/if}", start)
+    if end >= 0:
+        layout_text = layout_text[:start] + layout_text[end + len("{/if}"):]
+layout.write_text(layout_text, encoding="utf-8")
+
 # Keep the visual identity consistent with botconnector.id: the mark is ◇.
 mark = root / "static" / "botconnector-mark.svg"
 mark.write_text("""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="BotConnector">
