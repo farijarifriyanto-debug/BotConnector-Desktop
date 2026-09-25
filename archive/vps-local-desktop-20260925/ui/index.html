@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>BotConnector Local</title>
+  <link rel="stylesheet" href="app.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="mark">B</div>
+        <div><strong>BotConnector</strong><span>Local</span></div>
+      </div>
+      <nav>
+        <button class="nav active" data-view="chat">Chat</button>
+        <button class="nav" data-view="models">Models</button>
+        <button class="nav" data-view="settings">Settings</button>
+      </nav>
+      <div class="side-foot">
+        <span class="dot" id="runtimeDot"></span>
+        <span id="runtimeLabel">Runtime idle</span>
+      </div>
+    </aside>
+    <main class="main">
+      <header>
+        <div>
+          <h1 id="viewTitle">Local Chat</h1>
+          <p id="viewSubtitle">Private AI on this device</p>
+        </div>
+        <div class="offline-pill">Local • Offline capable</div>
+      </header>
+
+      <section class="view active" id="chatView">
+        <div class="chat-toolbar">
+          <label>Model
+            <select id="modelSelect"></select>
+          </label>
+          <button class="ghost" id="refreshModels">Refresh</button>
+        </div>
+        <div class="messages" id="messages">
+          <div class="empty" id="emptyChat">
+            <strong>Chat locally, even without internet.</strong>
+            <span>Your prompts stay on this computer.</span>
+          </div>
+        </div>
+        <form class="composer" id="composer">
+          <textarea id="prompt" rows="2"
+            placeholder="Tulis pesan ke AI lokal..." required></textarea>
+          <button class="primary" id="sendButton" type="submit">Send</button>
+        </form>
+        <div class="hint" id="chatHint"></div>
+      </section>
+      <section class="view" id="modelsView">
+        <div class="section-head">
+          <div>
+            <h2>Installed models</h2>
+            <p>GGUF models available on this device</p>
+          </div>
+          <button class="ghost" id="modelsRefresh">Refresh</button>
+        </div>
+        <div class="path-card">
+          <span>Model storage</span>
+          <code id="modelsPath">Loading…</code>
+        </div>
+        <div class="model-grid" id="modelGrid"></div>
+        <div class="notice">
+          Download and model recommendations will be added here.
+          Existing GGUF files already work offline.
+        </div>
+      </section>
+
+      <section class="view" id="settingsView">
+        <div class="settings-card">
+          <h2>Local runtime</h2>
+          <div class="setting-row">
+            <div><strong>Idle unload</strong>
+              <span>Release model RAM/VRAM when unused</span></div>
+            <select id="idleMinutes">
+              <option value="1">1 minute</option>
+              <option value="5" selected>5 minutes</option>
+              <option value="10">10 minutes</option>
+              <option value="30">30 minutes</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <div><strong>Loaded models</strong>
+              <span id="loadedModels">None</span></div>
+            <button class="ghost" id="unloadAll">Unload now</button>
+          </div>
+        </div>
+        <div class="settings-card">
+          <h2>This device</h2>
+          <pre id="hardwareInfo">Detecting hardware…</pre>
+        </div>
+        <div class="settings-card">
+          <h2>Privacy</h2>
+          <p>Local chat uses the model and engine on this computer.
+            No cloud API is required after model installation.</p>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

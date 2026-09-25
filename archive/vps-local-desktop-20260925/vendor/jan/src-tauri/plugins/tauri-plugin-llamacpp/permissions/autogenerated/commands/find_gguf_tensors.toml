@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-find-gguf-tensors"
+description = "Enables the find_gguf_tensors command without any pre-configured scope."
+commands.allow = ["find_gguf_tensors"]
+
+[[permission]]
+identifier = "deny-find-gguf-tensors"
+description = "Denies the find_gguf_tensors command without any pre-configured scope."
+commands.deny = ["find_gguf_tensors"]

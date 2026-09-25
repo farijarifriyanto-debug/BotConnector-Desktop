@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-engine-devices"
+description = "Enables the engine_devices command without any pre-configured scope."
+commands.allow = ["engine_devices"]
+
+[[permission]]
+identifier = "deny-engine-devices"
+description = "Denies the engine_devices command without any pre-configured scope."
+commands.deny = ["engine_devices"]

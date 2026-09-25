@@ -1,0 +1,25 @@
+[package]
+name = "botconnector-local-desktop"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2.5.0", features = ["wry"] }
+tauri-plugin-llamacpp = { path = "../vendor/jan/src-tauri/plugins/tauri-plugin-llamacpp" }
+tauri-plugin-hardware = { path = "../vendor/jan/src-tauri/plugins/tauri-plugin-hardware" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
+tokio = { version = "1", features = ["rt-multi-thread", "time", "sync"] }
+walkdir = "2"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

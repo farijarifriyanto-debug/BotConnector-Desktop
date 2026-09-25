@@ -1,0 +1,29 @@
+[default]
+description = "Default permissions for the llamacpp plugin"
+permissions = [
+    # Cleanup
+    "allow-cleanup-llama-processes",
+
+    # Model lifecycle, served by the engine worker over loopback HTTP
+    "allow-load-llama-model",
+    "allow-unload-llama-model",
+    "allow-generate-api-key",
+    "allow-ensure-session-ready",
+    "allow-find-session-by-model",
+    "allow-get-loaded-models",
+
+    # The in-process engine worker
+    "allow-start-engine",
+    "allow-stop-engine",
+    "allow-get-engine-info",
+    "allow-reload-engine-models",
+    "allow-engine-devices",
+    "allow-force-stop-engine",
+    "allow-engine-slots-idle",
+    "allow-erase-thread-slot-state",
+
+    # GGUF
+    "allow-read-gguf-metadata",
+    "allow-find-gguf-tensors",
+    "allow-is-model-supported",
+]

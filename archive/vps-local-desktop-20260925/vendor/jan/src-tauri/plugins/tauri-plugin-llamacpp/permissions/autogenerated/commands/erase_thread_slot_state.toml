@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-erase-thread-slot-state"
+description = "Enables the erase_thread_slot_state command without any pre-configured scope."
+commands.allow = ["erase_thread_slot_state"]
+
+[[permission]]
+identifier = "deny-erase-thread-slot-state"
+description = "Denies the erase_thread_slot_state command without any pre-configured scope."
+commands.deny = ["erase_thread_slot_state"]
