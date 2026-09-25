@@ -60,7 +60,7 @@ Usage:
   npx https://app.botconnector.id/device-cli.tgz connect --code ABC123 --allow-desktop-commander
 
 Options:
-  --code <kode>                  Pairing code from app.botconnector.id
+  --code <code>                  Pairing code from app.botconnector.id
   --allow-desktop-commander     Allow this session to run Desktop Commander Remote
   --origin <url>                 Override the BotConnector origin
   --no-prompt                    Disable interactive prompts
