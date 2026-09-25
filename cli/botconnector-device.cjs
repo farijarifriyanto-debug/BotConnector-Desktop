@@ -8,6 +8,9 @@ const { DeviceBridge } = require('../desktop/local/device-bridge.cjs');
 const { detectHardware } = require('../desktop/local/hardware.cjs');
 const { LocalLauncher } = require('../desktop/local/launcher.cjs');
 const { LocalAiRuntime } = require('./local-runtime.cjs');
+const { startOfflineServer, DEFAULT_PORT } = require('./offline-server.cjs');
+
+const PUBLIC_PACKAGE_URL = 'https://app.botconnector.id/device-cli-v0.4.0.tgz';
 
 class SessionSettings {
   constructor(seed = {}) {
@@ -34,6 +37,8 @@ function parseArgs(argv) {
     allowDesktopCommander: false,
     allowLocalAi: false,
     noPrompt: false,
+    noBrowser: false,
+    port: DEFAULT_PORT,
   };
 
   while (args.length) {
@@ -43,6 +48,14 @@ function parseArgs(argv) {
     else if (arg === '--allow-desktop-commander') options.allowDesktopCommander = true;
     else if (arg === '--allow-local-ai') options.allowLocalAi = true;
     else if (arg === '--no-prompt') options.noPrompt = true;
+    else if (arg === '--no-browser') options.noBrowser = true;
+    else if (arg === '--port') {
+      const value = Number(args.shift());
+      if (!Number.isInteger(value) || value < 1 || value > 65535) {
+        throw new Error('Invalid --port value. Use 1-65535.');
+      }
+      options.port = value;
+    }
     else if (arg === '--help' || arg === '-h') options.command = 'help';
     else if (arg === '--version' || arg === '-v') options.command = 'version';
     else throw new Error(`Unknown argument: ${arg}`);
