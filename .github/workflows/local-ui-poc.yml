@@ -36,7 +36,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ref="${{ inputs.upstream_ref }}"
+          ref="${{ inputs.upstream_ref || 'v0.6.5' }}"
           if [ "$ref" != "v0.6.5" ]; then
             echo "::error::POC is intentionally pinned to v0.6.5 for the BSD-3-Clause baseline."
             exit 1
