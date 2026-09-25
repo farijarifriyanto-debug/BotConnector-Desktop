@@ -151,6 +151,64 @@ async function promptLocalAi(options) {
   }
 }
 
+function createLocalAi(enabled) {
+  return new LocalAiRuntime({
+    enabled,
+    emit(event, payload) {
+      if (event === 'local-ai:download') {
+        const percent = Number.isFinite(payload?.percent) ? ` ${payload.percent}%` : '';
+        console.log(
+          `[BotConnector] Model download ${payload?.model || ''}: ${payload?.status || 'unknown'}${percent}`,
+        );
+      } else if (event === 'local-ai:runtime-install') {
+        const percent = Number.isFinite(payload?.percent) ? ` ${payload.percent}%` : '';
+        console.log(
+          `[BotConnector] Runtime install: ${payload?.status || 'unknown'}${percent}`,
+        );
+      }
+    },
+  });
+}
+
+async function startLocalUi(localAi, options) {
+  const localServer = await startOfflineServer({
+    localAi,
+    detectHardware,
+    port: options.port,
+    open: !options.noBrowser,
+  });
+  console.log(`[BotConnector] Local browser UI: ${localServer.url}`);
+  console.log(
+    '[BotConnector] This localhost UI keeps working if the internet connection drops.',
+  );
+  return localServer;
+}
+
+async function runOffline(options) {
+  const allowLocalAi = await promptLocalAi(options);
+  if (!allowLocalAi) {
+    throw new Error('Offline mode requires Local AI permission for this session.');
+  }
+
+  const localAi = createLocalAi(true);
+  const localServer = await startLocalUi(localAi, options);
+
+  const shutdown = () => {
+    void localServer.close();
+    localAi.close();
+    console.log('\n[BotConnector] Local offline session stopped.');
+    process.exit(0);
+  };
+  process.once('SIGINT', shutdown);
+  process.once('SIGTERM', shutdown);
+
+  console.log(
+    '[BotConnector] Offline mode is ready. No BotConnector cloud pairing is active.',
+  );
+  const hold = setInterval(() => {}, 60_000);
+  hold.unref();
+}
+
 async function connect(options) {
   const code = await promptForCode(options);
   const allowLocalAi = await promptLocalAi(options);
