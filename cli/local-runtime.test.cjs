@@ -10,6 +10,8 @@ const {
   encodeManagedModel,
   decodeManagedModel,
   chooseGgufGroup,
+  isPathInside,
+  scanExternalGguf,
 } = require('./local-runtime.cjs');
 
 function jsonResponse(status, body) {
@@ -148,6 +150,62 @@ test('aggregates managed, Ollama, and Lemonade models instead of hiding secondar
     );
     assert.ok(models.some((model) => model.id === 'ollama-model:latest'));
     assert.ok(models.some((model) => model.id === 'lemonade-model'));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+
+test('discovers existing GGUF files outside the BotConnector managed model directory', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bc-existing-gguf-'));
+  try {
+    const managed = path.join(root, 'managed');
+    const external = path.join(root, 'hf-cache');
+    const modelDir = path.join(external, 'models--Example--Local', 'snapshots', 'abc');
+    fs.mkdirSync(managed, { recursive: true });
+    fs.mkdirSync(modelDir, { recursive: true });
+    const gguf = path.join(modelDir, 'existing-model-Q4_K_M.gguf');
+    fs.writeFileSync(gguf, 'existing-model');
+    fs.writeFileSync(path.join(modelDir, 'mmproj-model.gguf'), 'projector');
+
+    const rows = await scanExternalGguf([managed, external], managed);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].path, path.resolve(gguf));
+    assert.equal(rows[0].quant, 'Q4_K_M');
+
+    assert.equal(await isPathInside(gguf, [external]), true);
+    assert.equal(await isPathInside(path.join(root, 'outside.gguf'), [external]), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('listModels includes existing local GGUF even when external runtimes are stopped', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bc-existing-list-'));
+  try {
+    const external = path.join(root, 'existing-models');
+    fs.mkdirSync(external, { recursive: true });
+    const gguf = path.join(external, 'legacy-Q5_K_M.gguf');
+    fs.writeFileSync(gguf, 'legacy-model');
+
+    const fetchImpl = async () => {
+      throw new TypeError('runtime offline');
+    };
+    const runtime = new LocalAiRuntime({ enabled: true, fetchImpl, dataDir: path.join(root, 'bc') });
+    runtime.runtimeManager.installed = async () => ({ installed: false });
+    runtime.externalRoots = [external];
+    runtime.externalScanCache = { at: 0, models: [] };
+
+    const models = await runtime.listModels();
+    assert.equal(models.length, 1);
+    assert.equal(models[0].runtime, 'external-gguf');
+    assert.equal(models[0].name, 'legacy-Q5_K_M.gguf');
+    assert.match(models[0].path, /^device:external-gguf:/);
+
+    await assert.rejects(
+      () => runtime.deleteModel(models[0].id, 'external-gguf'),
+      /read-only/i,
+    );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
