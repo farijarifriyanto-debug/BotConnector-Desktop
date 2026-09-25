@@ -7,6 +7,7 @@ const { WebSocket } = require('ws');
 const { DeviceBridge } = require('../desktop/local/device-bridge.cjs');
 const { detectHardware } = require('../desktop/local/hardware.cjs');
 const { LocalLauncher } = require('../desktop/local/launcher.cjs');
+const { LocalAiRuntime } = require('./local-runtime.cjs');
 
 class SessionSettings {
   constructor(seed = {}) {
@@ -31,6 +32,7 @@ function parseArgs(argv) {
     code: '',
     origin: process.env.BOTCONNECTOR_APP_ORIGIN || 'https://app.botconnector.id',
     allowDesktopCommander: false,
+    allowLocalAi: false,
     noPrompt: false,
   };
 
@@ -39,6 +41,7 @@ function parseArgs(argv) {
     if (arg === '--code') options.code = String(args.shift() || '').trim();
     else if (arg === '--origin') options.origin = String(args.shift() || '').trim();
     else if (arg === '--allow-desktop-commander') options.allowDesktopCommander = true;
+    else if (arg === '--allow-local-ai') options.allowLocalAi = true;
     else if (arg === '--no-prompt') options.noPrompt = true;
     else if (arg === '--help' || arg === '-h') options.command = 'help';
     else if (arg === '--version' || arg === '-v') options.command = 'version';
@@ -57,11 +60,13 @@ Connect a laptop or PC to app.botconnector.id without an installer.
 Usage:
   npx https://app.botconnector.id/device-cli.tgz connect
   npx https://app.botconnector.id/device-cli.tgz connect --code ABC123
-  npx https://app.botconnector.id/device-cli.tgz connect --code ABC123 --allow-desktop-commander
+  npx https://app.botconnector.id/device-cli.tgz connect --code ABC123 --allow-local-ai
+  npx https://app.botconnector.id/device-cli.tgz connect --code ABC123 --allow-local-ai --allow-desktop-commander
 
 Options:
   --code <code>                  Pairing code from app.botconnector.id
   --allow-desktop-commander     Allow this session to run Desktop Commander Remote
+  --allow-local-ai              Allow model management and local inference for this session
   --origin <url>                 Override the BotConnector origin
   --no-prompt                    Disable interactive prompts
   -h, --help                     Show help
@@ -71,6 +76,7 @@ Security:
   - Does not open an inbound port on this device.
   - Pairing credentials are kept in process memory for this session only.
   - Close the terminal or press Ctrl+C to disconnect.
+  - Local AI model management and inference require explicit session approval.
   - Arbitrary remote shell access is not available.
 `.trim());
 }
@@ -106,18 +112,43 @@ async function promptDesktopCommander(options) {
   }
 }
 
+async function promptLocalAi(options) {
+  if (options.allowLocalAi) return true;
+  if (options.noPrompt || !stdin.isTTY || !stdout.isTTY) return false;
+
+  const rl = readline.createInterface({ input: stdin, output: stdout });
+  try {
+    const answer = String(await rl.question(
+      'Allow BotConnector to manage local AI models and run local inference for this session? [y/N] '
+    )).trim().toLowerCase();
+    return answer === 'y' || answer === 'yes';
+  } finally {
+    rl.close();
+  }
+}
+
 async function connect(options) {
   const code = await promptForCode(options);
+  const allowLocalAi = await promptLocalAi(options);
   const allowDesktopCommander = await promptDesktopCommander(options);
 
   const settings = new SessionSettings({
     launcherProfiles: {
       'desktop-commander-remote': allowDesktopCommander,
-      'ollama-serve': false,
+      'ollama-serve': allowLocalAi,
     },
   });
 
   const launcher = new LocalLauncher({ settings });
+  const localAi = new LocalAiRuntime({
+    enabled: allowLocalAi,
+    emit(event, payload) {
+      if (event === 'local-ai:download') {
+        const percent = Number.isFinite(payload?.percent) ? ` ${payload.percent}%` : '';
+        console.log(`[BotConnector] Model download ${payload?.model || ''}: ${payload?.status || 'unknown'}${percent}`);
+      }
+    },
+  });
   const tools = { list: () => [] };
 
   let lastState = '';
@@ -126,6 +157,7 @@ async function connect(options) {
     detectHardware,
     tools,
     launcher,
+    localAi,
     cloudBase: options.origin,
     WebSocketImpl: WebSocket,
     emit(event, payload) {
@@ -140,6 +172,9 @@ async function connect(options) {
       if (state === 'CONNECTED') {
         console.log(`[BotConnector] Online as ${payload.deviceName} (${payload.deviceId}).`);
         console.log('[BotConnector] Close the terminal or press Ctrl+C to disconnect.');
+        if (allowLocalAi) {
+          console.log('[BotConnector] Local AI model management and inference are allowed for this session.');
+        }
         if (allowDesktopCommander) {
           console.log('[BotConnector] Desktop Commander Remote is allowed for this session.');
         }
@@ -151,6 +186,7 @@ async function connect(options) {
 
   const shutdown = () => {
     bridge.close();
+    localAi.close();
     launcher.stopAll();
     console.log('\n[BotConnector] Device offline.');
     process.exit(0);
@@ -201,6 +237,7 @@ module.exports = {
   parseArgs,
   promptForCode,
   promptDesktopCommander,
+  promptLocalAi,
   connect,
   main,
 };

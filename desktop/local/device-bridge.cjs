@@ -10,11 +10,12 @@ function wsState(socket) {
 }
 
 class DeviceBridge {
-  constructor({ settings, detectHardware, tools, launcher, emit = () => {}, seal = value => value, open = value => value, cloudBase = 'https://app.botconnector.id', WebSocketImpl = globalThis.WebSocket } = {}) {
+  constructor({ settings, detectHardware, tools, launcher, localAi = null, emit = () => {}, seal = value => value, open = value => value, cloudBase = 'https://app.botconnector.id', WebSocketImpl = globalThis.WebSocket } = {}) {
     this.settings = settings;
     this.detectHardware = detectHardware;
     this.tools = tools;
     this.launcher = launcher;
+    this.localAi = localAi;
     this.emit = emit;
     this.seal = seal;
     this.open = open;
@@ -42,7 +43,7 @@ class DeviceBridge {
 
   async pair(code) {
     const pairingCode = String(code || '').trim().toUpperCase();
-    if (!/^[A-Z0-9-]{6,32}$/.test(pairingCode)) throw new Error('Kode pairing tidak valid.');
+    if (!/^[A-Z0-9-]{6,32}$/.test(pairingCode)) throw new Error('Invalid pairing code.');
     const response = await fetch(`${this.cloudBase}/api/devices/pair/exchange`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', accept: 'application/json' },
@@ -51,7 +52,7 @@ class DeviceBridge {
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || !payload.device_token || !payload.device_id || !payload.ws_url) {
-      throw new Error(payload.error?.message || 'Pairing perangkat gagal.');
+      throw new Error(payload.error?.message || 'Device pairing failed.');
     }
     await this.settings.set('devicePairing', {
       deviceId: String(payload.device_id),
@@ -89,7 +90,33 @@ class DeviceBridge {
         token,
         deviceId: pairing.deviceId,
         deviceName: pairing.deviceName || defaultDeviceName(),
-        capabilities: ['hardware.get', 'launcher.list', 'launcher.start', 'launcher.stop', 'tools.list'],
+        capabilities: [
+          'hardware.get',
+          'launcher.list',
+          'launcher.start',
+          'launcher.stop',
+          'tools.list',
+          ...(this.localAi?.enabled
+            ? [
+                'runtime.status',
+                'runtime.start',
+                'runtime.stop',
+                'runtime.install.start',
+                'runtime.install.status',
+                'runtime.install.list',
+                'models.list',
+                'models.pull.start',
+                'models.pull.status',
+                'models.pull.list',
+                'models.pull.cancel',
+                'models.delete',
+                'model.load',
+                'model.unload',
+                'chat.completions',
+                'chat.cancel',
+              ]
+            : []),
+        ],
         hardware,
       }));
       this.emit('device:changed', this.status());
@@ -131,7 +158,31 @@ class DeviceBridge {
       id: tool.id, name: tool.name, source: tool.source,
       permissionClass: tool.permissionClass, enabled: Boolean(tool.enabled), status: tool.status,
     }));
-    throw new Error('Kemampuan remote tidak diizinkan.');
+    if (method === 'runtime.status') return this.localAi.status();
+    if (method === 'runtime.start') {
+      const runtime = String(params.runtime || 'ollama').toLowerCase();
+      if (runtime !== 'ollama') throw new Error('Only Ollama can be started by Device CLI.');
+      return this.launcher.start('ollama-serve');
+    }
+    if (method === 'runtime.stop') {
+      const runtime = String(params.runtime || 'ollama').toLowerCase();
+      if (runtime !== 'ollama') throw new Error('Only Ollama can be stopped by Device CLI.');
+      return this.launcher.stop('ollama-serve');
+    }
+    if (method === 'runtime.install.start') return this.localAi.startRuntimeInstall(params.backend);
+    if (method === 'runtime.install.status') return this.localAi.runtimeJobStatus(params.id);
+    if (method === 'runtime.install.list') return this.localAi.listRuntimeJobs();
+    if (method === 'models.list') return this.localAi.listModels();
+    if (method === 'models.pull.start') return this.localAi.startPull(params.model);
+    if (method === 'models.pull.status') return this.localAi.jobStatus(params.id);
+    if (method === 'models.pull.list') return this.localAi.listJobs();
+    if (method === 'models.pull.cancel') return this.localAi.cancelPull(params.id);
+    if (method === 'models.delete') return this.localAi.deleteModel(params.model, params.runtime);
+    if (method === 'model.load') return this.localAi.loadModel(params.model, params.runtime);
+    if (method === 'model.unload') return this.localAi.unloadModel(params.model, params.runtime);
+    if (method === 'chat.completions') return this.localAi.chat(params);
+    if (method === 'chat.cancel') return this.localAi.cancelChat(params.id);
+    throw new Error('Remote capability is not allowed.');
   }
 
   reply(id, payload) {
