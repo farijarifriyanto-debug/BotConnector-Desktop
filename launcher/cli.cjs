@@ -74,10 +74,6 @@ function writeState(manifest, stateFile = DEFAULT_STATE_FILE) {
   fs.renameSync(temp, stateFile);
 }
 
-function npxCommand(platform = process.platform) {
-  return platform === 'win32' ? 'npx.cmd' : 'npx';
-}
-
 function buildNpxArgs(packageUrl, argv, { offline = false } = {}) {
   return [
     '--yes',
@@ -86,6 +82,59 @@ function buildNpxArgs(packageUrl, argv, { offline = false } = {}) {
     'botconnector-device',
     ...argv,
   ];
+}
+
+function buildNpmExecArgs(packageUrl, argv, { offline = false } = {}) {
+  return [
+    'exec',
+    '--yes',
+    ...(offline ? ['--offline'] : []),
+    '--package=' + packageUrl,
+    '--',
+    'botconnector-device',
+    ...argv,
+  ];
+}
+
+function assertSafeWindowsCmdArgs(args) {
+  for (const value of args) {
+    if (/[&|<>^%!"\r\n]/.test(String(value))) {
+      throw new Error('Unsupported character in Windows launcher argument.');
+    }
+  }
+}
+
+function resolveNpmInvocation(
+  packageUrl,
+  argv,
+  {
+    offline = false,
+    platform = process.platform,
+    env = process.env,
+    execPath = process.execPath,
+    exists = fs.existsSync,
+  } = {},
+) {
+  const npmExecPath = String(env.npm_execpath || '').trim();
+  if (npmExecPath && /npm-cli\.(?:c?js|mjs)$/i.test(npmExecPath) && exists(npmExecPath)) {
+    return {
+      command: execPath,
+      args: [npmExecPath, ...buildNpmExecArgs(packageUrl, argv, { offline })],
+      via: 'npm-cli',
+    };
+  }
+
+  const npxArgs = buildNpxArgs(packageUrl, argv, { offline });
+  if (platform === 'win32') {
+    assertSafeWindowsCmdArgs(npxArgs);
+    return {
+      command: env.ComSpec || env.COMSPEC || 'cmd.exe',
+      args: ['/d', '/s', '/c', 'npx.cmd', ...npxArgs],
+      via: 'cmd.exe',
+    };
+  }
+
+  return { command: 'npx', args: npxArgs, via: 'npx' };
 }
 
 async function run(argv = process.argv.slice(2), {
@@ -112,15 +161,16 @@ async function run(argv = process.argv.slice(2), {
     }
   }
 
-  const result = spawn(
-    npxCommand(platform),
-    buildNpxArgs(manifest.url, argv, { offline }),
-    {
-      stdio: 'inherit',
-      env: process.env,
-      windowsHide: false,
-    },
-  );
+  const invocation = resolveNpmInvocation(manifest.url, argv, {
+    offline,
+    platform,
+    env: process.env,
+  });
+  const result = spawn(invocation.command, invocation.args, {
+    stdio: 'inherit',
+    env: process.env,
+    windowsHide: false,
+  });
 
   if (result?.error) throw result.error;
   if (result?.signal) {
@@ -147,7 +197,9 @@ module.exports = {
   fetchManifest,
   readState,
   writeState,
-  npxCommand,
   buildNpxArgs,
+  buildNpmExecArgs,
+  assertSafeWindowsCmdArgs,
+  resolveNpmInvocation,
   run,
 };
