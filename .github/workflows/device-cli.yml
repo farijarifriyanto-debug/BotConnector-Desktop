@@ -107,6 +107,12 @@ jobs:
         run: |
           node -e "require('./desktop/local/hardware.cjs').detectHardware().then(h => { console.log(JSON.stringify(h, null, 2)); if (!h.cpu || !h.ramGb || h.platform !== 'win32') process.exit(1); })"
 
+      - name: Smoke test Windows stable launcher
+        shell: pwsh
+        run: |
+          $env:BOTCONNECTOR_DEVICE_LAUNCHER_STATE = Join-Path $env:RUNNER_TEMP "botconnector-launcher-state.json"
+          node launcher/cli.cjs --version
+
       - name: Smoke test Windows Local AI module
         shell: pwsh
         run: |
