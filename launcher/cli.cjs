@@ -115,15 +115,6 @@ function resolveNpmInvocation(
     exists = fs.existsSync,
   } = {},
 ) {
-  const npmExecPath = String(env.npm_execpath || '').trim();
-  if (npmExecPath && /npm-cli\.(?:c?js|mjs)$/i.test(npmExecPath) && exists(npmExecPath)) {
-    return {
-      command: execPath,
-      args: [npmExecPath, ...buildNpmExecArgs(packageUrl, argv, { offline })],
-      via: 'npm-cli',
-    };
-  }
-
   const npxArgs = buildNpxArgs(packageUrl, argv, { offline });
   if (platform === 'win32') {
     assertSafeWindowsCmdArgs(npxArgs);
@@ -131,6 +122,15 @@ function resolveNpmInvocation(
       command: env.ComSpec || env.COMSPEC || 'cmd.exe',
       args: ['/d', '/s', '/c', 'npx.cmd', ...npxArgs],
       via: 'cmd.exe',
+    };
+  }
+
+  const npmExecPath = String(env.npm_execpath || '').trim();
+  if (npmExecPath && /npm-cli\.(?:c?js|mjs)$/i.test(npmExecPath) && exists(npmExecPath)) {
+    return {
+      command: execPath,
+      args: [npmExecPath, ...buildNpmExecArgs(packageUrl, argv, { offline })],
+      via: 'npm-cli',
     };
   }
 

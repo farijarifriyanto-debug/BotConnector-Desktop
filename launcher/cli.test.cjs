@@ -52,20 +52,36 @@ test('builds online and offline npx invocations without version hardcoding', () 
   ]);
 });
 
-test('uses npm CLI through node when npm_execpath is available', () => {
-  const url = 'https://app.botconnector.id/device-cli-v0.4.6.tgz';
+test('uses npm CLI through node on non-Windows when npm_execpath is available', () => {
+  const url = 'https://app.botconnector.id/device-cli-v0.4.8.tgz';
   const invocation = resolveNpmInvocation(url, ['--version'], {
-    platform: 'win32',
-    env: { npm_execpath: 'C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js' },
-    execPath: 'C:\\Program Files\\nodejs\\node.exe',
+    platform: 'linux',
+    env: { npm_execpath: '/usr/lib/node_modules/npm/bin/npm-cli.js' },
+    execPath: '/usr/bin/node',
     exists: () => true,
   });
-  assert.equal(invocation.command, 'C:\\Program Files\\nodejs\\node.exe');
+  assert.equal(invocation.command, '/usr/bin/node');
   assert.deepEqual(invocation.args, [
-    'C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js',
+    '/usr/lib/node_modules/npm/bin/npm-cli.js',
     ...buildNpmExecArgs(url, ['--version']),
   ]);
   assert.equal(invocation.via, 'npm-cli');
+});
+
+test('prefers cmd.exe on Windows even when npm_execpath is inherited from outer npx', () => {
+  const url = 'https://app.botconnector.id/device-cli-v0.4.8.tgz';
+  const invocation = resolveNpmInvocation(url, ['--version'], {
+    platform: 'win32',
+    env: {
+      ComSpec: 'C:\\Windows\\System32\\cmd.exe',
+      npm_execpath: 'C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js',
+    },
+    execPath: 'C:\\Program Files\\nodejs\\node.exe',
+    exists: () => true,
+  });
+  assert.equal(invocation.command, 'C:\\Windows\\System32\\cmd.exe');
+  assert.equal(invocation.via, 'cmd.exe');
+  assert.deepEqual(invocation.args.slice(0, 5), ['/d', '/s', '/c', 'npx.cmd', '--yes']);
 });
 
 test('uses cmd.exe for npx.cmd fallback on Windows instead of spawning .cmd directly', () => {

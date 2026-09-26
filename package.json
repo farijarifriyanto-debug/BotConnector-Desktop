@@ -1,6 +1,6 @@
 {
   "name": "botconnector-device",
-  "version": "0.4.8",
+  "version": "0.4.9",
   "private": true,
   "description": "Installer-free BotConnector local device bridge",
   "main": "cli/botconnector-device.cjs",
