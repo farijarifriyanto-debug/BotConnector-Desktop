@@ -3,10 +3,12 @@ const crypto = require('node:crypto');
 const http = require('node:http');
 const { spawn } = require('node:child_process');
 const defaultCatalog = require('../desktop/local/catalog.cjs');
+const { localUiHtml } = require('./local-ui.cjs');
+const { createDocumentStore } = require('./local-documents.cjs');
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 18765;
-const MAX_BODY_BYTES = 512 * 1024;
+const MAX_BODY_BYTES = 15 * 1024 * 1024;
 
 function sendJson(res, status, payload) {
   const body = Buffer.from(JSON.stringify(payload));
@@ -321,13 +323,14 @@ async function startOfflineServer({
   if (!detectHardware) throw new Error('Hardware detector is required.');
 
   const token = crypto.randomBytes(32).toString('base64url');
+  const documentStore = createDocumentStore();
   const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url || '/', 'http://' + host + ':' + port);
       if (req.method === 'GET' && url.pathname === '/') {
         const address = server.address();
         const actualPort = typeof address === 'object' && address ? address.port : port;
-        sendHtml(res, offlineHtml({ token, host, port: actualPort }));
+        sendHtml(res, localUiHtml({ token, host, port: actualPort }));
         return;
       }
       const address = server.address();
@@ -403,6 +406,10 @@ async function startOfflineServer({
         sendJson(res, 200, { models: await localAi.listModels() });
         return;
       }
+      if (req.method === 'GET' && url.pathname === '/api/documents') {
+        sendJson(res, 200, { documents: documentStore.list() });
+        return;
+      }
       if (req.method === 'GET' && url.pathname === '/api/catalog/search') {
         const payload = await catalog.searchCatalog({
           query: url.searchParams.get('q') || '',
@@ -415,6 +422,14 @@ async function startOfflineServer({
 
       const body = req.method === 'POST' ? await readJson(req) : {};
 
+      if (req.method === 'POST' && url.pathname === '/api/documents') {
+        sendJson(res, 201, await documentStore.add(body));
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/documents/delete') {
+        sendJson(res, 200, { deleted: documentStore.remove(body.id) });
+        return;
+      }
       if (req.method === 'POST' && url.pathname === '/api/catalog/details') {
         const hardware = await detectHardware();
         sendJson(res, 200, await catalog.modelDetails(String(body.id || ''), hardware));
@@ -486,7 +501,23 @@ async function startOfflineServer({
         return;
       }
       if (req.method === 'POST' && url.pathname === '/api/chat') {
-        sendJson(res, 200, await localAi.chat(body));
+        const context = documentStore.buildContext(body.document_ids, 12000);
+        const messages = Array.isArray(body.messages)
+          ? body.messages.map((message) => ({ ...message }))
+          : [];
+        if (context) {
+          let attached = false;
+          for (let i = messages.length - 1; i >= 0; i--) {
+            if (messages[i]?.role === 'user') {
+              messages[i].content = String(messages[i].content || '') +
+                '\n\n[Local attached document context]\n' + context;
+              attached = true;
+              break;
+            }
+          }
+          if (!attached) messages.push({ role: 'user', content: '[Local attached document context]\n' + context });
+        }
+        sendJson(res, 200, await localAi.chat({ ...body, messages }));
         return;
       }
       if (req.method === 'POST' && url.pathname === '/api/chat/cancel') {
