@@ -22,7 +22,9 @@ function inferCapabilities(item) {
 }
 
 function estimateCompatibility(item, hardware) {
-  const params = Number(item.gguf?.total || item.safetensors?.total || 0);
+  // Some GGUF uploads (e.g. NVFP4 packs) report a tiny tensor total; the size in the repo name is the safer floor.
+  const named = String(item.id || item.modelId || '').match(/(?:^|[-_/.])(\d+(?:\.\d+)?)[bB](?=$|[-_.])/);
+  const params = Math.max(Number(item.gguf?.total || item.safetensors?.total || 0), named ? Number(named[1]) * 1e9 : 0);
   const paramsB = params > 0 ? params / 1e9 : null;
   const ramGb = Number(hardware?.ramGb || 0);
   const maxVram = Math.max(0, ...(hardware?.nvidia || []).map(g => Number(g.memoryGb || 0)));
@@ -32,6 +34,11 @@ function estimateCompatibility(item, hardware) {
   const ramBudget = Math.max(0, ramGb - osReserve);
   const vramBudget = maxVram * 0.9;
   let level='no';
+  if (!vramBudget) {
+    // CPU only: fitting in RAM is not enough, large models crawl at a few tokens per second.
+    if (estimatedQ4Gb <= ramBudget) level = paramsB <= 4 ? 'great' : paramsB <= 9 ? 'ok' : 'warn';
+    return {level,paramsB:+paramsB.toFixed(1),estimatedQ4Gb,reason:'estimated-q4-cpu'};
+  }
   if (estimatedQ4Gb <= vramBudget && ramGb >= 8) level='great';
   else if (estimatedQ4Gb <= ramBudget * .75) level='great';
   else if (estimatedQ4Gb <= ramBudget) level='ok';
@@ -54,11 +61,12 @@ async function requestJson(url, token, timeout=20000) {
   } finally { clearTimeout(timer); }
 }
 
-async function searchModels({query='',limit=80,hardware,token}={}) {
+async function searchModels({query='',limit=80,hardware,token,sort='',pipeline=''}={}) {
   const url=new URL(`${HF}/api/models`);
   if (query) url.searchParams.set('search',query);
   url.searchParams.set('filter','gguf');
-  url.searchParams.set('sort',query?'downloads':'trendingScore');
+  url.searchParams.set('sort',sort||(query?'downloads':'trendingScore'));
+  if (pipeline) url.searchParams.set('pipeline_tag',pipeline);
   url.searchParams.set('direction','-1');
   url.searchParams.set('limit',String(Math.min(150,Math.max(1,limit))));
   for (const field of ['author','downloads','likes','tags','pipeline_tag','gated','lastModified','trendingScore','gguf','safetensors']) url.searchParams.append('expand',field);
@@ -67,7 +75,7 @@ async function searchModels({query='',limit=80,hardware,token}={}) {
     id:x.id,author:x.author||String(x.id||'').split('/')[0]||'',downloads:x.downloads||0,likes:x.likes||0,
     lastModified:x.lastModified||x.last_modified||null,tags:Array.isArray(x.tags)?x.tags:[],pipeline_tag:x.pipeline_tag||x.pipelineTag||null,
     gated:x.gated||false,private:Boolean(x.private),trendingScore:x.trendingScore||x.trending_score||0,gguf:x.gguf||null,safetensors:x.safetensors||null,
-    capabilities:inferCapabilities(x),compatibility:estimateCompatibility(x,hardware),url:`${HF}/${x.id}`
+    capabilities:inferCapabilities(x),compatibility:hardware?estimateCompatibility(x,hardware):null,url:`${HF}/${x.id}`
   }));
 }
 

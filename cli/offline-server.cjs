@@ -3,6 +3,7 @@ const crypto = require('node:crypto');
 const http = require('node:http');
 const { spawn } = require('node:child_process');
 const defaultCatalog = require('../desktop/local/catalog.cjs');
+const { recommendModels } = defaultCatalog;
 const { localUiHtml } = require('./local-ui.cjs');
 const { createDocumentStore } = require('./local-documents.cjs');
 
@@ -436,40 +437,7 @@ async function startOfflineServer({
         return;
       }
       if (req.method === 'POST' && url.pathname === '/api/catalog/recommendations') {
-        const hardware = await detectHardware();
-        const result = await catalog.searchCatalog({
-          query: String(body.query || ''),
-          limit: Math.min(24, Math.max(4, Number(body.limit) || 12)),
-        });
-        const candidates = (Array.isArray(result.models) ? result.models : []).slice(0, 12);
-        const enriched = await Promise.all(
-          candidates.map(async (model) => {
-            const id = String(model?.id || model?.modelId || '');
-            if (!id.includes('/')) return { ...model, compatibility: model?.compatibility || null };
-            try {
-              const details = await catalog.modelDetails(id, hardware);
-              return {
-                ...model,
-                capabilities: details?.capabilities || model?.capabilities || null,
-                compatibility: details?.compatibility || model?.compatibility || null,
-              };
-            } catch {
-              return { ...model, compatibility: model?.compatibility || null };
-            }
-          }),
-        );
-        const rank = { great: 0, ok: 1, warn: 2, unknown: 3, no: 4 };
-        enriched.sort((a, b) => {
-          const ar = rank[a?.compatibility?.level] ?? 9;
-          const br = rank[b?.compatibility?.level] ?? 9;
-          if (ar !== br) return ar - br;
-          return Number(b?.downloads || 0) - Number(a?.downloads || 0);
-        });
-        sendJson(res, 200, {
-          hardware,
-          models: enriched,
-          source: result.source,
-        });
+        sendJson(res, 200, await recommendModels(catalog, await detectHardware(), body));
         return;
       }
       if (req.method === 'POST' && url.pathname === '/api/runtime/install') {
