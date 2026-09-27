@@ -280,3 +280,23 @@ test('a busy default port moves to the next free one; a busy explicit --port exp
     new RegExp('Port ' + busy + ' is already in use.*http://127\\.0\\.0\\.1:' + busy + '.*--port'),
   );
 });
+
+test('chat history is stored on disk, so a UI on another port sees the same chats', async (t) => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bc-chats-'));
+  const start = () => startOfflineServer({ localAi: runtimeFixture(), detectHardware: async () => ({}), port: 0, open: false, dataDir });
+  const a = await start();
+  t.after(() => a.close());
+  const h = (s) => ({ 'content-type': 'application/json', 'x-botconnector-local-token': s.token });
+  assert.deepEqual(await (await fetch(a.url + '/api/chats', { headers: h(a) })).json(), { state: null, settings: null });
+  const saved = { state: { active: 'c1', chats: [{ id: 'c1', title: 'siapa anda', messages: [{ role: 'user', content: 'siapa anda' }] }] }, settings: { theme: 'light' } };
+  assert.equal((await fetch(a.url + '/api/chats', { method: 'POST', headers: h(a), body: JSON.stringify(saved) })).status, 200);
+  const b = await start();
+  t.after(() => b.close());
+  assert.notEqual(a.port, b.port);
+  assert.deepEqual(await (await fetch(b.url + '/api/chats', { headers: h(b) })).json(), saved);
+  if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(dataDir, 'local-chats.json')).mode & 0o777, 0o600);
+  assert.equal((await fetch(b.url + '/api/chats', { method: 'POST', headers: h(b), body: JSON.stringify({ state: 'nope' }) })).status, 400);
+});

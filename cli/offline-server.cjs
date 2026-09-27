@@ -1,5 +1,8 @@
 
 const crypto = require('node:crypto');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const http = require('node:http');
 const { spawn } = require('node:child_process');
 const defaultCatalog = require('../desktop/local/catalog.cjs');
@@ -318,6 +321,7 @@ async function startOfflineServer({
   host = DEFAULT_HOST,
   port = DEFAULT_PORT,
   portFallback = 0,
+  dataDir = process.env.BOTCONNECTOR_DEVICE_DATA_DIR || path.join(os.homedir(), '.botconnector-device'),
   open = true,
   catalog = defaultCatalog,
 } = {}) {
@@ -326,6 +330,7 @@ async function startOfflineServer({
 
   const token = crypto.randomBytes(32).toString('base64url');
   const documentStore = createDocumentStore();
+  const chatsFile = path.join(dataDir, 'local-chats.json');
   const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url || '/', 'http://' + host + ':' + port);
@@ -408,6 +413,13 @@ async function startOfflineServer({
         sendJson(res, 200, { models: await localAi.listModels() });
         return;
       }
+      // Chat history lives on disk, not in localStorage: the browser keys storage by port, and the port can move.
+      if (req.method === 'GET' && url.pathname === '/api/chats') {
+        let saved = {};
+        try { saved = JSON.parse(fs.readFileSync(chatsFile, 'utf8')); } catch {}
+        sendJson(res, 200, { state: saved.state ?? null, settings: saved.settings ?? null });
+        return;
+      }
       if (req.method === 'GET' && url.pathname === '/api/documents') {
         sendJson(res, 200, { documents: documentStore.list() });
         return;
@@ -424,6 +436,19 @@ async function startOfflineServer({
 
       const body = req.method === 'POST' ? await readJson(req) : {};
 
+      if (req.method === 'POST' && url.pathname === '/api/chats') {
+        const isObject = (v) => v && typeof v === 'object' && !Array.isArray(v);
+        if (!isObject(body.state) || !Array.isArray(body.state.chats) || (body.settings != null && !isObject(body.settings))) {
+          sendJson(res, 400, { error: { message: 'Invalid chat history payload.' } });
+          return;
+        }
+        fs.mkdirSync(dataDir, { recursive: true });
+        const tmp = chatsFile + '.' + process.pid + '.tmp';
+        fs.writeFileSync(tmp, JSON.stringify({ state: body.state, settings: body.settings ?? null }), { mode: 0o600 });
+        fs.renameSync(tmp, chatsFile);
+        sendJson(res, 200, { saved: true });
+        return;
+      }
       if (req.method === 'POST' && url.pathname === '/api/documents') {
         sendJson(res, 201, await documentStore.add(body));
         return;

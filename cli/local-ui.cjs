@@ -68,7 +68,17 @@ function app(TOKEN, renderMarkdown) {
   let streaming = null; // { requestId, controller, chatId, message }
   let filter = '';
 
-  const persist = () => save('botconnector-local-chats-v1', state);
+  // The disk copy (via /api/chats) is the source of truth; localStorage is only a fast first paint.
+  let diskTimer = 0;
+  let diskLoaded = false; // never write before reading: a fresh port would overwrite the history with an empty chat
+  const saveToDisk = () => {
+    if (!diskLoaded) return;
+    clearTimeout(diskTimer);
+    diskTimer = setTimeout(() => {
+      fetch('/api/chats', { method: 'POST', headers: HEADERS, body: JSON.stringify({ state, settings }) }).catch(() => {});
+    }, 400);
+  };
+  const persist = () => { save('botconnector-local-chats-v1', state); saveToDisk(); };
   const activeChat = () => state.chats.find((c) => c.id === state.active) || null;
   function ensureChat() {
     let c = activeChat();
@@ -325,7 +335,8 @@ function app(TOKEN, renderMarkdown) {
       const sel = $('modelSelect');
       const want = sel.value || settings.model;
       sel.innerHTML = models.length ? '' : '<option value="">No local model — open Models</option>';
-      for (const x of models) {
+      // Embedding and rerank models are listed under Models, but they cannot chat.
+      for (const x of models.filter((m) => !/embed|rerank/i.test((m.name || '') + ' ' + (m.id || '')))) {
         const o = document.createElement('option');
         o.value = x.path;
         o.textContent = (x.name || x.id) + (x.quant ? ' · ' + x.quant : '') + ' · ' + (x.source || x.runtime || 'local');
@@ -420,7 +431,7 @@ function app(TOKEN, renderMarkdown) {
     $('temperature').value = settings.temperature;
     $('tempValue').textContent = Number(settings.temperature).toFixed(1);
   }
-  const persistSettings = () => save('botconnector-local-settings-v1', settings);
+  const persistSettings = () => { save('botconnector-local-settings-v1', settings); saveToDisk(); };
 
   const open = (id) => { $(id).classList.add('open'); $('overlay').classList.add('open'); };
   const close = () => { for (const el of document.querySelectorAll('.panel.open,.overlay.open')) el.classList.remove('open'); };
@@ -449,10 +460,27 @@ function app(TOKEN, renderMarkdown) {
   for (const ev of ['dragleave', 'drop']) composer.addEventListener(ev, (e) => { e.preventDefault(); composer.classList.remove('drag'); });
   composer.addEventListener('drop', (e) => uploadFiles([...e.dataTransfer.files]).catch((err) => alert(err.message)));
 
+  async function loadFromDisk() {
+    let saved;
+    try { saved = await api('/api/chats'); } catch { return; } // disk unavailable: stay on browser storage only
+    diskLoaded = true;
+    if (saved.state && Array.isArray(saved.state.chats)) {
+      if (streaming) return;
+      state = saved.state;
+      if (saved.settings) settings = { ...settings, ...saved.settings };
+      save('botconnector-local-chats-v1', state);
+      applySettings();
+      renderAll();
+    } else if (state.chats.some((c) => c.messages.length)) {
+      saveToDisk(); // first run of this version: move this browser's history to disk
+    }
+  }
+
   applySettings();
   ensureChat();
   renderAll();
   refresh();
+  loadFromDisk();
 }
 
 function localUiHtml({ token, host, port }) {
