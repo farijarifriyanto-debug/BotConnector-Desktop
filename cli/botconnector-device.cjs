@@ -8,6 +8,7 @@ const { DeviceBridge } = require('../desktop/local/device-bridge.cjs');
 const { detectHardware } = require('../desktop/local/hardware.cjs');
 const { LocalLauncher } = require('../desktop/local/launcher.cjs');
 const { LocalAiRuntime } = require('./local-runtime.cjs');
+const { ToolRegistry } = require('../desktop/local/tools.cjs');
 const { startOfflineServer, DEFAULT_PORT } = require('./offline-server.cjs');
 
 const PUBLIC_PACKAGE_URL = 'https://app.botconnector.id/device-cli-launcher-v1.0.2.tgz';
@@ -171,6 +172,25 @@ function createLocalAi(enabled) {
   });
 }
 
+async function createToolRegistry() {
+  const registry = new ToolRegistry({
+    emit(event, payload) {
+      if (event === 'mcp:changed') {
+        const ready = Array.isArray(payload)
+          ? payload.filter(server => server?.status === 'READY').length
+          : 0;
+        if (ready) console.log(`[BotConnector] MCP servers ready: ${ready}`);
+      }
+    },
+  });
+  try {
+    await registry.loadMcpConfig();
+  } catch (error) {
+    console.error(`[BotConnector] MCP config was not loaded: ${error?.message || error}`);
+  }
+  return registry;
+}
+
 async function startLocalUi(localAi, options) {
   const localServer = await startOfflineServer({
     localAi,
@@ -226,7 +246,7 @@ async function connect(options) {
 
   const launcher = new LocalLauncher({ settings });
   const localAi = createLocalAi(allowLocalAi);
-  const tools = { list: () => [] };
+  const tools = await createToolRegistry();
 
   let localServer = null;
   if (allowLocalAi) {
@@ -279,6 +299,7 @@ async function connect(options) {
     bridge.close();
     if (localServer) void localServer.close();
     localAi.close();
+    void tools.close();
     launcher.stopAll();
     console.log('\n[BotConnector] Device offline.');
     process.exit(0);
@@ -337,6 +358,7 @@ module.exports = {
   promptDesktopCommander,
   promptLocalAi,
   createLocalAi,
+  createToolRegistry,
   startLocalUi,
   runOffline,
   connect,
