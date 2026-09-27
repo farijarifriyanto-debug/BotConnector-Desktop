@@ -77,7 +77,49 @@ function normalizeMessages(messages) {
     const content = message?.content == null ? '' : String(message.content);
     total += content.length;
     if (total > MAX_CHAT_CHARS) throw new Error('Local chat payload is too large.');
-    return { role, content };
+    const normalized = { role, content };
+    if (role === 'tool' && message?.tool_call_id) {
+      normalized.tool_call_id = String(message.tool_call_id).slice(0, 256);
+    }
+    if (role === 'assistant' && Array.isArray(message?.tool_calls)) {
+      normalized.tool_calls = message.tool_calls.slice(0, 16).map((call) => {
+        const args =
+          call?.function?.arguments && typeof call.function.arguments === 'object'
+            ? JSON.stringify(call.function.arguments)
+            : String(call?.function?.arguments || '{}');
+        total += args.length;
+        if (total > MAX_CHAT_CHARS) throw new Error('Local chat payload is too large.');
+        return {
+          id: String(call?.id || crypto.randomUUID()).slice(0, 256),
+          type: 'function',
+          function: {
+            name: String(call?.function?.name || '').slice(0, 256),
+            arguments: args,
+          },
+        };
+      });
+    }
+    return normalized;
+  });
+}
+
+function normalizeTools(tools) {
+  if (!Array.isArray(tools)) return [];
+  return tools.slice(0, 24).map((tool) => {
+    const fn = tool?.function || {};
+    const name = String(fn.name || '').trim();
+    if (!name || name.length > 256) throw new Error('Invalid local tool name.');
+    return {
+      type: 'function',
+      function: {
+        name,
+        description: String(fn.description || '').slice(0, 2000),
+        parameters:
+          fn.parameters && typeof fn.parameters === 'object' && !Array.isArray(fn.parameters)
+            ? fn.parameters
+            : { type: 'object', properties: {} },
+      },
+    };
   });
 }
 
@@ -1297,10 +1339,11 @@ class LocalAiRuntime {
     return { content, reasoning, usage };
   }
 
-  async chat({ model, messages, runtime: runtimeHint = '', options = {}, request_id: requestId = '', onDelta } = {}) {
+  async chat({ model, messages, runtime: runtimeHint = '', options = {}, request_id: requestId = '', onDelta, tools = [], tool_choice: toolChoice = 'auto' } = {}) {
     this.assertEnabled();
     const modelName = validModelName(model);
     const normalized = normalizeMessages(messages);
+    const toolDefs = normalizeTools(tools);
     const runtime = runtimeHint || (await this.detect())?.kind;
     if (!runtime) throw new Error('No supported local AI runtime is available.');
     this.clearIdleTimer();
@@ -1318,7 +1361,13 @@ class LocalAiRuntime {
         await this.loadModel(modelName, runtime);
       }
       this.clearIdleTimer();
-      const body = { model: 'botconnector-local', messages: normalized, stream, temperature };
+      const body = {
+        model: 'botconnector-local',
+        messages: normalized,
+        stream,
+        temperature,
+        ...(toolDefs.length ? { tools: toolDefs, tool_choice: toolChoice === 'none' ? 'none' : 'auto' } : {}),
+      };
       const url = `${MANAGED_LLAMA_BASE}/v1/chat/completions`;
       let result;
       if (stream) {
@@ -1329,8 +1378,10 @@ class LocalAiRuntime {
           { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal },
           15 * 60 * 1000,
         );
+        const message = payload?.choices?.[0]?.message || {};
         result = {
-          content: String(payload?.choices?.[0]?.message?.content || ''),
+          content: String(message?.content || ''),
+          tool_calls: Array.isArray(message?.tool_calls) ? message.tool_calls : [],
           model: modelName,
           runtime,
           usage: payload?.usage,
@@ -1353,6 +1404,7 @@ class LocalAiRuntime {
           temperature,
           ...(options?.num_ctx ? { num_ctx: Math.max(512, Math.min(262144, Number(options.num_ctx) || 4096)) } : {}),
         },
+        ...(toolDefs.length ? { tools: toolDefs } : {}),
       };
       let payload;
       let content = '';
@@ -1375,6 +1427,7 @@ class LocalAiRuntime {
       }
       const result = {
         content,
+        tool_calls: Array.isArray(payload?.message?.tool_calls) ? payload.message.tool_calls : [],
         model: modelName,
         runtime: 'ollama',
         usage: {
@@ -1388,7 +1441,13 @@ class LocalAiRuntime {
 
     await this.loadModel(modelName, 'lemonade');
     this.clearIdleTimer();
-    const body = { model: modelName, messages: normalized, stream, temperature };
+    const body = {
+      model: modelName,
+      messages: normalized,
+      stream,
+      temperature,
+      ...(toolDefs.length ? { tools: toolDefs, tool_choice: toolChoice === 'none' ? 'none' : 'auto' } : {}),
+    };
     const url = `${LEMONADE_BASE}/v1/chat/completions`;
     let result;
     if (stream) {
@@ -1399,8 +1458,10 @@ class LocalAiRuntime {
         { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal },
         15 * 60 * 1000,
       );
+      const message = payload?.choices?.[0]?.message || {};
       result = {
-        content: String(payload?.choices?.[0]?.message?.content || ''),
+        content: String(message?.content || ''),
+        tool_calls: Array.isArray(message?.tool_calls) ? message.tool_calls : [],
         model: modelName,
         runtime: 'lemonade',
         usage: payload?.usage,
