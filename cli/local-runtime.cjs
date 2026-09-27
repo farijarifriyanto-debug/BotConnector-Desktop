@@ -1244,7 +1244,60 @@ class LocalAiRuntime {
     return { loaded: false, model: modelName, runtime };
   }
 
-  async chat({ model, messages, runtime: runtimeHint = '', options = {}, request_id: requestId = '' } = {}) {
+  // Reads a streamed response line by line (SSE "data:" lines or NDJSON), however the chunks are split.
+  async streamLines(url, body, signal, onLine) {
+    const response = await this.fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      signal,
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw new Error('Local runtime returned HTTP ' + response.status + (text ? ': ' + text.slice(0, 300) : ''));
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let newline;
+      while ((newline = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, newline).trim();
+        buffer = buffer.slice(newline + 1);
+        if (line) onLine(line);
+      }
+    }
+    if (buffer.trim()) onLine(buffer.trim());
+  }
+
+  async streamOpenAi(url, body, signal, onDelta) {
+    let content = '';
+    let reasoning = '';
+    let usage;
+    await this.streamLines(url, body, signal, (line) => {
+      if (!line.startsWith('data:')) return;
+      const data = line.slice(5).trim();
+      if (data === '[DONE]') return;
+      let chunk;
+      try { chunk = JSON.parse(data); } catch { return; }
+      const delta = chunk?.choices?.[0]?.delta || {};
+      if (delta.reasoning_content) {
+        reasoning += delta.reasoning_content;
+        onDelta({ reasoning: String(delta.reasoning_content) });
+      }
+      if (delta.content) {
+        content += delta.content;
+        onDelta({ content: String(delta.content) });
+      }
+      if (chunk?.usage) usage = chunk.usage;
+    });
+    return { content, reasoning, usage };
+  }
+
+  async chat({ model, messages, runtime: runtimeHint = '', options = {}, request_id: requestId = '', onDelta } = {}) {
     this.assertEnabled();
     const modelName = validModelName(model);
     const normalized = normalizeMessages(messages);
@@ -1255,6 +1308,9 @@ class LocalAiRuntime {
     const id = String(requestId || crypto.randomUUID());
     const controller = new AbortController();
     this.chatControllers.set(id, controller);
+    const t = Number(options?.temperature);
+    const temperature = Number.isFinite(t) ? Math.min(2, Math.max(0, t)) : 0.7;
+    const stream = typeof onDelta === 'function';
 
     try {
     if (runtime === 'llamacpp' || runtime === 'external-gguf') {
@@ -1262,27 +1318,24 @@ class LocalAiRuntime {
         await this.loadModel(modelName, runtime);
       }
       this.clearIdleTimer();
-      const payload = await this.fetchJson(
-        `${MANAGED_LLAMA_BASE}/v1/chat/completions`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            model: 'botconnector-local',
-            messages: normalized,
-            stream: false,
-            temperature: 0.7,
-          }),
-          signal: controller.signal,
-        },
-        15 * 60 * 1000,
-      );
-      const result = {
-        content: String(payload?.choices?.[0]?.message?.content || ''),
-        model: modelName,
-        runtime,
-        usage: payload?.usage,
-      };
+      const body = { model: 'botconnector-local', messages: normalized, stream, temperature };
+      const url = `${MANAGED_LLAMA_BASE}/v1/chat/completions`;
+      let result;
+      if (stream) {
+        result = { ...(await this.streamOpenAi(url, body, controller.signal, onDelta)), model: modelName, runtime };
+      } else {
+        const payload = await this.fetchJson(
+          url,
+          { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal },
+          15 * 60 * 1000,
+        );
+        result = {
+          content: String(payload?.choices?.[0]?.message?.content || ''),
+          model: modelName,
+          runtime,
+          usage: payload?.usage,
+        };
+      }
       this.scheduleIdleUnload(runtime, modelName);
       return result;
     }
@@ -1291,31 +1344,37 @@ class LocalAiRuntime {
       await this.assertOllamaModelLocal(modelName);
       const base = await this.findOllamaBase();
       if (!base) throw new Error('Ollama runtime unavailable.');
-      const payload = await this.fetchJson(
-        base + '/api/chat',
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            model: modelName,
-            messages: normalized,
-            stream: false,
-            keep_alive: options?.keep_alive || '5m',
-            options: options?.num_ctx
-              ? {
-                  num_ctx: Math.max(
-                    512,
-                    Math.min(262144, Number(options.num_ctx) || 4096),
-                  ),
-                }
-              : undefined,
-          }),
-          signal: controller.signal,
+      const body = {
+        model: modelName,
+        messages: normalized,
+        stream,
+        keep_alive: options?.keep_alive || '5m',
+        options: {
+          temperature,
+          ...(options?.num_ctx ? { num_ctx: Math.max(512, Math.min(262144, Number(options.num_ctx) || 4096)) } : {}),
         },
-        15 * 60 * 1000,
-      );
+      };
+      let payload;
+      let content = '';
+      if (stream) {
+        // Ollama streams NDJSON: one object per line, the last one (done: true) carries the token counts.
+        await this.streamLines(base + '/api/chat', body, controller.signal, (line) => {
+          let chunk;
+          try { chunk = JSON.parse(line); } catch { return; }
+          const piece = String(chunk?.message?.content || '');
+          if (piece) { content += piece; onDelta({ content: piece }); }
+          if (chunk?.done) payload = chunk;
+        });
+      } else {
+        payload = await this.fetchJson(
+          base + '/api/chat',
+          { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal },
+          15 * 60 * 1000,
+        );
+        content = String(payload?.message?.content || '');
+      }
       const result = {
-        content: String(payload?.message?.content || ''),
+        content,
         model: modelName,
         runtime: 'ollama',
         usage: {
@@ -1329,22 +1388,24 @@ class LocalAiRuntime {
 
     await this.loadModel(modelName, 'lemonade');
     this.clearIdleTimer();
-    const payload = await this.fetchJson(
-      `${LEMONADE_BASE}/v1/chat/completions`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ model: modelName, messages: normalized, stream: false }),
-        signal: controller.signal,
-      },
-      15 * 60 * 1000,
-    );
-    const result = {
-      content: String(payload?.choices?.[0]?.message?.content || ''),
-      model: modelName,
-      runtime: 'lemonade',
-      usage: payload?.usage,
-    };
+    const body = { model: modelName, messages: normalized, stream, temperature };
+    const url = `${LEMONADE_BASE}/v1/chat/completions`;
+    let result;
+    if (stream) {
+      result = { ...(await this.streamOpenAi(url, body, controller.signal, onDelta)), model: modelName, runtime: 'lemonade' };
+    } else {
+      const payload = await this.fetchJson(
+        url,
+        { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal },
+        15 * 60 * 1000,
+      );
+      result = {
+        content: String(payload?.choices?.[0]?.message?.content || ''),
+        model: modelName,
+        runtime: 'lemonade',
+        usage: payload?.usage,
+      };
+    }
     this.scheduleIdleUnload('lemonade', modelName);
     return result;
     } finally {

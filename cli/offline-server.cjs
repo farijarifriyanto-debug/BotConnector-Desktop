@@ -317,6 +317,7 @@ async function startOfflineServer({
   detectHardware,
   host = DEFAULT_HOST,
   port = DEFAULT_PORT,
+  portFallback = 0,
   open = true,
   catalog = defaultCatalog,
 } = {}) {
@@ -485,6 +486,24 @@ async function startOfflineServer({
           }
           if (!attached) messages.push({ role: 'user', content: '[Local attached document context]\n' + context });
         }
+        if (body.stream === true) {
+          // Server-sent events so the UI can render the answer while the model is still writing it.
+          res.writeHead(200, {
+            'content-type': 'text/event-stream; charset=utf-8',
+            'cache-control': 'no-store',
+            'x-content-type-options': 'nosniff',
+            'referrer-policy': 'no-referrer',
+          });
+          const event = (payload) => res.write('data: ' + JSON.stringify(payload) + '\n\n');
+          try {
+            const result = await localAi.chat({ ...body, messages, onDelta: event });
+            event({ done: true, ...result });
+          } catch (error) {
+            event({ error: { message: String(error?.message || error) } });
+          }
+          res.end();
+          return;
+        }
         sendJson(res, 200, await localAi.chat({ ...body, messages }));
         return;
       }
@@ -501,14 +520,29 @@ async function startOfflineServer({
     }
   });
 
-  await new Promise((resolve, reject) => {
+  const listenOn = (p) => new Promise((resolve, reject) => {
     const onError = (error) => reject(error);
     server.once('error', onError);
-    server.listen(port, host, () => {
+    server.listen(p, host, () => {
       server.off('error', onError);
       resolve();
     });
   });
+  // Another Device CLI (e.g. a connect session) often already owns the default port: take the next free one.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await listenOn(port + attempt);
+      break;
+    } catch (error) {
+      if (error?.code !== 'EADDRINUSE' || port === 0) throw error;
+      if (attempt >= portFallback) {
+        throw new Error(
+          'Port ' + port + ' is already in use, probably by another BotConnector Device CLI. ' +
+          'Open http://' + host + ':' + port + ' in your browser, close the other terminal, or start with --port <number>.',
+        );
+      }
+    }
+  }
 
   const address = server.address();
   const actualPort = typeof address === 'object' && address ? address.port : port;

@@ -11,7 +11,8 @@ test('defaults to connect and production BotConnector origin', () => {
   assert.equal(parsed.allowLocalAi, false);
   assert.equal(parsed.port, 18765);
   assert.equal(parsed.noBrowser, false);
-  assert.equal(PUBLIC_PACKAGE_URL, 'https://app.botconnector.id/device-cli.tgz');
+  // Versioned: npx reuses whatever it cached for an unchanging URL, so a fixed URL never updates.
+  assert.equal(PUBLIC_PACKAGE_URL, 'https://app.botconnector.id/device-cli-launcher-v1.0.2.tgz');
 });
 
 test('parses pairing and explicit session permission', () => {

@@ -227,3 +227,56 @@ test('OpenAI-compatible local API lists runnable models and chats without cloud 
   assert.equal(chatPayload.object, 'chat.completion');
   assert.equal(chatPayload.choices[0].message.content, 'offline:hello');
 });
+
+test('/api/chat streams deltas as server-sent events when stream is true', async (t) => {
+  const localAi = {
+    ...runtimeFixture(),
+    chat: async ({ onDelta }) => {
+      onDelta({ reasoning: 'hmm' });
+      onDelta({ content: 'Ha' });
+      onDelta({ content: 'lo' });
+      return { content: 'Halo', reasoning: 'hmm', usage: { completion_tokens: 2 } };
+    },
+  };
+  const server = await startOfflineServer({ localAi, detectHardware: async () => ({}), port: 0, open: false });
+  t.after(() => server.close());
+  const res = await fetch(server.url + '/api/chat', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-botconnector-local-token': server.token },
+    body: JSON.stringify({ model: 'm1', runtime: 'test', stream: true, messages: [{ role: 'user', content: 'hai' }] }),
+  });
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /text\/event-stream/);
+  const events = (await res.text()).split('\n\n').filter(Boolean).map((e) => JSON.parse(e.replace(/^data: /, '')));
+  assert.deepEqual(events.slice(0, 3), [{ reasoning: 'hmm' }, { content: 'Ha' }, { content: 'lo' }]);
+  assert.equal(events[3].done, true);
+  assert.equal(events[3].content, 'Halo');
+
+  const failing = await startOfflineServer({
+    localAi: { ...runtimeFixture(), chat: async () => { throw new Error('model crashed'); } },
+    detectHardware: async () => ({}), port: 0, open: false,
+  });
+  t.after(() => failing.close());
+  const bad = await fetch(failing.url + '/api/chat', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-botconnector-local-token': failing.token },
+    body: JSON.stringify({ model: 'm1', runtime: 'test', stream: true, messages: [{ role: 'user', content: 'hai' }] }),
+  });
+  assert.deepEqual(JSON.parse((await bad.text()).trim().replace(/^data: /, '')), { error: { message: 'model crashed' } });
+});
+
+test('a busy default port moves to the next free one; a busy explicit --port explains what to do', async (t) => {
+  const net = require('node:net');
+  const blocker = net.createServer();
+  await new Promise((r) => blocker.listen(0, '127.0.0.1', r));
+  t.after(() => blocker.close());
+  const busy = blocker.address().port;
+  const server = await startOfflineServer({ localAi: runtimeFixture(), detectHardware: async () => ({}), port: busy, portFallback: 5, open: false });
+  t.after(() => server.close());
+  assert.notEqual(server.port, busy);
+  assert.ok(server.port > busy && server.port <= busy + 5);
+  await assert.rejects(
+    startOfflineServer({ localAi: runtimeFixture(), detectHardware: async () => ({}), port: busy, portFallback: 0, open: false }),
+    new RegExp('Port ' + busy + ' is already in use.*http://127\\.0\\.0\\.1:' + busy + '.*--port'),
+  );
+});

@@ -10,7 +10,7 @@ const { LocalLauncher } = require('../desktop/local/launcher.cjs');
 const { LocalAiRuntime } = require('./local-runtime.cjs');
 const { startOfflineServer, DEFAULT_PORT } = require('./offline-server.cjs');
 
-const PUBLIC_PACKAGE_URL = 'https://app.botconnector.id/device-cli.tgz';
+const PUBLIC_PACKAGE_URL = 'https://app.botconnector.id/device-cli-launcher-v1.0.2.tgz';
 
 class SessionSettings {
   constructor(seed = {}) {
@@ -55,6 +55,7 @@ function parseArgs(argv) {
         throw new Error('Invalid --port value. Use 1-65535.');
       }
       options.port = value;
+      options.portExplicit = true;
     }
     else if (arg === '--help' || arg === '-h') options.command = 'help';
     else if (arg === '--version' || arg === '-v') options.command = 'version';
@@ -175,6 +176,8 @@ async function startLocalUi(localAi, options) {
     localAi,
     detectHardware,
     port: options.port,
+    // An explicit --port is respected exactly; the default port may move to the next free one.
+    portFallback: options.portExplicit ? 0 : 10,
     open: !options.noBrowser,
   });
   console.log(`[BotConnector] Local browser UI: ${localServer.url}`);
