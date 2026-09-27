@@ -334,7 +334,11 @@ class ToolRegistry {
     const server = {
       id, name: String(definition.name || 'Local MCP fixture'), transport: 'stdio',
       command: definition.command || process.env.BOTCONNECTOR_NODE || 'node',
-      args: Array.isArray(definition.args) ? definition.args.map(String) : [path.join(__dirname, 'mcp-fixture.cjs')],
+      args: Array.isArray(definition.args)
+        ? definition.args.map(String)
+        : definition.command
+          ? []
+          : [path.join(__dirname, 'mcp-fixture.cjs')],
       cwd: definition.cwd || process.cwd(), enabled: definition.enabled !== false,
       status: 'STARTING', tools: [], error: null,
     };
