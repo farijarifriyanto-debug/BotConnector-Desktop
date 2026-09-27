@@ -180,6 +180,57 @@ test('detects Ollama, exposes only verified local models, and chats locally', as
   }
 });
 
+test('passes function tools to Ollama and preserves returned tool calls', async () => {
+  let sent;
+  const fetchImpl = async (url, init = {}) => {
+    if (String(url).endsWith('/api/chat')) {
+      sent = JSON.parse(init.body);
+      return jsonResponse(200, {
+        message: {
+          content: '',
+          tool_calls: [
+            {
+              id: 'call-search',
+              type: 'function',
+              function: { name: 'web_search', arguments: { query: 'BotConnector' } },
+            },
+          ],
+        },
+        prompt_eval_count: 8,
+        eval_count: 3,
+      });
+    }
+    throw new Error('Unexpected URL ' + url);
+  };
+  const runtime = new LocalAiRuntime({ enabled: true, fetchImpl });
+  runtime.assertOllamaModelLocal = async (model) => model;
+  runtime.findOllamaBase = async () => 'http://127.0.0.1:11434';
+
+  const result = await runtime.chat({
+    model: 'qwen:test',
+    runtime: 'ollama',
+    messages: [{ role: 'user', content: 'search the web' }],
+    tools: [
+      {
+        type: 'function',
+        function: {
+          name: 'web_search',
+          description: 'Search the public web',
+          parameters: {
+            type: 'object',
+            properties: { query: { type: 'string' } },
+            required: ['query'],
+          },
+        },
+      },
+    ],
+  });
+
+  assert.equal(sent.tools[0].function.name, 'web_search');
+  assert.equal(result.tool_calls[0].function.name, 'web_search');
+  assert.equal(result.content, '');
+});
+
 test('falls back to Lemonade when Ollama is unavailable', async () => {
   const fetchImpl = async (url) => {
     if (url.endsWith('/api/tags')) throw new TypeError('Failed to fetch');
