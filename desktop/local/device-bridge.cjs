@@ -1,4 +1,5 @@
 const os = require('node:os');
+const defaultCatalog = require('./catalog.cjs');
 
 function defaultDeviceName() {
   return os.hostname() || 'BotConnector device';
@@ -10,12 +11,13 @@ function wsState(socket) {
 }
 
 class DeviceBridge {
-  constructor({ settings, detectHardware, tools, launcher, localAi = null, emit = () => {}, seal = value => value, open = value => value, cloudBase = 'https://app.botconnector.id', WebSocketImpl = globalThis.WebSocket } = {}) {
+  constructor({ settings, detectHardware, tools, launcher, localAi = null, catalog = defaultCatalog, emit = () => {}, seal = value => value, open = value => value, cloudBase = 'https://app.botconnector.id', WebSocketImpl = globalThis.WebSocket } = {}) {
     this.settings = settings;
     this.detectHardware = detectHardware;
     this.tools = tools;
     this.launcher = launcher;
     this.localAi = localAi;
+    this.catalog = catalog;
     this.emit = emit;
     this.seal = seal;
     this.open = open;
@@ -151,6 +153,8 @@ class DeviceBridge {
   }
   async execute(method, params) {
     if (method === 'hardware.get') return this.detectHardware();
+    // Read-only public catalog lookup ranked for this device's hardware; no local AI permission needed.
+    if (method === 'catalog.recommendations') return defaultCatalog.recommendModels(this.catalog, await this.detectHardware(), params);
     if (method === 'launcher.list') return this.launcher.list();
     if (method === 'launcher.start') return this.launcher.start(params.id);
     if (method === 'launcher.stop') return this.launcher.stop(params.id);

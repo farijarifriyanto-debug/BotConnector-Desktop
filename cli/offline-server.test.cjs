@@ -118,6 +118,9 @@ test('Local UI catalog search and recommendations use detected hardware', async 
         models: [
           { id: 'Example/Fast-GGUF', downloads: 1000 },
           { id: 'Example/Heavy-GGUF', downloads: 5000 },
+          { id: 'Example/Image-GGUF', downloads: 9000 },
+          { id: 'Example/Huge-GGUF', downloads: 9500 },
+          { id: 'Example/Chat-Uncensored-GGUF', downloads: 9900 },
         ],
       };
     },
@@ -125,9 +128,9 @@ test('Local UI catalog search and recommendations use detected hardware', async 
       calls.push({ kind: 'details', id, hardware });
       return {
         id,
-        capabilities: { chat: true },
+        capabilities: { chat: !id.includes('Image') },
         compatibility: {
-          level: id.includes('Fast') ? 'great' : 'warn',
+          level: id.includes('Fast') ? 'great' : id.includes('Huge') ? 'no' : 'warn',
           estimatedQ4Gb: id.includes('Fast') ? 2.5 : 18,
         },
       };
@@ -151,7 +154,7 @@ test('Local UI catalog search and recommendations use detected hardware', async 
   const search = await fetch(server.url + '/api/catalog/search?q=qwen&limit=20', { headers });
   assert.equal(search.status, 200);
   const searchPayload = await search.json();
-  assert.equal(searchPayload.models.length, 2);
+  assert.equal(searchPayload.models.length, 5);
 
   const recs = await fetch(server.url + '/api/catalog/recommendations', {
     method: 'POST',
@@ -163,6 +166,7 @@ test('Local UI catalog search and recommendations use detected hardware', async 
   assert.equal(recPayload.hardware.ramGb, 16);
   assert.equal(recPayload.models[0].id, 'Example/Fast-GGUF');
   assert.equal(recPayload.models[0].compatibility.level, 'great');
+  assert.deepEqual(recPayload.models.map((m) => m.id), ['Example/Fast-GGUF', 'Example/Heavy-GGUF']);
   assert.ok(calls.some((call) => call.kind === 'details' && call.hardware.ramGb === 16));
 });
 

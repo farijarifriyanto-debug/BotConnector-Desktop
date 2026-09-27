@@ -7,6 +7,7 @@ const { RuntimeManager } = require('../desktop/local/runtime-manager.cjs');
 const { DownloadManager } = require('../desktop/local/downloads.cjs');
 const { scanInstalled } = require('../desktop/local/installed.cjs');
 const hf = require('../desktop/local/hf.cjs');
+const { detectHardware: defaultDetectHardware } = require('../desktop/local/hardware.cjs');
 
 const OLLAMA_BASE = 'http://127.0.0.1:11434';
 
@@ -412,8 +413,11 @@ class LocalAiRuntime {
     fetchImpl = globalThis.fetch,
     emit = () => {},
     dataDir = process.env.BOTCONNECTOR_DEVICE_DATA_DIR || path.join(os.homedir(), '.botconnector-device'),
+    detectHardware = defaultDetectHardware,
   } = {}) {
     this.enabled = Boolean(enabled);
+    this.detectHardware = detectHardware;
+    this.gpuPromise = null;
     this.fetch = fetchImpl;
     this.emit = emit;
     this.jobs = new Map();
@@ -497,6 +501,19 @@ class LocalAiRuntime {
     return modelName;
   }
 
+  // ponytail: Linux only reports NVIDIA here (AMD/Intel detection is Windows-only), so Linux AMD/Intel GPUs get the
+  // CPU build — slower but working; add Linux Vulkan device detection if those users need GPU speed.
+  hasGpu() {
+    this.gpuPromise ||= Promise.resolve(this.detectHardware())
+      .then((hw) => Boolean(hw?.nvidia?.length || hw?.amd?.length || hw?.intel?.length))
+      .catch(() => false);
+    return this.gpuPromise;
+  }
+
+  async managedInstalled() {
+    return this.runtimeManager.installed({ gpu: await this.hasGpu() });
+  }
+
   managedRunning() {
     return Boolean(this.managedProcess && this.managedProcess.exitCode === null);
   }
@@ -528,7 +545,7 @@ class LocalAiRuntime {
   async detect() {
     this.assertEnabled();
 
-    const managed = await this.runtimeManager.installed().catch(() => ({ installed: false }));
+    const managed = await this.managedInstalled().catch(() => ({ installed: false }));
     if (managed?.installed) {
       return { kind: 'llamacpp', baseUrl: MANAGED_LLAMA_BASE, binary: managed.binary };
     }
@@ -622,7 +639,7 @@ class LocalAiRuntime {
     };
 
     const listManaged = async () => {
-      const managed = await this.runtimeManager.installed().catch(() => ({ installed: false }));
+      const managed = await this.managedInstalled().catch(() => ({ installed: false }));
       if (!managed?.installed) return [];
       await fsp.mkdir(this.modelsDir, { recursive: true });
       const installed = await scanInstalled(this.modelsDir);
@@ -806,6 +823,7 @@ class LocalAiRuntime {
       completedAt: null,
       controller: new AbortController(),
     };
+    if (job.backend === 'auto' && !(await this.hasGpu())) job.backend = 'cpu';
     this.runtimeJobs.set(job.id, job);
     this.runRuntimeInstall(job).catch(() => {});
     return this.publicJob(job);
@@ -1100,7 +1118,7 @@ class LocalAiRuntime {
         runtime === 'llamacpp'
           ? decodeManagedModel(modelName, this.modelsDir)
           : await this.externalModelPath(modelName);
-      const installed = await this.runtimeManager.installed();
+      const installed = await this.managedInstalled();
       if (!installed?.binary) throw new Error('Managed llama.cpp runtime is not installed.');
       await fsp.access(modelPath);
 
@@ -1115,7 +1133,7 @@ class LocalAiRuntime {
           '-m',
           modelPath,
           '-ngl',
-          '999',
+          (await this.hasGpu()) ? '999' : '0',
           '-c',
           '8192',
           '--jinja',

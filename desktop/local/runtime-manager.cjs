@@ -29,7 +29,11 @@ function verifyBinary(binary,timeout=30000){
   return new Promise((resolve,reject)=>{
     execFile(binary,['--version'],{shell:false,windowsHide:true,timeout},(err,stdout,stderr)=>{
       const out=String(stdout||stderr||'').trim();
-      if(err)return reject(new Error(`llama-server --version failed: ${err.message}${out?` — ${out.slice(0,300)}`:''}`));
+      if(err){
+        // Minimal Linux installs often lack the OpenMP runtime the official builds link against.
+        const hint=/libgomp\.so/.test(out+err.message)?' Install the OpenMP runtime first: sudo apt install libgomp1 (Debian/Ubuntu) or your distro\'s libgomp package, then try again.':'';
+        return reject(new Error(`llama-server --version failed: ${err.message}${out?` — ${out.slice(0,300)}`:''}${hint}`));
+      }
       resolve(out.slice(0,500));
     });
   });
@@ -428,7 +432,10 @@ class RuntimeManager{
     if(process.platform!=='win32'){try{fs.chmodSync(p,0o700);}catch{}}
     return p;
   }}}return null;}
-  async installed(){const exe=await this.findServer();return exe?{installed:true,binary:exe}:{installed:false,binary:null};}
+  async findServers(dir=this.baseDir){const out=[];const stack=[dir];while(stack.length){const d=stack.pop();let items=[];try{items=await fsp.readdir(d,{withFileTypes:true});}catch{continue;}for(const x of items){const p=path.join(d,x.name);if(x.isDirectory()){if(!x.name.startsWith('.staging-'))stack.push(p);}else if(x.name.toLowerCase()===SERVER_BIN)out.push(p);}}return out.sort();}
+  // gpu:false = no usable GPU on this machine: only a CPU build counts. A Vulkan build "installs" fine without a GPU
+  // but hangs every chat, so it must not be picked there. gpu:true (default) keeps the old GPU-first behaviour.
+  async installed({gpu=true}={}){const all=await this.findServers();const isCpu=p=>p.split(path.sep).includes('cpu');const exe=gpu?(all.find(p=>!isCpu(p))||all[0]):all.find(isCpu);if(exe&&process.platform!=='win32'){try{fs.chmodSync(exe,0o700);}catch{}}return exe?{installed:true,binary:exe}:{installed:false,binary:null};}
   async verifyInstalled(){const s=await this.installed();if(!s.installed)return{installed:false,verified:false};try{const out=await verifyBinary(s.binary);return{installed:true,binary:s.binary,verified:true,version:out};}catch(e){return{installed:true,binary:s.binary,verified:false,error:String(e.message||e)};}}
 }
 module.exports={ARCHIVE_LIMITS,RuntimeManager,verifyBinary,safeEntryName,extractZipSecure,extractTarGzSecure,SERVER_BIN};

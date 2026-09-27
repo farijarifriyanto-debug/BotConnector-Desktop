@@ -399,3 +399,43 @@ test('extracts Lemonade model metadata without requiring the Lemonade server', (
   assert.equal(rows[0].source, 'Lemonade local metadata');
   assert.equal(rows[0].deletable, false);
 });
+
+test('without a GPU, auto installs the CPU build and a Vulkan-only install is not used', async () => {
+  const { RuntimeManager } = require('../desktop/local/runtime-manager.cjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bc-rt-'));
+  const bin = process.platform === 'win32' ? 'llama-server.exe' : 'llama-server';
+  const put = (backend) => {
+    const d = path.join(dir, 'b1', backend, 'llama-b1');
+    fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, bin), '');
+    return path.join(d, bin);
+  };
+  const manager = new RuntimeManager({ baseDir: dir, emit: () => {} });
+  const vulkan = put('vulkan');
+  assert.deepEqual(await manager.installed({ gpu: false }), { installed: false, binary: null });
+  assert.equal((await manager.installed({ gpu: true })).binary, vulkan);
+  const cpu = put('cpu');
+  assert.equal((await manager.installed({ gpu: false })).binary, cpu);
+  assert.equal((await manager.installed({ gpu: true })).binary, vulkan);
+
+  const runtime = new LocalAiRuntime({ enabled: true, detectHardware: async () => ({ nvidia: [], amd: [], intel: [] }) });
+  let chosen;
+  runtime.runtimeManager.install = async ({ backend }) => { chosen = backend; return { backend, release: 'b1', version: 'x' }; };
+  const job = await runtime.startRuntimeInstall('auto');
+  for (let i = 0; i < 50 && runtime.runtimeJobStatus(job.id).status !== 'completed'; i++) await new Promise((r) => setTimeout(r, 10));
+  assert.equal(chosen, 'cpu');
+
+  const gpuRuntime = new LocalAiRuntime({ enabled: true, detectHardware: async () => ({ nvidia: [{ name: 'RTX' }], amd: [], intel: [] }) });
+  gpuRuntime.runtimeManager.install = async ({ backend }) => { chosen = backend; return { backend, release: 'b1', version: 'x' }; };
+  await gpuRuntime.startRuntimeInstall('auto');
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(chosen, 'auto');
+});
+
+test('a missing Linux system library names the package to install', { skip: process.platform === 'win32' }, async () => {
+  const { verifyBinary } = require('../desktop/local/runtime-manager.cjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bc-lib-'));
+  const bin = path.join(dir, 'llama-server');
+  fs.writeFileSync(bin, '#!/bin/sh\necho "llama-server: error while loading shared libraries: libgomp.so.1: cannot open shared object file" >&2\nexit 127\n', { mode: 0o755 });
+  await assert.rejects(verifyBinary(bin), /sudo apt install libgomp1/);
+});
