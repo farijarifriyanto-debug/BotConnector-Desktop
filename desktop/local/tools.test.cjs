@@ -57,3 +57,55 @@ test('bad MCP start reports FAILED without affecting registry', async () => {
   assert.equal(registry.list().some(tool => tool.serverId === 'bad-test'), false);
   await registry.close();
 });
+
+
+test('selected READ tool can run for one turn without persistent enablement', async () => {
+  const registry = new ToolRegistry();
+  const result = await registry.invoke('echo_text', { text: 'turn-scoped' }, { selected: true });
+  assert.deepEqual(result, { text: 'turn-scoped' });
+});
+
+test('Run Code is approval-gated and executes JavaScript in a temporary directory', async () => {
+  const registry = new ToolRegistry();
+  await assert.rejects(
+    () => registry.invoke('run_code', { language: 'javascript', code: 'console.log(2 + 3)' }, { selected: true }),
+    /persetujuan eksplisit/,
+  );
+  const result = await registry.invoke(
+    'run_code',
+    { language: 'javascript', code: 'console.log(2 + 3)' },
+    { selected: true, approved: true },
+  );
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stdout.trim(), '5');
+});
+
+test('configured Web Search backend is normalized without leaking its response shape', async () => {
+  const previousUrl = process.env.BOTCONNECTOR_WEB_SEARCH_URL;
+  const previousFetch = global.fetch;
+  process.env.BOTCONNECTOR_WEB_SEARCH_URL = 'https://search.invalid/query';
+  global.fetch = async (_url, init) => {
+    assert.equal(init.method, 'POST');
+    return new Response(
+      JSON.stringify({
+        results: [{ name: 'Result', href: 'https://example.com', description: 'Snippet' }],
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
+  };
+  try {
+    const registry = new ToolRegistry();
+    const result = await registry.invoke(
+      'web_search',
+      { query: 'test', max_results: 3 },
+      { selected: true },
+    );
+    assert.equal(result.results[0].title, 'Result');
+    assert.equal(result.results[0].url, 'https://example.com');
+    assert.equal(result.untrustedExternalContent, true);
+  } finally {
+    global.fetch = previousFetch;
+    if (previousUrl == null) delete process.env.BOTCONNECTOR_WEB_SEARCH_URL;
+    else process.env.BOTCONNECTOR_WEB_SEARCH_URL = previousUrl;
+  }
+});
