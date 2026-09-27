@@ -462,8 +462,9 @@ Untuk setiap perubahan pada source, UI, konfigurasi, dependency, dokumentasi, at
   - Prepared package metadata as Device CLI `0.4.13` candidate and included `desktop/local/tools.cjs` in the installer-free package.
 - Files: `desktop/local/tools.cjs`, `desktop/local/tools.test.cjs`, `desktop/local/device-bridge.cjs`, `desktop/local/device-bridge.test.cjs`, `cli/local-runtime.cjs`, `cli/local-runtime.test.cjs`, `cli/botconnector-device.cjs`, `package.json`, `package-lock.json`.
 - Verification:
-  - Clean VPS checkout: `npm run check:device` PASS — 62 tests, 0 failures.
+  - Clean VPS checkout: `npm run check:device` PASS — 63 tests, 0 failures.
   - `npm pack --dry-run` PASS and includes `cli/botconnector-device.cjs`, `cli/local-runtime.cjs`, `desktop/local/device-bridge.cjs`, and `desktop/local/tools.cjs`.
-  - GitHub Actions run 36338377644 PASS on head `fe6af0e0066db790d970c5de342adec9dddf302a`: Installer-free device CLI PASS, fresh TGZ install PASS, stable launcher PASS, Windows hardware/Local AI/offline browser smoke PASS.
+  - GitHub Actions run 36339288927 PASS on head `9c6264b5fce4bb6ee2a5a46f8789b130cea9ce8a`: Installer-free device CLI PASS, fresh TGZ install PASS, stable launcher PASS, Windows hardware/Local AI/Local tools/offline browser smoke PASS.
+  - Web Search fallback regression covers DuckDuckGo Lite result links with href/class attributes in either order; Run Code and MCP executor smoke tests PASS.
 - Release/deployment: candidate only. No `device-v0.4.13` release and no `app.botconnector.id` manifest/deployment performed in this task yet.
 
