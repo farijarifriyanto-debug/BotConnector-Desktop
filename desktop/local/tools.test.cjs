@@ -113,3 +113,38 @@ test('configured Web Search backend is normalized without leaking its response s
     else process.env.BOTCONNECTOR_WEB_SEARCH_URL = previousUrl;
   }
 });
+
+
+test('DuckDuckGo Lite fallback accepts href before class on result links', async () => {
+  const previousUrl = process.env.BOTCONNECTOR_WEB_SEARCH_URL;
+  const previousFetch = global.fetch;
+  delete process.env.BOTCONNECTOR_WEB_SEARCH_URL;
+  global.fetch = async () =>
+    new Response(
+      [
+        '<table>',
+        '<tr><td><a rel="nofollow" href="https://example.com/result" class="result-link">Example Result</a></td></tr>',
+        '<tr><td class="result-snippet">Example snippet</td></tr>',
+        '</table>',
+      ].join(''),
+      { status: 200, headers: { 'content-type': 'text/html' } },
+    );
+  try {
+    const registry = new ToolRegistry();
+    const result = await registry.invoke(
+      'web_search',
+      { query: 'example', max_results: 2 },
+      { selected: true },
+    );
+    assert.equal(result.provider, 'duckduckgo-lite');
+    assert.deepEqual(result.results[0], {
+      title: 'Example Result',
+      url: 'https://example.com/result',
+      snippet: 'Example snippet',
+    });
+  } finally {
+    global.fetch = previousFetch;
+    if (previousUrl == null) delete process.env.BOTCONNECTOR_WEB_SEARCH_URL;
+    else process.env.BOTCONNECTOR_WEB_SEARCH_URL = previousUrl;
+  }
+});
