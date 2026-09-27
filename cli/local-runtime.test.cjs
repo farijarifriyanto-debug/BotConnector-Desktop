@@ -439,3 +439,60 @@ test('a missing Linux system library names the package to install', { skip: proc
   fs.writeFileSync(bin, '#!/bin/sh\necho "llama-server: error while loading shared libraries: libgomp.so.1: cannot open shared object file" >&2\nexit 127\n', { mode: 0o755 });
   await assert.rejects(verifyBinary(bin), /sudo apt install libgomp1/);
 });
+
+function streamResponse(chunks) {
+  const enc = new TextEncoder();
+  return new Response(new ReadableStream({
+    start(c) { for (const ch of chunks) c.enqueue(enc.encode(ch)); c.close(); },
+  }), { status: 200 });
+}
+
+test('chat streams OpenAI-style deltas (Lemonade/llama.cpp) including reasoning and temperature', async () => {
+  let sent;
+  const fetchImpl = async (url, init) => {
+    if (url.endsWith('/v1/load')) return jsonResponse(200, {});
+    if (url.endsWith('/v1/chat/completions')) {
+      sent = JSON.parse(init.body);
+      return streamResponse([
+        'data: {"choices":[{"delta":{"reasoning_content":"hm"}}]}\n\ndata: {"choices":[{"del',
+        'ta":{"content":"Hal"}}]}\n\n',
+        'data: {"choices":[{"delta":{"content":"o"}}],"usage":{"completion_tokens":2}}\n\ndata: [DONE]\n\n',
+      ]);
+    }
+    throw new Error('Unexpected URL ' + url);
+  };
+  const runtime = new LocalAiRuntime({ enabled: true, fetchImpl });
+  const deltas = [];
+  const out = await runtime.chat({
+    model: 'Qwen-Test-GGUF', runtime: 'lemonade', options: { temperature: 0.2 },
+    messages: [{ role: 'system', content: 'Be brief.' }, { role: 'user', content: 'hai' }],
+    onDelta: (d) => deltas.push(d),
+  });
+  assert.equal(sent.stream, true);
+  assert.equal(sent.temperature, 0.2);
+  assert.deepEqual(deltas, [{ reasoning: 'hm' }, { content: 'Hal' }, { content: 'o' }]);
+  assert.equal(out.content, 'Halo');
+  assert.equal(out.reasoning, 'hm');
+  assert.equal(out.usage.completion_tokens, 2);
+});
+
+test('chat streams Ollama NDJSON deltas', async () => {
+  const fetchImpl = async (url, init) => {
+    if (url.endsWith('/api/tags')) return jsonResponse(200, { models: [] });
+    if (url.endsWith('/api/chat')) {
+      assert.equal(JSON.parse(init.body).stream, true);
+      return streamResponse([
+        '{"message":{"content":"Ja"},"done":false}\n{"message":{"content":"karta"},"done":false}\n',
+        '{"message":{"content":""},"done":true,"prompt_eval_count":5,"eval_count":2}\n',
+      ]);
+    }
+    throw new Error('Unexpected URL ' + url);
+  };
+  const runtime = new LocalAiRuntime({ enabled: true, fetchImpl });
+  runtime.assertOllamaModelLocal = async (m) => m;
+  const deltas = [];
+  const out = await runtime.chat({ model: 'qwen:0.5b', runtime: 'ollama', messages: [{ role: 'user', content: 'x' }], onDelta: (d) => deltas.push(d) });
+  assert.deepEqual(deltas, [{ content: 'Ja' }, { content: 'karta' }]);
+  assert.equal(out.content, 'Jakarta');
+  assert.deepEqual(out.usage, { prompt_tokens: 5, completion_tokens: 2 });
+});
