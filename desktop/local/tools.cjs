@@ -137,13 +137,17 @@ async function webSearch(args = {}) {
   });
   if (!response.ok) throw new Error(`Web Search HTTP ${response.status}`);
   const html = await response.text();
-  const linkPattern = /<a[^>]+class=["'][^"']*result-link[^"']*["'][^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  const anchorPattern = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
   const snippetPattern = /<td[^>]+class=["'][^"']*result-snippet[^"']*["'][^>]*>([\s\S]*?)<\/td>/gi;
   const links = [];
   const snippets = [];
   let match;
-  while ((match = linkPattern.exec(html)) && links.length < maxResults) {
-    let url = decodeHtml(match[1]);
+  while ((match = anchorPattern.exec(html)) && links.length < maxResults) {
+    const attributes = match[1] || '';
+    if (!/\bclass=["'][^"']*\bresult-link\b[^"']*["']/i.test(attributes)) continue;
+    const href = attributes.match(/\bhref=["']([^"']+)["']/i)?.[1];
+    if (!href) continue;
+    let url = decodeHtml(href);
     try {
       const parsed = new URL(url, 'https://duckduckgo.com');
       const redirected = parsed.searchParams.get('uddg');
