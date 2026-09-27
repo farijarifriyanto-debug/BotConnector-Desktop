@@ -300,3 +300,34 @@ test('chat history is stored on disk, so a UI on another port sees the same chat
   if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(dataDir, 'local-chats.json')).mode & 0o777, 0o600);
   assert.equal((await fetch(b.url + '/api/chats', { method: 'POST', headers: h(b), body: JSON.stringify({ state: 'nope' }) })).status, 400);
 });
+
+test('chats made before the disk copy loaded are merged into it, not lost or overwritten', () => {
+  const { mergeChatStates, localUiHtml } = require('./local-ui.cjs');
+  const opened = 1000;
+  const old = { id: 'old', createdAt: 1, messages: [{ role: 'user', content: 'siapa anda' }] };
+  const disk = { active: 'old', chats: [old] };
+
+  // New port, empty browser storage: a message sent before the disk copy arrived is kept, next to the history.
+  const typed = { id: 'new', createdAt: 1500, messages: [{ role: 'user', content: 'halo' }] };
+  const a = mergeChatStates(disk, { active: 'new', chats: [typed] }, opened, null);
+  assert.deepEqual(a.state.chats.map((c) => c.id), ['new', 'old']);
+  assert.equal(a.state.active, 'new');
+  assert.equal(a.changed, true);
+
+  // An untouched empty chat and stale chats from this browser's storage do not come back.
+  const deletedElsewhere = { id: 'gone', createdAt: 5, messages: [{ role: 'user', content: 'x' }] };
+  const b = mergeChatStates(disk, { active: 'e', chats: [{ id: 'e', createdAt: 1200, messages: [] }, deletedElsewhere] }, opened, null);
+  assert.deepEqual(b.state, disk);
+  assert.equal(b.changed, false);
+
+  // The chat still streaming keeps this page's copy, so the reply keeps landing in the object on screen.
+  const streaming = { id: 'old', createdAt: 1, messages: [...old.messages, { role: 'assistant', content: '' }] };
+  const c = mergeChatStates(disk, { active: 'old', chats: [streaming] }, opened, 'old');
+  assert.equal(c.state.chats[0], streaming);
+  assert.equal(c.changed, true);
+
+  // The helper is shipped with the page.
+  const html = localUiHtml({ token: 't', host: '127.0.0.1', port: 1 });
+  assert.match(html, /function mergeChatStates\(/);
+  assert.match(html, /renderMarkdown, mergeChatStates\);/);
+});

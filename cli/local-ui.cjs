@@ -54,7 +54,19 @@ button,input,select,textarea{font:inherit;color:inherit}button{cursor:pointer}bu
 `;
 
 // Runs in the browser. Kept as a real function so `node --check` and the tests see it; embedded via toString().
-function app(TOKEN, renderMarkdown) {
+// The disk copy wins, except for what this page did before it arrived (e.g. a message sent right after
+// opening a new port): chats created since `since` are added, and the chat still streaming is kept.
+// Older chats only in this browser's storage are not revived, so a chat deleted on another port stays deleted.
+function mergeChatStates(disk, local, since, keepId) {
+  const diskIds = new Set(disk.chats.map((c) => c.id));
+  const fresh = local.chats.filter((c) => !diskIds.has(c.id) && c.messages.length && (c.id === keepId || c.createdAt >= since));
+  const kept = local.chats.find((c) => c.id === keepId && diskIds.has(c.id));
+  const chats = [...fresh, ...disk.chats.map((c) => (kept && c.id === kept.id ? kept : c))];
+  const mine = fresh.some((c) => c.id === local.active) || (kept && kept.id === local.active);
+  return { state: { ...disk, chats, active: mine ? local.active : disk.active }, changed: fresh.length > 0 || !!kept };
+}
+
+function app(TOKEN, renderMarkdown, mergeChatStates) {
   const HEADERS = { 'content-type': 'application/json', 'x-botconnector-local-token': TOKEN };
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -70,6 +82,7 @@ function app(TOKEN, renderMarkdown) {
 
   // The disk copy (via /api/chats) is the source of truth; localStorage is only a fast first paint.
   let diskTimer = 0;
+  const pageOpenedAt = Date.now();
   let diskLoaded = false; // never write before reading: a fresh port would overwrite the history with an empty chat
   const saveToDisk = () => {
     if (!diskLoaded) return;
@@ -465,12 +478,14 @@ function app(TOKEN, renderMarkdown) {
     try { saved = await api('/api/chats'); } catch { return; } // disk unavailable: stay on browser storage only
     diskLoaded = true;
     if (saved.state && Array.isArray(saved.state.chats)) {
-      if (streaming) return;
-      state = saved.state;
+      const merged = mergeChatStates(saved.state, state, pageOpenedAt, streaming && streaming.chatId);
+      state = merged.state;
       if (saved.settings) settings = { ...settings, ...saved.settings };
       save('botconnector-local-chats-v1', state);
       applySettings();
+      ensureChat();
       renderAll();
+      if (merged.changed) saveToDisk();
     } else if (state.chats.some((c) => c.messages.length)) {
       saveToDisk(); // first run of this version: move this browser's history to disk
     }
@@ -542,7 +557,7 @@ function localUiHtml({ token, host, port }) {
   <div class="card"><h3>Privacy</h3><div class="muted">Chats are saved in this browser only. Nothing is sent to BotConnector cloud from this page.</div></div>
 </aside>
 `.replace('__LOCAL_URL__', localUrl) +
-    '<script>\n' + renderMarkdown.toString() + '\n(' + app.toString() + ')(' + JSON.stringify(token) + ', renderMarkdown);\n</script>\n</body>\n</html>';
+    '<script>\n' + renderMarkdown.toString() + '\n' + mergeChatStates.toString() + '\n(' + app.toString() + ')(' + JSON.stringify(token) + ', renderMarkdown, mergeChatStates);\n</script>\n</body>\n</html>';
 }
 
-module.exports = { localUiHtml };
+module.exports = { localUiHtml, mergeChatStates };
