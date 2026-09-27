@@ -1,5 +1,7 @@
 const os = require('node:os');
+const crypto = require('node:crypto');
 const defaultCatalog = require('./catalog.cjs');
+const { MAX_TOOL_CALLS_PER_TURN } = require('./tools.cjs');
 
 function defaultDeviceName() {
   return os.hostname() || 'BotConnector device';
@@ -8,6 +10,30 @@ function defaultDeviceName() {
 function wsState(socket) {
   if (!socket) return 'DISCONNECTED';
   return ['CONNECTING', 'CONNECTED', 'CLOSING', 'DISCONNECTED'][socket.readyState] || 'DISCONNECTED';
+}
+
+function parseToolArguments(call) {
+  const raw = call?.function?.arguments;
+  if (raw == null || raw === '') return {};
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw;
+  try {
+    const parsed = JSON.parse(String(raw));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error();
+    return parsed;
+  } catch {
+    throw new Error(`Tool '${call?.function?.name || 'unknown'}' returned invalid JSON arguments.`);
+  }
+}
+
+function toolResultContent(value) {
+  try {
+    const serialized = JSON.stringify(value);
+    return serialized.length > 64 * 1024
+      ? serialized.slice(0, 64 * 1024) + '…[truncated]'
+      : serialized;
+  } catch {
+    return JSON.stringify({ error: 'Tool result could not be serialized.' });
+  }
 }
 
 class DeviceBridge {
@@ -151,6 +177,129 @@ class DeviceBridge {
       this.reply(message.id, { ok: false, error: { message: error.message || String(error) } });
     }
   }
+  async agentChat(params = {}) {
+    const selected = Array.isArray(params.tools)
+      ? [...new Set(params.tools.map(String).filter(Boolean))].slice(0, 24)
+      : [];
+    const toolSchemas = this.tools?.schemas ? this.tools.schemas(selected) : [];
+    if (!selected.length || !toolSchemas.length) {
+      return this.localAi.chat({ ...params, tools: [] });
+    }
+
+    const approved = new Set(
+      Array.isArray(params.approved_tools) ? params.approved_tools.map(String) : [],
+    );
+    const messages = Array.isArray(params.messages)
+      ? params.messages.map(message => ({ ...message }))
+      : [];
+    const events = [];
+    let lastResult = null;
+
+    for (let round = 0; round < MAX_TOOL_CALLS_PER_TURN; round += 1) {
+      lastResult = await this.localAi.chat({
+        ...params,
+        messages,
+        tools: toolSchemas,
+        tool_choice: 'auto',
+      });
+      const calls = Array.isArray(lastResult?.tool_calls) ? lastResult.tool_calls : [];
+      if (!calls.length) {
+        return { ...lastResult, tool_events: events };
+      }
+
+      messages.push({
+        role: 'assistant',
+        content: String(lastResult?.content || ''),
+        tool_calls: calls,
+      });
+
+      for (const call of calls) {
+        const name = String(call?.function?.name || '');
+        const tool = this.tools.findTool(name);
+        if (!tool || (!selected.includes(tool.id) && !selected.includes(tool.name))) {
+          const error = `Tool '${name || 'unknown'}' was not selected for this turn.`;
+          events.push({ type: 'tool.error', name, error });
+          messages.push({
+            role: 'tool',
+            tool_call_id: String(call?.id || crypto.randomUUID()),
+            content: JSON.stringify({ error }),
+          });
+          continue;
+        }
+
+        const callId = String(call?.id || crypto.randomUUID());
+        let args;
+        try {
+          args = parseToolArguments(call);
+        } catch (error) {
+          const message = error?.message || String(error);
+          events.push({ type: 'tool.error', id: callId, name, error: message });
+          messages.push({
+            role: 'tool',
+            tool_call_id: callId,
+            content: JSON.stringify({ error: message }),
+          });
+          continue;
+        }
+
+        events.push({
+          type: 'tool.started',
+          id: callId,
+          name,
+          source: tool.source,
+          permissionClass: tool.permissionClass,
+        });
+        try {
+          const result = await this.tools.invoke(name, args, {
+            selected: true,
+            approved: approved.has(tool.id) || approved.has(tool.name),
+          });
+          events.push({
+            type: 'tool.completed',
+            id: callId,
+            name,
+            source: tool.source,
+            permissionClass: tool.permissionClass,
+          });
+          messages.push({
+            role: 'tool',
+            tool_call_id: callId,
+            content: toolResultContent(result),
+          });
+        } catch (error) {
+          const message = error?.message || String(error);
+          events.push({
+            type: 'tool.error',
+            id: callId,
+            name,
+            source: tool.source,
+            permissionClass: tool.permissionClass,
+            error: message,
+          });
+          messages.push({
+            role: 'tool',
+            tool_call_id: callId,
+            content: JSON.stringify({ error: message }),
+          });
+        }
+      }
+    }
+
+    const final = await this.localAi.chat({
+      ...params,
+      messages,
+      tools: [],
+      tool_choice: 'none',
+    });
+    return {
+      ...final,
+      tool_events: [
+        ...events,
+        { type: 'tool.limit', max_calls: MAX_TOOL_CALLS_PER_TURN },
+      ],
+    };
+  }
+
   async execute(method, params) {
     if (method === 'hardware.get') return this.detectHardware();
     // Read-only public catalog lookup ranked for this device's hardware; no local AI permission needed.
@@ -159,7 +308,7 @@ class DeviceBridge {
     if (method === 'launcher.start') return this.launcher.start(params.id);
     if (method === 'launcher.stop') return this.launcher.stop(params.id);
     if (method === 'tools.list') return this.tools.list().map(tool => ({
-      id: tool.id, name: tool.name, source: tool.source,
+      id: tool.id, name: tool.name, description: tool.description, source: tool.source,
       permissionClass: tool.permissionClass, enabled: Boolean(tool.enabled), status: tool.status,
     }));
     if (method === 'runtime.status') return this.localAi.status();
@@ -184,7 +333,9 @@ class DeviceBridge {
     if (method === 'models.delete') return this.localAi.deleteModel(params.model, params.runtime);
     if (method === 'model.load') return this.localAi.loadModel(params.model, params.runtime);
     if (method === 'model.unload') return this.localAi.unloadModel(params.model, params.runtime);
-    if (method === 'chat.completions') return this.localAi.chat(params);
+    if (method === 'chat.completions') {
+      return params?.tool_mode === 'auto' ? this.agentChat(params) : this.localAi.chat(params);
+    }
     if (method === 'chat.cancel') return this.localAi.cancelChat(params.id);
     throw new Error('Remote capability is not allowed.');
   }
