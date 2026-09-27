@@ -44,7 +44,11 @@ test('MCP fixture discovery, allowlist, invocation, and shutdown are isolated', 
   assert.ok(discovered);
   await assert.rejects(() => registry.invoke(discovered.name, { text: 'x' }), /belum diaktifkan/);
   await registry.setEnabled(discovered.id, true);
-  const result = await registry.invoke(discovered.name, { text: 'x' });
+  await assert.rejects(
+    () => registry.invoke(discovered.name, { text: 'x' }),
+    /persetujuan eksplisit/,
+  );
+  const result = await registry.invoke(discovered.name, { text: 'x' }, { approved: true });
   assert.deepEqual(result.content[0], { type: 'text', text: 'x' });
   await registry.close();
   assert.equal(registry.mcpStatus().length, 0);
