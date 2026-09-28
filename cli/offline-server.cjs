@@ -326,6 +326,7 @@ async function startOfflineServer({
   open = true,
   catalog = defaultCatalog,
   tools = null,
+  webApp = null,
 } = {}) {
   if (!localAi) throw new Error('Local AI runtime is required.');
   if (!detectHardware) throw new Error('Hardware detector is required.');
@@ -451,6 +452,11 @@ async function startOfflineServer({
         });
         return;
       }
+      if (req.method === 'GET' && url.pathname === '/api/webapp/status') {
+        const status = webApp?.status ? await webApp.status() : { paired: false, connection: 'DISCONNECTED' };
+        sendJson(res, 200, { ...status, origin: webApp?.origin || 'https://app.botconnector.id', available: Boolean(webApp) });
+        return;
+      }
       // Chat history lives on disk, not in localStorage: the browser keys storage by port, and the port can move.
       if (req.method === 'GET' && url.pathname === '/api/chats') {
         let saved = {};
@@ -530,6 +536,16 @@ async function startOfflineServer({
       }
       if (req.method === 'POST' && url.pathname === '/api/models/delete') {
         sendJson(res, 200, await localAi.deleteModel(body.model, body.runtime));
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/webapp/pair') {
+        if (!webApp?.pair) throw new Error('Web App connection is unavailable in this session.');
+        sendJson(res, 200, await webApp.pair(String(body.code || '')));
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/webapp/disconnect') {
+        if (!webApp?.disconnect) throw new Error('Web App connection is unavailable in this session.');
+        sendJson(res, 200, await webApp.disconnect());
         return;
       }
       if (req.method === 'POST' && url.pathname === '/api/chat') {
