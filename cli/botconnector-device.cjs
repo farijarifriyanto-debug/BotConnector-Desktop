@@ -191,10 +191,11 @@ async function createToolRegistry() {
   return registry;
 }
 
-async function startLocalUi(localAi, options) {
+async function startLocalUi(localAi, options, tools = null) {
   const localServer = await startOfflineServer({
     localAi,
     detectHardware,
+    tools,
     port: options.port,
     // An explicit --port is respected exactly; the default port may move to the next free one.
     portFallback: options.portExplicit ? 0 : 10,
@@ -214,10 +215,12 @@ async function runOffline(options) {
   }
 
   const localAi = createLocalAi(true);
-  const localServer = await startLocalUi(localAi, options);
+  const tools = await createToolRegistry();
+  const localServer = await startLocalUi(localAi, options, tools);
 
   const shutdown = () => {
     void localServer.close();
+    void tools.close();
     localAi.close();
     console.log('\n[BotConnector] Local offline session stopped.');
     process.exit(0);
@@ -251,7 +254,7 @@ async function connect(options) {
   let localServer = null;
   if (allowLocalAi) {
     try {
-      localServer = await startLocalUi(localAi, options);
+      localServer = await startLocalUi(localAi, options, tools);
     } catch (error) {
       console.error(
         `[BotConnector] Local browser UI could not start: ${error?.message || error}`,
