@@ -46,7 +46,7 @@ test('offline UI serves localhost HTML and protects local API with a session tok
   assert.equal(page.status, 200);
   const html = await page.text();
   assert.match(html, /BotConnector Local/);
-  assert.match(html, /On-device inference/);
+  assert.match(html, /Connect Web App/);
   assert.match(html, /How can I help on this device\?/);
   assert.match(html, /id="openTools"/);
   assert.match(html, /On-device AI workspace/);
