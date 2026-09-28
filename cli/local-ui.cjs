@@ -274,6 +274,9 @@ svg{display:block}
 }
 .pillDot{width:6px;height:6px;border-radius:50%;background:var(--ok)}
 .pill.right{margin-left:auto}
+.modelActions{display:flex;gap:6px;align-items:center}
+.connectBtn{margin-left:auto;border-radius:999px;min-height:30px;padding:0 11px;font-size:11px}
+.connectBtn.connected{border-color:color-mix(in srgb,var(--ok) 40%,var(--line));color:var(--ok)}
 .chat{
   flex:1;
   overflow:auto;
@@ -689,6 +692,8 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   let settings = load('botconnector-local-settings-v1', { system: '', temperature: 0.7, theme: 'dark', model: '', tools: [] });
   if (!Array.isArray(settings.tools)) settings.tools = [];
   let models = [];
+  let runtimeState = null;
+  let webAppStatus = { paired: false, connection: 'DISCONNECTED', origin: 'https://app.botconnector.id' };
   let tools = [];
   let mcpServers = [];
   let approvedOnce = new Set();
@@ -744,6 +749,31 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       model?.quant || '',
       model?.runtime || model?.source || '',
     ].filter(Boolean).join(' · ');
+  }
+  function modelIsLoaded(model) {
+    if (!model || !runtimeState) return false;
+    const loaded = Array.isArray(runtimeState.loadedModels) ? runtimeState.loadedModels.map(String) : [];
+    return loaded.includes(String(model.id)) || String(runtimeState.activeModel || '') === String(model.id);
+  }
+  function renderModelActions() {
+    const model = selectedModel();
+    const loaded = modelIsLoaded(model);
+    $('loadSelected').hidden = !model || loaded;
+    $('unloadSelected').hidden = !model || !loaded;
+    $('loadSelected').disabled = !model;
+    $('unloadSelected').disabled = !model;
+  }
+  function renderWebAppStatus() {
+    const connected = webAppStatus.connection === 'CONNECTED';
+    const button = $('openWebApp');
+    button.classList.toggle('connected', connected);
+    button.innerHTML = '<span class="pillDot"></span><span>' + (connected ? 'Web App connected' : 'Connect Web App') + '</span>';
+    $('webAppState').textContent = connected
+      ? 'Connected as ' + (webAppStatus.deviceName || 'this device') + '. Local AI can be used from BotConnector Web App while this session stays open.'
+      : 'Not connected. Pair this Local session with your BotConnector account when you want to use this device from the Web App.';
+    $('webAppCode').disabled = connected;
+    $('pairWebApp').hidden = connected;
+    $('disconnectWebApp').hidden = !connected;
   }
 
   // ---- rendering ----
@@ -1039,6 +1069,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     try {
       const [s, m] = await Promise.all([api('/api/status'), api('/api/models')]);
       models = Array.isArray(m.models) ? m.models : [];
+      runtimeState = s.runtime || null;
       $('runtime').textContent = s.runtime?.available ? 'Ready · ' + (s.runtime.runtime || 'local runtime') : (s.runtime?.message || 'Runtime not ready');
       $('runtimePill').innerHTML = '<span class="pillDot"></span>' + esc(s.runtime?.available ? (s.runtime.runtime || 'local runtime') : 'Runtime unavailable');
       $('prepareRuntime').hidden = Boolean(s.runtime?.available);
@@ -1060,9 +1091,70 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       const current = selectedModel();
       sel.title = current ? modelDetail(current) : 'Select a local chat model';
       renderInstalled();
+      renderModelActions();
       renderComposer();
     } catch (e) {
       $('runtime').textContent = String(e.message || e);
+    }
+  }
+
+  async function selectedModelAction(action) {
+    const model = selectedModel();
+    if (!model) return;
+    const button = action === 'load' ? $('loadSelected') : $('unloadSelected');
+    button.disabled = true;
+    button.textContent = action === 'load' ? 'Loading…' : 'Unloading…';
+    try {
+      await api('/api/models/' + action, {
+        method: 'POST',
+        body: JSON.stringify({ model: model.id, runtime: model.runtime }),
+      });
+      await refresh();
+    } catch (error) {
+      alert(error.message || error);
+    } finally {
+      button.textContent = action === 'load' ? 'Load' : 'Unload';
+      renderModelActions();
+    }
+  }
+
+  async function loadWebAppStatus() {
+    try {
+      webAppStatus = await api('/api/webapp/status');
+      renderWebAppStatus();
+    } catch {}
+  }
+
+  async function pairWebApp() {
+    const code = $('webAppCode').value.trim();
+    if (!code) return;
+    $('pairWebApp').disabled = true;
+    $('webAppMessage').textContent = 'Connecting…';
+    try {
+      webAppStatus = await api('/api/webapp/pair', {
+        method: 'POST',
+        body: JSON.stringify({ code }),
+      });
+      $('webAppCode').value = '';
+      $('webAppMessage').textContent = 'Connected.';
+      renderWebAppStatus();
+    } catch (error) {
+      $('webAppMessage').textContent = String(error.message || error);
+    } finally {
+      $('pairWebApp').disabled = false;
+    }
+  }
+
+  async function disconnectWebApp() {
+    $('disconnectWebApp').disabled = true;
+    try {
+      webAppStatus = await api('/api/webapp/disconnect', { method: 'POST', body: '{}' });
+      $('webAppMessage').textContent = 'Disconnected.';
+      renderWebAppStatus();
+    } catch (error) {
+      $('webAppMessage').textContent = String(error.message || error);
+    } finally {
+      $('disconnectWebApp').disabled = false;
     }
   }
 
@@ -1249,11 +1341,18 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     settings.model = $('modelSelect').value;
     const current = selectedModel();
     $('modelSelect').title = current ? modelDetail(current) : 'Select a local chat model';
+    renderModelActions();
     persistSettings();
   };
+  $('loadSelected').onclick = () => selectedModelAction('load');
+  $('unloadSelected').onclick = () => selectedModelAction('unload');
   $('openModels').onclick = () => { open('modelsPanel'); refresh(); loadRecommendations(); };
   $('openTools').onclick = () => { open('toolsPanel'); loadTools(); };
   $('openSettings').onclick = () => open('settingsPanel');
+  $('openWebApp').onclick = () => { open('webAppPanel'); loadWebAppStatus(); };
+  $('openBotConnectorApp').onclick = () => window.open(webAppStatus.origin || 'https://app.botconnector.id', '_blank', 'noopener,noreferrer');
+  $('pairWebApp').onclick = pairWebApp;
+  $('disconnectWebApp').onclick = disconnectWebApp;
   $('mobileMenu').onclick = () => { $('sidebar').classList.add('mobileOpen'); $('overlay').classList.add('open'); };
   $('overlay').onclick = close;
   for (const b of document.querySelectorAll('[data-close]')) b.onclick = close;
@@ -1291,6 +1390,8 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   renderAll();
   refresh();
   loadTools();
+  loadWebAppStatus();
+  setInterval(loadWebAppStatus, 4000);
   loadFromDisk();
 }
 
@@ -1333,8 +1434,12 @@ function localUiHtml({ token, host, port }) {
         <span class="modelLabel">Model</span>
         <select id="modelSelect"><option value="">Detecting local models…</option></select>
       </div>
+      <div class="modelActions">
+        <button class="btn small" id="loadSelected" hidden>Load</button>
+        <button class="btn small" id="unloadSelected" hidden>Unload</button>
+      </div>
       <span class="pill" id="runtimePill"><span class="pillDot"></span>Checking runtime</span>
-      <span class="pill right">On-device inference</span>
+      <button class="btn connectBtn right" id="openWebApp"><span class="pillDot"></span><span>Connect Web App</span></button>
     </div>
     <div class="chat" id="chat"></div>
     <div class="composerWrap">
@@ -1369,6 +1474,21 @@ function localUiHtml({ token, host, port }) {
   <div class="panelHead"><div class="row"><div class="grow"><h2>Tools</h2><div class="panelLead">Choose capabilities the local model may use.</div></div><button class="btn" data-close>Close</button></div></div>
   <div class="card"><h3>Available tools</h3><div class="muted">READ tools can run when selected. WRITE and EXECUTE tools also require one-time approval for the next message.</div><div class="toolList" id="toolsList"></div></div>
   <div class="card"><h3>MCP servers</h3><div class="muted">Local MCP servers are loaded from ~/.botconnector-device/mcp.json.</div><div id="mcpServers"></div></div>
+</aside>
+<aside class="panel" id="webAppPanel">
+  <div class="panelHead"><div class="row"><div class="grow"><h2>Connect to Web App</h2><div class="panelLead">Use this local model from BotConnector Web App while inference continues on this device.</div></div><button class="btn" data-close>Close</button></div></div>
+  <div class="card">
+    <h3>1. Get a pairing code</h3>
+    <div class="muted">Open BotConnector Web App, go to Devices, and choose Connect a device.</div>
+    <button class="btn" id="openBotConnectorApp" style="margin-top:10px">Open BotConnector Web App</button>
+  </div>
+  <div class="card">
+    <h3>2. Pair this device</h3>
+    <div class="muted" id="webAppState"></div>
+    <div class="row" style="margin-top:10px"><input class="grow" id="webAppCode" placeholder="Enter pairing code" autocomplete="off"><button class="btn" id="pairWebApp">Connect</button><button class="btn" id="disconnectWebApp" hidden>Disconnect</button></div>
+    <div class="muted" id="webAppMessage" style="margin-top:8px"></div>
+  </div>
+  <div class="card"><h3>How it works</h3><div class="muted">The Web App becomes the interface. The selected local model remains loaded and inference still runs on this computer. Closing this Local session disconnects the device.</div></div>
 </aside>
 <aside class="panel" id="settingsPanel">
   <div class="panelHead"><div class="row"><div class="grow"><h2>Settings</h2><div class="panelLead">Tune the local chat experience on this device.</div></div><button class="btn" data-close>Close</button></div></div>
