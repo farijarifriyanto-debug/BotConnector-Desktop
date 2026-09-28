@@ -4,12 +4,12 @@
   "private": true,
   "description": "Installer-free BotConnector local device bridge",
   "main": "cli/botconnector-device.cjs",
-    "cli/device-settings.cjs",
   "bin": {
     "botconnector-device": "cli/botconnector-device.cjs"
   },
   "files": [
     "cli/botconnector-device.cjs",
+    "cli/device-settings.cjs",
     "cli/local-runtime.cjs",
     "cli/offline-server.cjs",
     "cli/local-documents.cjs",
