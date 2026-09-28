@@ -611,38 +611,45 @@ class LocalAiRuntime {
 
   async status() {
     this.assertEnabled();
-    const runtime = await this.detect();
-    if (!runtime) {
-      return {
-        available: false,
-        runtime: null,
-        installable: true,
-        message:
-          'No local AI runtime is available. BotConnector can install its managed llama.cpp runtime without a desktop installer.',
-      };
+
+    const runtimes = [];
+    const loadedModels = [];
+    const addRuntime = (runtime, baseUrl, models = []) => {
+      const normalized = [...new Set((Array.isArray(models) ? models : []).map(String).filter(Boolean))];
+      runtimes.push({ runtime, baseUrl, loadedModels: normalized });
+      loadedModels.push(...normalized);
+    };
+
+    const managed = await this.managedInstalled().catch(() => ({ installed: false }));
+    if (managed?.installed) {
+      addRuntime(
+        'llamacpp',
+        MANAGED_LLAMA_BASE,
+        this.managedRunning() && this.managedModel ? [this.managedModel] : [],
+      );
     }
 
-    const models = await this.listModels(runtime);
-    let loadedModels = [];
-
-    if (runtime.kind === 'llamacpp') {
-      if (this.managedRunning() && this.managedModel) loadedModels = [this.managedModel];
-    } else if (runtime.kind === 'ollama') {
+    const ollamaBase = await this.findOllamaBase().catch(() => null);
+    if (ollamaBase) {
+      let running = [];
       try {
-        const running = await this.fetchJson(`${runtime.baseUrl}/api/ps`, { method: 'GET' }, 3000);
-        loadedModels = (Array.isArray(running?.models) ? running.models : [])
+        const payload = await this.fetchJson(`${ollamaBase}/api/ps`, { method: 'GET' }, 3000);
+        running = (Array.isArray(payload?.models) ? payload.models : [])
           .map((model) => String(model?.name || model?.model || ''))
           .filter(Boolean);
       } catch {}
-    } else {
-      try {
-        const health = await this.fetchJson(
-          `${LEMONADE_BASE}/v1/health`,
-          { method: 'GET' },
-          3000,
-        );
+      addRuntime('ollama', ollamaBase, running);
+    }
+
+    try {
+      const health = await this.fetchJson(
+        `${LEMONADE_BASE}/v1/health`,
+        { method: 'GET' },
+        3000,
+      );
+      if (!health?.status || health.status === 'ok') {
         const primary = String(health?.model_loaded || '');
-        loadedModels = [
+        const running = [
           ...(primary ? [primary] : []),
           ...(Array.isArray(health?.all_models_loaded)
             ? health.all_models_loaded
@@ -650,18 +657,36 @@ class LocalAiRuntime {
                 .filter(Boolean)
             : []),
         ];
-        loadedModels = [...new Set(loadedModels)];
-      } catch {}
+        addRuntime('lemonade', LEMONADE_BASE, running);
+      }
+    } catch {}
+
+    if (!runtimes.length) {
+      return {
+        available: false,
+        runtime: null,
+        runtimes: [],
+        loadedModels: [],
+        activeModel: null,
+        installable: true,
+        message:
+          'No local AI runtime is available. BotConnector can install its managed llama.cpp runtime without a desktop installer.',
+      };
     }
+
+    const models = await this.listModels();
+    const uniqueLoaded = [...new Set(loadedModels)];
+    const primary = runtimes[0];
 
     return {
       available: true,
-      runtime: runtime.kind,
-      baseUrl: runtime.baseUrl,
+      runtime: primary.runtime,
+      baseUrl: primary.baseUrl,
+      runtimes,
       models: models.length,
-      activeModel: loadedModels[0] || null,
-      loadedModels,
-      managed: runtime.kind === 'llamacpp',
+      activeModel: uniqueLoaded[0] || null,
+      loadedModels: uniqueLoaded,
+      managed: primary.runtime === 'llamacpp',
     };
   }
 
