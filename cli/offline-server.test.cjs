@@ -67,7 +67,9 @@ test('offline UI serves localhost HTML and protects local API with a session tok
   assert.match(html, /id="deviceFitPanel"/);
   assert.match(html, /Recommended local models/);
   assert.match(html, /id="activeModelPill"/);
+  assert.match(html, /id="unloadActive"/);
   assert.match(html, /Model unload could not be verified/);
+  assert.match(html, /Active model unload could not be verified/);
 
   const anonymous = await fetch(server.url + '/api/status');
   assert.equal(anonymous.status, 401);
