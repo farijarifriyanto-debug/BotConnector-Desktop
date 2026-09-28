@@ -6,6 +6,7 @@ const path = require('node:path');
 const http = require('node:http');
 const { spawn } = require('node:child_process');
 const defaultCatalog = require('../desktop/local/catalog.cjs');
+const { runToolAgent } = require('../desktop/local/device-bridge.cjs');
 const { recommendModels } = defaultCatalog;
 const { localUiHtml } = require('./local-ui.cjs');
 const { createDocumentStore } = require('./local-documents.cjs');
@@ -324,6 +325,7 @@ async function startOfflineServer({
   dataDir = process.env.BOTCONNECTOR_DEVICE_DATA_DIR || path.join(os.homedir(), '.botconnector-device'),
   open = true,
   catalog = defaultCatalog,
+  tools = null,
 } = {}) {
   if (!localAi) throw new Error('Local AI runtime is required.');
   if (!detectHardware) throw new Error('Hardware detector is required.');
@@ -411,6 +413,42 @@ async function startOfflineServer({
       }
       if (req.method === 'GET' && url.pathname === '/api/models') {
         sendJson(res, 200, { models: await localAi.listModels() });
+        return;
+      }
+      if (req.method === 'GET' && url.pathname === '/api/tools') {
+        const rows = tools?.list ? tools.list() : [];
+        sendJson(res, 200, {
+          tools: rows.map(tool => ({
+            id: tool.id,
+            name: tool.name,
+            description: tool.description,
+            source: tool.source,
+            permissionClass: tool.permissionClass,
+            status: tool.status,
+          })),
+        });
+        return;
+      }
+      if (req.method === 'GET' && url.pathname === '/api/mcp') {
+        const rows = tools?.mcpStatus ? tools.mcpStatus() : [];
+        sendJson(res, 200, {
+          servers: rows.map(server => ({
+            id: server.id,
+            name: server.name,
+            transport: server.transport,
+            status: server.status,
+            error: server.error || null,
+            tools: Array.isArray(server.tools)
+              ? server.tools.map(tool => ({
+                  id: tool.id,
+                  name: tool.name,
+                  description: tool.description,
+                  permissionClass: tool.permissionClass,
+                  status: tool.status,
+                }))
+              : [],
+          })),
+        });
         return;
       }
       // Chat history lives on disk, not in localStorage: the browser keys storage by port, and the port can move.
@@ -511,8 +549,9 @@ async function startOfflineServer({
           }
           if (!attached) messages.push({ role: 'user', content: '[Local attached document context]\n' + context });
         }
+        const useTools = body.tool_mode === 'auto' && tools && Array.isArray(body.tools) && body.tools.length > 0;
         if (body.stream === true) {
-          // Server-sent events so the UI can render the answer while the model is still writing it.
+          // Server-sent events so the UI can render both model output and tool activity.
           res.writeHead(200, {
             'content-type': 'text/event-stream; charset=utf-8',
             'cache-control': 'no-store',
@@ -521,12 +560,28 @@ async function startOfflineServer({
           });
           const event = (payload) => res.write('data: ' + JSON.stringify(payload) + '\n\n');
           try {
-            const result = await localAi.chat({ ...body, messages, onDelta: event });
-            event({ done: true, ...result });
+            if (useTools) {
+              const result = await runToolAgent({
+                localAi,
+                tools,
+                params: { ...body, stream: false, messages },
+                onEvent: (toolEvent) => event({ tool_event: toolEvent }),
+              });
+              if (result?.reasoning) event({ reasoning: String(result.reasoning) });
+              if (result?.content) event({ content: String(result.content) });
+              event({ done: true, usage: result?.usage, tool_events: result?.tool_events || [] });
+            } else {
+              const result = await localAi.chat({ ...body, messages, onDelta: event });
+              event({ done: true, ...result });
+            }
           } catch (error) {
             event({ error: { message: String(error?.message || error) } });
           }
           res.end();
+          return;
+        }
+        if (useTools) {
+          sendJson(res, 200, await runToolAgent({ localAi, tools, params: { ...body, messages } }));
           return;
         }
         sendJson(res, 200, await localAi.chat({ ...body, messages }));
