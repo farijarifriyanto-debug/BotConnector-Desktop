@@ -331,3 +331,112 @@ test('chats made before the disk copy loaded are merged into it, not lost or ove
   assert.match(html, /function mergeChatStates\(/);
   assert.match(html, /renderMarkdown, mergeChatStates\);/);
 });
+
+
+test('offline browser exposes selected tools and streams tool activity', async (t) => {
+  const tool = {
+    id: 'web_search',
+    name: 'web_search',
+    description: 'Search the web.',
+    source: 'builtin',
+    permissionClass: 'READ',
+    status: 'READY',
+  };
+  let invoked = 0;
+  const localAi = runtimeFixture();
+  localAi.chat = async ({ messages = [], tools = [] }) => {
+    const hasToolResult = messages.some((message) => message.role === 'tool');
+    if (tools.length && !hasToolResult) {
+      return {
+        content: '',
+        tool_calls: [
+          {
+            id: 'call-search-1',
+            type: 'function',
+            function: {
+              name: 'web_search',
+              arguments: JSON.stringify({ query: 'BotConnector Local' }),
+            },
+          },
+        ],
+      };
+    }
+    return {
+      content: hasToolResult ? 'Local answer after tool result.' : 'Local answer without tools.',
+      tool_calls: [],
+      usage: { completion_tokens: 6 },
+    };
+  };
+  const registry = {
+    list: () => [tool],
+    mcpStatus: () => [
+      { id: 'fixture', name: 'Fixture MCP', transport: 'stdio', status: 'READY', error: null, tools: [] },
+    ],
+    schemas: (selected) => selected.includes('web_search')
+      ? [{
+          type: 'function',
+          function: {
+            name: 'web_search',
+            description: 'Search the web.',
+            parameters: {
+              type: 'object',
+              properties: { query: { type: 'string' } },
+              required: ['query'],
+            },
+          },
+        }]
+      : [],
+    findTool: (name) => name === 'web_search' ? tool : null,
+    invoke: async (name, args) => {
+      invoked += 1;
+      assert.equal(name, 'web_search');
+      assert.equal(args.query, 'BotConnector Local');
+      return { query: args.query, results: [{ title: 'Result', url: 'https://example.test' }] };
+    },
+  };
+
+  const server = await startOfflineServer({
+    localAi,
+    tools: registry,
+    detectHardware: async () => ({ cpu: 'Test CPU', ramGb: 16 }),
+    port: 0,
+    open: false,
+  });
+  t.after(() => server.close());
+
+  const headers = {
+    origin: server.url,
+    'content-type': 'application/json',
+    'x-botconnector-local-token': server.token,
+  };
+  const toolsResponse = await fetch(server.url + '/api/tools', { headers });
+  assert.equal(toolsResponse.status, 200);
+  const toolsPayload = await toolsResponse.json();
+  assert.equal(toolsPayload.tools[0].id, 'web_search');
+  assert.equal(toolsPayload.tools[0].permissionClass, 'READ');
+
+  const mcpResponse = await fetch(server.url + '/api/mcp', { headers });
+  assert.equal(mcpResponse.status, 200);
+  const mcpPayload = await mcpResponse.json();
+  assert.equal(mcpPayload.servers[0].status, 'READY');
+
+  const response = await fetch(server.url + '/api/chat', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      model: 'model-1',
+      runtime: 'test',
+      stream: true,
+      tool_mode: 'auto',
+      tools: ['web_search'],
+      messages: [{ role: 'user', content: 'search this' }],
+    }),
+  });
+  assert.equal(response.status, 200);
+  const stream = await response.text();
+  assert.match(stream, /"type":"tool\.started"/);
+  assert.match(stream, /"type":"tool\.completed"/);
+  assert.match(stream, /"arguments":\{"query":"BotConnector Local"\}/);
+  assert.match(stream, /Local answer after tool result/);
+  assert.equal(invoked, 1);
+});
