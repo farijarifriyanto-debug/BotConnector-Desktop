@@ -55,6 +55,10 @@ test('offline UI serves localhost HTML and protects local API with a session tok
   assert.match(html, /button\.disabled = !streaming/);
   assert.match(html, /id="loadSelected"/);
   assert.match(html, /id="unloadSelected"/);
+  assert.match(html, /id="modelLoadState"/);
+  assert.match(html, />Loaded</);
+  assert.match(html, />Unloaded</);
+  assert.match(html, /Chat can auto-load the selected model/);
   assert.match(html, /id="openWebApp"/);
   assert.match(html, /Connect to Web App/);
 
