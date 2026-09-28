@@ -661,6 +661,12 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   const HEADERS = { 'content-type': 'application/json', 'x-botconnector-local-token': TOKEN };
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const iconSvg = (name) => ({
+    edit: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+    trash: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5M14 11v5"/></svg>',
+    send: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m6 11 6-6 6 6"/></svg>',
+    stop: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>',
+  }[name] || '');
   const load = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch { return fallback; } };
   const save = (key, value) => localStorage.setItem(key, JSON.stringify(value));
 
@@ -714,10 +720,10 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       if (f && !String(c.title).toLowerCase().includes(f) && !c.messages.some((m) => String(m.content).toLowerCase().includes(f))) continue;
       const row = document.createElement('div');
       row.className = 'item' + (c.id === state.active ? ' active' : '');
-      row.innerHTML = '<button class="title"></button><button class="mini" title="Rename">✎</button><button class="mini" title="Delete">🗑</button>';
+      row.innerHTML = '<button class="title"></button><button class="mini rename" title="Rename chat" aria-label="Rename chat">' + iconSvg('edit') + '</button><button class="mini" title="Delete chat" aria-label="Delete chat">' + iconSvg('trash') + '</button>';
       const [title, rename, del] = row.querySelectorAll('button');
       title.textContent = c.title || 'New chat';
-      title.onclick = () => { state.active = c.id; attachments = []; persist(); renderAll(); };
+      title.onclick = () => { state.active = c.id; attachments = []; persist(); renderAll(); close(); };
       rename.onclick = () => {
         const name = prompt('Chat name', c.title);
         if (name && name.trim()) { c.title = name.trim().slice(0, 80); persist(); renderHistory(); }
@@ -793,7 +799,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     const c = ensureChat();
     const box = $('chat');
     if (!c.messages.length) {
-      box.innerHTML = '<div class="empty"><h1>BotConnector Local</h1><div>Private local chat with files, local models, and offline conversation history.</div></div>';
+      box.innerHTML = '<div class="empty"><div class="emptyMark">BC</div><h1>How can I help on this device?</h1><div class="emptyLead">Choose a local model and start a conversation. Model inference runs on this computer, while optional tools are used only when you enable them.</div><div class="quickGrid"><button class="quick" data-prompt="Summarize the key points in this text:"><strong>Summarize something</strong><span>Paste text or attach a local document</span></button><button class="quick" data-prompt="Help me understand and improve this code:"><strong>Work with code</strong><span>Explain, review, or improve a snippet</span></button><button class="quick" data-prompt="Help me compare these options and their tradeoffs:"><strong>Compare options</strong><span>Structure a decision clearly</span></button><button class="quick" data-prompt="Use the selected tools when they are useful for this request:"><strong>Use local tools</strong><span>Search, run code, or call MCP when enabled</span></button></div></div>';
       return;
     }
     const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
@@ -823,15 +829,18 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     attachments.forEach((a, i) => {
       const chip = document.createElement('span');
       chip.className = 'chip';
-      chip.innerHTML = esc(a.name) + ' <button title="Remove">×</button>';
+      chip.innerHTML = esc(a.name) + ' <button title="Remove file" aria-label="Remove file">Remove</button>';
       chip.querySelector('button').onclick = () => { attachments.splice(i, 1); renderAttachments(); };
       box.appendChild(chip);
     });
   }
 
   function renderComposer() {
-    $('sendBtn').textContent = streaming ? 'Stop' : 'Send';
-    $('sendBtn').classList.toggle('send', !streaming);
+    const button = $('sendBtn');
+    button.innerHTML = streaming ? iconSvg('stop') : iconSvg('send');
+    button.title = streaming ? 'Stop generation' : 'Send message';
+    button.setAttribute('aria-label', button.title);
+    button.classList.add('send');
   }
 
   function renderAll() { renderHistory(); renderChat(); renderAttachments(); renderComposer(); }
@@ -932,6 +941,13 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   }
 
   async function onChatClick(e) {
+    const quick = e.target.closest('[data-prompt]');
+    if (quick && !streaming) {
+      $('prompt').value = quick.dataset.prompt || '';
+      autosize();
+      $('prompt').focus();
+      return;
+    }
     const copyCode = e.target.closest('[data-copy]');
     if (copyCode) return copy(copyCode.closest('.code').querySelector('pre').textContent, copyCode);
     const btn = e.target.closest('[data-act]');
@@ -986,7 +1002,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       const [s, m] = await Promise.all([api('/api/status'), api('/api/models')]);
       models = Array.isArray(m.models) ? m.models : [];
       $('runtime').textContent = s.runtime?.available ? 'Ready · ' + (s.runtime.runtime || 'local runtime') : (s.runtime?.message || 'Runtime not ready');
-      $('runtimePill').textContent = s.runtime?.available ? (s.runtime.runtime || 'local') : 'no runtime';
+      $('runtimePill').innerHTML = '<span class="pillDot"></span>' + esc(s.runtime?.available ? (s.runtime.runtime || 'local runtime') : 'Runtime unavailable');
       $('prepareRuntime').hidden = Boolean(s.runtime?.available);
       const h = s.hardware || {};
       const gpu = [...(h.nvidia || []), ...(h.amd || []), ...(h.intel || [])][0];
@@ -1131,7 +1147,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       box.appendChild(row);
     }
     const count = settings.tools.length;
-    $('openTools').textContent = count ? 'Tools (' + count + ')' : 'Tools';
+    $('openTools').querySelector('.toolBtnLabel').textContent = count ? 'Tools (' + count + ')' : 'Tools';
     $('openTools').classList.toggle('active', count > 0);
 
     const mcp = $('mcpServers');
@@ -1165,7 +1181,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   // ---- settings ----
   function applySettings() {
     document.documentElement.dataset.theme = settings.theme;
-    $('themeBtn').textContent = settings.theme === 'light' ? 'Dark mode' : 'Light mode';
+    $('themeBtn').querySelector('span').textContent = settings.theme === 'light' ? 'Dark mode' : 'Light mode';
     $('system').value = settings.system;
     $('temperature').value = settings.temperature;
     $('tempValue').textContent = Number(settings.temperature).toFixed(1);
@@ -1173,9 +1189,12 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   const persistSettings = () => { save('botconnector-local-settings-v1', settings); saveToDisk(); };
 
   const open = (id) => { $(id).classList.add('open'); $('overlay').classList.add('open'); };
-  const close = () => { for (const el of document.querySelectorAll('.panel.open,.overlay.open')) el.classList.remove('open'); };
+  const close = () => {
+    for (const el of document.querySelectorAll('.panel.open,.overlay.open')) el.classList.remove('open');
+    $('sidebar').classList.remove('mobileOpen');
+  };
 
-  $('newChat').onclick = () => { if (streaming) return; state.active = null; attachments = []; ensureChat(); renderAll(); $('prompt').focus(); };
+  $('newChat').onclick = () => { if (streaming) return; state.active = null; attachments = []; ensureChat(); renderAll(); close(); $('prompt').focus(); };
   $('search').oninput = (e) => { filter = e.target.value; renderHistory(); };
   $('chat').onclick = onChatClick;
   $('sendBtn').onclick = send;
@@ -1187,6 +1206,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   $('openModels').onclick = () => { open('modelsPanel'); refresh(); loadRecommendations(); };
   $('openTools').onclick = () => { open('toolsPanel'); loadTools(); };
   $('openSettings').onclick = () => open('settingsPanel');
+  $('mobileMenu').onclick = () => { $('sidebar').classList.add('mobileOpen'); $('overlay').classList.add('open'); };
   $('overlay').onclick = close;
   for (const b of document.querySelectorAll('[data-close]')) b.onclick = close;
   $('themeBtn').onclick = () => { settings.theme = settings.theme === 'light' ? 'dark' : 'light'; persistSettings(); applySettings(); };
@@ -1232,63 +1252,82 @@ function localUiHtml({ token, host, port }) {
   return '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width,initial-scale=1">\n' +
     '<title>BotConnector Local</title>\n<link rel="icon" href="data:,">\n<style>' + STYLE + '</style>\n</head>\n<body>\n' +
     `<div class="app">
-  <aside class="sidebar">
-    <div class="brand">BotConnector Local</div>
-    <button class="newchat" id="newChat">New chat</button>
-    <input class="search" id="search" placeholder="Search chats">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebarHead">
+      <div class="brandRow">
+        <div class="brandMark">BC</div>
+        <div class="brandCopy">
+          <div class="brand">BotConnector Local</div>
+          <div class="brandSub">On-device AI workspace</div>
+        </div>
+      </div>
+      <button class="newchat" id="newChat">
+        <span class="iconBox"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span>
+        <span>New chat</span>
+      </button>
+      <div class="searchWrap">
+        <span class="searchIcon"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>
+        <input class="search" id="search" placeholder="Search chats">
+      </div>
+    </div>
+    <div class="sideSectionLabel">Chats</div>
     <div class="history" id="history"></div>
     <div class="sideBottom">
-      <button id="openModels">Models</button>
-      <button id="openSettings">Settings</button>
-      <button id="themeBtn">Light mode</button>
+      <button id="openModels"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16v12H4z"/><path d="M8 10h8M8 14h5"/></svg><span>Models</span></button>
+      <button id="openSettings"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.8 1.8 0 0 0 .4 2l.1.1-2.8 2.8-.1-.1a1.8 1.8 0 0 0-2-.4 1.8 1.8 0 0 0-1 1.6v.2h-4V21a1.8 1.8 0 0 0-1-1.6 1.8 1.8 0 0 0-2 .4l-.1.1-2.8-2.8.1-.1a1.8 1.8 0 0 0 .4-2A1.8 1.8 0 0 0 3 14H2.8v-4H3a1.8 1.8 0 0 0 1.6-1 1.8 1.8 0 0 0-.4-2l-.1-.1L6.9 4l.1.1a1.8 1.8 0 0 0 2 .4A1.8 1.8 0 0 0 10 3V2.8h4V3a1.8 1.8 0 0 0 1 1.6 1.8 1.8 0 0 0 2-.4l.1-.1 2.8 2.8-.1.1a1.8 1.8 0 0 0-.4 2A1.8 1.8 0 0 0 21 10h.2v4H21a1.8 1.8 0 0 0-1.6 1Z"/></svg><span>Settings</span></button>
+      <button id="themeBtn"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9Z"/></svg><span>Light mode</span></button>
     </div>
   </aside>
   <main class="main">
     <div class="topbar">
-      <select id="modelSelect"><option value="">Detecting local models…</option></select>
-      <span class="pill" id="runtimePill">…</span>
-      <span class="pill right">OFFLINE · Localhost only</span>
+      <button class="btn mobileMenu" id="mobileMenu" aria-label="Open navigation"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+      <div class="modelControl">
+        <span class="modelLabel">Model</span>
+        <select id="modelSelect"><option value="">Detecting local models…</option></select>
+      </div>
+      <span class="pill" id="runtimePill"><span class="pillDot"></span>Checking runtime</span>
+      <span class="pill right">On-device inference</span>
     </div>
     <div class="chat" id="chat"></div>
     <div class="composerWrap">
       <div class="composer" id="composer">
         <div class="attachments" id="attachments"></div>
-        <textarea id="prompt" rows="1" placeholder="Message your local model…  (Enter to send, Shift+Enter for a new line)"></textarea>
+        <textarea id="prompt" rows="1" placeholder="Message your local model"></textarea>
         <div class="bar">
           <input id="fileInput" type="file" hidden multiple accept=".txt,.md,.markdown,.csv,.json,.jsonl,.yaml,.yml,.xml,.html,.htm,.docx,.js,.ts,.tsx,.jsx,.py,.rs,.go,.java,.c,.cpp,.h,.hpp,.css,.sql,.sh,.ps1,.toml,.ini,.conf,.log">
-          <button class="btn" id="attachBtn">Attach</button>
-          <button class="btn toolBtn" id="openTools">Tools</button>
-          <button class="btn send" id="sendBtn">Send</button>
+          <button class="btn" id="attachBtn"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.4 11.6-8.5 8.5a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg><span>Attach</span></button>
+          <button class="btn toolBtn" id="openTools"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14.7 6.3 3-3a4.2 4.2 0 0 1-5.5 5.5l-6.7 6.7a2 2 0 1 1-2.8-2.8l6.7-6.7a4.2 4.2 0 0 1 5.5-5.5l-3 3 2.8 2.8Z"/></svg><span class="toolBtnLabel">Tools</span></button>
+          <button class="btn send" id="sendBtn" aria-label="Send message"></button>
         </div>
       </div>
-      <div class="hint">Inference and attached document text stay on this device.</div>
+      <div class="hint">Local model inference runs on this device. Optional connected tools run only when selected.</div>
     </div>
   </main>
 </div>
 <div class="overlay" id="overlay"></div>
 <aside class="panel" id="modelsPanel">
-  <div class="row"><h2 class="grow">Models</h2><button class="btn" data-close>✕</button></div>
+  <div class="panelHead"><div class="row"><div class="grow"><h2>Models</h2><div class="panelLead">Manage local runtimes and models for this device.</div></div><button class="btn" data-close>Close</button></div></div>
   <div class="card"><h3>This device</h3><div class="muted" id="hardware">Checking…</div><div class="muted" id="runtime">Checking…</div>
     <button class="btn small" id="prepareRuntime" hidden style="margin-top:8px">Install local runtime</button></div>
   <div class="muted" id="jobStatus"></div>
   <div class="card"><h3>Installed</h3><div id="installed"></div></div>
   <div class="card"><h3>Recommended for this device</h3><div id="recommended"></div></div>
-  <div class="card"><h3>Search Hugging Face (GGUF)</h3>
-    <div class="row"><input class="grow" id="catalogQuery" placeholder="e.g. qwen, gemma, llama — or a repo id"><button class="btn small" id="catalogSearch">Search</button></div>
+  <div class="card"><h3>Find GGUF models</h3>
+    <div class="row"><input class="grow" id="catalogQuery" placeholder="Search Qwen, Gemma, Llama, or enter a repo id"><button class="btn small" id="catalogSearch">Search</button></div>
     <div id="results"></div></div>
   <div class="card"><h3>Local endpoint</h3><div class="muted">__LOCAL_URL__ · OpenAI-compatible API at /v1</div></div>
 </aside>
 <aside class="panel" id="toolsPanel">
-  <div class="row"><h2 class="grow">Tools</h2><button class="btn" data-close>Close</button></div>
-  <div class="card"><h3>Available tools</h3><div class="muted">Choose which local tools the model may use for the next messages. READ tools run when selected. EXECUTE tools also require a one-time approval for each message.</div><div class="toolList" id="toolsList"></div></div>
+  <div class="panelHead"><div class="row"><div class="grow"><h2>Tools</h2><div class="panelLead">Choose capabilities the local model may use.</div></div><button class="btn" data-close>Close</button></div></div>
+  <div class="card"><h3>Available tools</h3><div class="muted">READ tools can run when selected. WRITE and EXECUTE tools also require one-time approval for the next message.</div><div class="toolList" id="toolsList"></div></div>
   <div class="card"><h3>MCP servers</h3><div class="muted">Local MCP servers are loaded from ~/.botconnector-device/mcp.json.</div><div id="mcpServers"></div></div>
 </aside>
 <aside class="panel" id="settingsPanel">
-  <div class="row"><h2 class="grow">Settings</h2><button class="btn" data-close>✕</button></div>
-  <div class="card"><h3>System prompt</h3><textarea id="system" rows="5" placeholder="Optional instructions for every chat, e.g. Answer in Bahasa Indonesia."></textarea></div>
+  <div class="panelHead"><div class="row"><div class="grow"><h2>Settings</h2><div class="panelLead">Tune the local chat experience on this device.</div></div><button class="btn" data-close>Close</button></div></div>
+  <div class="card"><h3>System prompt</h3><textarea id="system" rows="5" placeholder="Optional instructions for every chat, for example: Answer in Bahasa Indonesia."></textarea></div>
   <div class="card"><h3>Temperature <span class="muted" id="tempValue"></span></h3><input id="temperature" type="range" min="0" max="2" step="0.1">
-    <div class="muted">Lower is more precise, higher is more creative.</div></div>
-  <div class="card"><h3>Local storage</h3><div class="muted">Chat history is stored on this device. Local model inference runs on this device; connected web features such as Web Search can access their configured external source when you explicitly select them.</div></div>
+    <div class="muted">Lower values are more focused. Higher values are more varied.</div></div>
+  <div class="card"><h3>On-device storage</h3><div class="muted">Chat history is stored on this device. Local model inference stays on this computer. Connected tools such as Web Search may access their configured external source only when you select them.</div></div>
 </aside>
 `.replace('__LOCAL_URL__', localUrl) +
     '<script>\n' + renderMarkdown.toString() + '\n' + mergeChatStates.toString() + '\n(' + app.toString() + ')(' + JSON.stringify(token) + ', renderMarkdown, mergeChatStates);\n</script>\n</body>\n</html>';
