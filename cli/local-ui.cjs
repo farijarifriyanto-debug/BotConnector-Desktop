@@ -668,6 +668,7 @@ svg{display:block}
   .modelControl{flex:1;min-width:0}
   .modelActions{display:none}
   .activeModelPill{display:none}
+  #unloadActive{display:none}
   #openDeviceFit{display:none}
   .connectBtn{width:34px;padding:0;margin-left:auto;flex:0 0 34px}
   .connectBtn span:last-child{display:none}
@@ -795,6 +796,34 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     activePill.hidden = !active || selectedIsActive;
     activePill.textContent = active && !selectedIsActive ? 'Loaded: ' + friendlyModelName(active) : '';
     activePill.title = active && !selectedIsActive ? 'Currently loaded in memory: ' + modelDetail(active) : '';
+    $('unloadActive').hidden = !active || selectedIsActive;
+    $('unloadActive').disabled = !active || selectedIsActive;
+  }
+
+  async function unloadActiveModel() {
+    const active = activeLoadedModel();
+    if (!active) return;
+    const model = models.find((item) => String(item.id) === String(active.id)) || active;
+    const button = $('unloadActive');
+    button.disabled = true;
+    button.textContent = 'Unloading…';
+    try {
+      await api('/api/models/unload', {
+        method: 'POST',
+        body: JSON.stringify({ model: model.id, runtime: model.runtime || runtimeState?.runtime || '' }),
+      });
+      await refresh();
+      if (activeLoadedModel()) {
+        await new Promise((resolve) => setTimeout(resolve, 180));
+        await refresh();
+      }
+      if (activeLoadedModel()) throw new Error('Active model unload could not be verified.');
+    } catch (error) {
+      alert(error.message || error);
+    } finally {
+      button.textContent = 'Unload';
+      renderModelActions();
+    }
   }
   function renderWebAppStatus() {
     const connected = webAppStatus.connection === 'CONNECTED';
@@ -1456,6 +1485,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   };
   $('loadSelected').onclick = () => selectedModelAction('load');
   $('unloadSelected').onclick = () => selectedModelAction('unload');
+  $('unloadActive').onclick = unloadActiveModel;
   $('openModels').onclick = () => { open('modelsPanel'); refresh(); loadRecommendations(); };
   const openFit = () => { open('deviceFitPanel'); loadDeviceFit(); };
   $('openDeviceFit').onclick = openFit;
@@ -1562,6 +1592,7 @@ function localUiHtml({ token, host, port }) {
         <button class="btn small" id="unloadSelected" hidden>Unload</button>
       </div>
       <span class="pill activeModelPill" id="activeModelPill" hidden></span>
+      <button class="btn small" id="unloadActive" hidden>Unload</button>
       <span class="pill" id="runtimePill"><span class="pillDot"></span>Checking runtime</span>
       <button class="btn" id="openDeviceFit">Device fit</button>
       <button class="btn connectBtn right" id="openWebApp"><span class="pillDot"></span><span>Connect Web App</span></button>
