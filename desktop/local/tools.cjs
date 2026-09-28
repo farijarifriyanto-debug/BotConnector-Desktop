@@ -238,6 +238,9 @@ class ToolRegistry {
     const tool = this.findTool(name);
     if (!tool) throw new Error(`Tool tidak dikenal: ${name}`);
     if (!tool.enabled) throw new Error(`Tool '${name}' belum diaktifkan.`);
+    if (tool.permissionClass !== 'READ' && !options.approved) {
+      throw new Error(`Tool '${name}' membutuhkan persetujuan eksplisit.`);
+    }
     if (tool.serverId) return this.executeMcp(tool, args);
     return this.execute(name, args, options);
   }
