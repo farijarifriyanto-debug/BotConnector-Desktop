@@ -60,6 +60,9 @@ test('offline UI serves localhost HTML and protects local API with a session tok
   assert.match(html, /Chat can auto-load the selected model/);
   assert.match(html, /id="openWebApp"/);
   assert.match(html, /Connect to Web App/);
+  assert.match(html, /Web App paired/);
+  assert.match(html, /reconnects automatically/);
+  assert.match(html, /Forget pairing/);
 
   const anonymous = await fetch(server.url + '/api/status');
   assert.equal(anonymous.status, 401);
