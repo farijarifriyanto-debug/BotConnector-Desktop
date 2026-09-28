@@ -547,3 +547,36 @@ test('chat streams Ollama NDJSON deltas', async () => {
   assert.equal(out.content, 'Jakarta');
   assert.deepEqual(out.usage, { prompt_tokens: 5, completion_tokens: 2 });
 });
+
+
+test('status reports loaded models from secondary runtimes even when managed llama.cpp is primary', async () => {
+  const fetchImpl = async (url) => {
+    if (String(url).endsWith('/api/tags')) throw new TypeError('ollama unavailable');
+    if (String(url).endsWith('/v1/health')) {
+      return jsonResponse(200, {
+        status: 'ok',
+        model_loaded: 'Qwen3-0.6B-GGUF',
+        all_models_loaded: [{ model_name: 'Qwen3-0.6B-GGUF' }],
+      });
+    }
+    throw new Error('Unexpected URL ' + url);
+  };
+
+  const runtime = new LocalAiRuntime({ enabled: true, fetchImpl });
+  runtime.runtimeManager.installed = async () => ({ installed: true, binary: '/tmp/llama-server' });
+  runtime.findOllamaBase = async () => null;
+  runtime.listModels = async () => [
+    { id: 'managed-model', runtime: 'llamacpp' },
+    { id: 'Qwen3-0.6B-GGUF', runtime: 'lemonade' },
+  ];
+
+  const status = await runtime.status();
+  assert.equal(status.runtime, 'llamacpp');
+  assert.equal(status.activeModel, 'Qwen3-0.6B-GGUF');
+  assert.deepEqual(status.loadedModels, ['Qwen3-0.6B-GGUF']);
+  assert.deepEqual(
+    status.runtimes.map((item) => item.runtime),
+    ['llamacpp', 'lemonade'],
+  );
+  assert.deepEqual(status.runtimes[1].loadedModels, ['Qwen3-0.6B-GGUF']);
+});
