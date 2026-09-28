@@ -36,6 +36,130 @@ function toolResultContent(value) {
   }
 }
 
+
+async function runToolAgent({ localAi, tools, params = {}, onEvent = () => {} } = {}) {
+  const selected = Array.isArray(params.tools)
+    ? [...new Set(params.tools.map(String).filter(Boolean))].slice(0, 24)
+    : [];
+  const toolSchemas = tools?.schemas ? tools.schemas(selected) : [];
+  if (!selected.length || !toolSchemas.length) {
+    return localAi.chat({ ...params, tools: [] });
+  }
+
+  const approved = new Set(
+    Array.isArray(params.approved_tools) ? params.approved_tools.map(String) : [],
+  );
+  const messages = Array.isArray(params.messages)
+    ? params.messages.map(message => ({ ...message }))
+    : [];
+  const events = [];
+  const record = (event) => {
+    events.push(event);
+    try { onEvent(event); } catch {}
+  };
+  let lastResult = null;
+
+  for (let round = 0; round < MAX_TOOL_CALLS_PER_TURN; round += 1) {
+    lastResult = await localAi.chat({
+      ...params,
+      messages,
+      tools: toolSchemas,
+      tool_choice: 'auto',
+    });
+    const calls = Array.isArray(lastResult?.tool_calls) ? lastResult.tool_calls : [];
+    if (!calls.length) return { ...lastResult, tool_events: events };
+
+    messages.push({
+      role: 'assistant',
+      content: String(lastResult?.content || ''),
+      tool_calls: calls,
+    });
+
+    for (const call of calls) {
+      const name = String(call?.function?.name || '');
+      const tool = tools.findTool(name);
+      if (!tool || (!selected.includes(tool.id) && !selected.includes(tool.name))) {
+        const error = `Tool '${name || 'unknown'}' was not selected for this turn.`;
+        record({ type: 'tool.error', name, error });
+        messages.push({
+          role: 'tool',
+          tool_call_id: String(call?.id || crypto.randomUUID()),
+          content: JSON.stringify({ error }),
+        });
+        continue;
+      }
+
+      const callId = String(call?.id || crypto.randomUUID());
+      let args;
+      try {
+        args = parseToolArguments(call);
+      } catch (error) {
+        const message = error?.message || String(error);
+        record({ type: 'tool.error', id: callId, name, error: message });
+        messages.push({
+          role: 'tool',
+          tool_call_id: callId,
+          content: JSON.stringify({ error: message }),
+        });
+        continue;
+      }
+
+      record({
+        type: 'tool.started',
+        id: callId,
+        name,
+        source: tool.source,
+        permissionClass: tool.permissionClass,
+        arguments: args,
+      });
+      try {
+        const result = await tools.invoke(name, args, {
+          selected: true,
+          approved: approved.has(tool.id) || approved.has(tool.name),
+        });
+        record({
+          type: 'tool.completed',
+          id: callId,
+          name,
+          source: tool.source,
+          permissionClass: tool.permissionClass,
+          result,
+        });
+        messages.push({
+          role: 'tool',
+          tool_call_id: callId,
+          content: toolResultContent(result),
+        });
+      } catch (error) {
+        const message = error?.message || String(error);
+        record({
+          type: 'tool.error',
+          id: callId,
+          name,
+          source: tool.source,
+          permissionClass: tool.permissionClass,
+          error: message,
+        });
+        messages.push({
+          role: 'tool',
+          tool_call_id: callId,
+          content: JSON.stringify({ error: message }),
+        });
+      }
+    }
+  }
+
+  const final = await localAi.chat({
+    ...params,
+    messages,
+    tools: [],
+    tool_choice: 'none',
+  });
+  const limit = { type: 'tool.limit', max_calls: MAX_TOOL_CALLS_PER_TURN };
+  record(limit);
+  return { ...final, tool_events: events };
+}
+
 class DeviceBridge {
   constructor({ settings, detectHardware, tools, launcher, localAi = null, catalog = defaultCatalog, emit = () => {}, seal = value => value, open = value => value, cloudBase = 'https://app.botconnector.id', WebSocketImpl = globalThis.WebSocket } = {}) {
     this.settings = settings;
@@ -178,126 +302,11 @@ class DeviceBridge {
     }
   }
   async agentChat(params = {}) {
-    const selected = Array.isArray(params.tools)
-      ? [...new Set(params.tools.map(String).filter(Boolean))].slice(0, 24)
-      : [];
-    const toolSchemas = this.tools?.schemas ? this.tools.schemas(selected) : [];
-    if (!selected.length || !toolSchemas.length) {
-      return this.localAi.chat({ ...params, tools: [] });
-    }
-
-    const approved = new Set(
-      Array.isArray(params.approved_tools) ? params.approved_tools.map(String) : [],
-    );
-    const messages = Array.isArray(params.messages)
-      ? params.messages.map(message => ({ ...message }))
-      : [];
-    const events = [];
-    let lastResult = null;
-
-    for (let round = 0; round < MAX_TOOL_CALLS_PER_TURN; round += 1) {
-      lastResult = await this.localAi.chat({
-        ...params,
-        messages,
-        tools: toolSchemas,
-        tool_choice: 'auto',
-      });
-      const calls = Array.isArray(lastResult?.tool_calls) ? lastResult.tool_calls : [];
-      if (!calls.length) {
-        return { ...lastResult, tool_events: events };
-      }
-
-      messages.push({
-        role: 'assistant',
-        content: String(lastResult?.content || ''),
-        tool_calls: calls,
-      });
-
-      for (const call of calls) {
-        const name = String(call?.function?.name || '');
-        const tool = this.tools.findTool(name);
-        if (!tool || (!selected.includes(tool.id) && !selected.includes(tool.name))) {
-          const error = `Tool '${name || 'unknown'}' was not selected for this turn.`;
-          events.push({ type: 'tool.error', name, error });
-          messages.push({
-            role: 'tool',
-            tool_call_id: String(call?.id || crypto.randomUUID()),
-            content: JSON.stringify({ error }),
-          });
-          continue;
-        }
-
-        const callId = String(call?.id || crypto.randomUUID());
-        let args;
-        try {
-          args = parseToolArguments(call);
-        } catch (error) {
-          const message = error?.message || String(error);
-          events.push({ type: 'tool.error', id: callId, name, error: message });
-          messages.push({
-            role: 'tool',
-            tool_call_id: callId,
-            content: JSON.stringify({ error: message }),
-          });
-          continue;
-        }
-
-        events.push({
-          type: 'tool.started',
-          id: callId,
-          name,
-          source: tool.source,
-          permissionClass: tool.permissionClass,
-        });
-        try {
-          const result = await this.tools.invoke(name, args, {
-            selected: true,
-            approved: approved.has(tool.id) || approved.has(tool.name),
-          });
-          events.push({
-            type: 'tool.completed',
-            id: callId,
-            name,
-            source: tool.source,
-            permissionClass: tool.permissionClass,
-          });
-          messages.push({
-            role: 'tool',
-            tool_call_id: callId,
-            content: toolResultContent(result),
-          });
-        } catch (error) {
-          const message = error?.message || String(error);
-          events.push({
-            type: 'tool.error',
-            id: callId,
-            name,
-            source: tool.source,
-            permissionClass: tool.permissionClass,
-            error: message,
-          });
-          messages.push({
-            role: 'tool',
-            tool_call_id: callId,
-            content: JSON.stringify({ error: message }),
-          });
-        }
-      }
-    }
-
-    const final = await this.localAi.chat({
-      ...params,
-      messages,
-      tools: [],
-      tool_choice: 'none',
+    return runToolAgent({
+      localAi: this.localAi,
+      tools: this.tools,
+      params,
     });
-    return {
-      ...final,
-      tool_events: [
-        ...events,
-        { type: 'tool.limit', max_calls: MAX_TOOL_CALLS_PER_TURN },
-      ],
-    };
   }
 
   async execute(method, params) {
@@ -353,4 +362,4 @@ class DeviceBridge {
   }
 }
 
-module.exports = { DeviceBridge, defaultDeviceName, wsState };
+module.exports = { DeviceBridge, defaultDeviceName, wsState, runToolAgent };
