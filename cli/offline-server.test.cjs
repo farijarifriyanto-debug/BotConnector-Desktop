@@ -63,6 +63,11 @@ test('offline UI serves localhost HTML and protects local API with a session tok
   assert.match(html, /Web App paired/);
   assert.match(html, /reconnects automatically/);
   assert.match(html, /Forget pairing/);
+  assert.match(html, /id="openDeviceFit"/);
+  assert.match(html, /id="deviceFitPanel"/);
+  assert.match(html, /Recommended local models/);
+  assert.match(html, /id="activeModelPill"/);
+  assert.match(html, /Model unload could not be verified/);
 
   const anonymous = await fetch(server.url + '/api/status');
   assert.equal(anonymous.status, 401);
@@ -511,4 +516,57 @@ test('Local UI Web App pairing routes stay behind localhost session auth', async
   });
   assert.equal(disconnect.status, 200);
   assert.equal(disconnected, 1);
+});
+
+
+test('Local UI load and unload endpoints return verified model lifecycle responses', async (t) => {
+  let loaded = false;
+  const localAi = {
+    ...runtimeFixture(),
+    status: async () => ({
+      available: true,
+      runtime: 'test',
+      activeModel: loaded ? 'model-1' : null,
+      loadedModels: loaded ? ['model-1'] : [],
+    }),
+    loadModel: async (model, runtime) => {
+      loaded = true;
+      return { loaded: true, model, runtime };
+    },
+    unloadModel: async (model, runtime) => {
+      loaded = false;
+      return { loaded: false, model, runtime };
+    },
+  };
+  const server = await startOfflineServer({
+    localAi,
+    detectHardware: async () => ({ cpu: 'Test CPU', ramGb: 16 }),
+    port: 0,
+    open: false,
+  });
+  t.after(() => server.close());
+
+  const headers = {
+    origin: server.url,
+    'content-type': 'application/json',
+    'x-botconnector-local-token': server.token,
+  };
+
+  const load = await fetch(server.url + '/api/models/load', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ model: 'model-1', runtime: 'test' }),
+  });
+  assert.equal(load.status, 200);
+  assert.equal((await load.json()).loaded, true);
+  assert.deepEqual((await (await fetch(server.url + '/api/status', { headers })).json()).runtime.loadedModels, ['model-1']);
+
+  const unload = await fetch(server.url + '/api/models/unload', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ model: 'model-1', runtime: 'test' }),
+  });
+  assert.equal(unload.status, 200);
+  assert.equal((await unload.json()).loaded, false);
+  assert.deepEqual((await (await fetch(server.url + '/api/status', { headers })).json()).runtime.loadedModels, []);
 });
