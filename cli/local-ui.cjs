@@ -50,6 +50,16 @@ button,input,select,textarea{font:inherit;color:inherit}button{cursor:pointer}bu
 .model{display:flex;gap:8px;align-items:center;border-top:1px solid var(--line);padding:8px 0}.model:first-of-type{border-top:0}.model .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .fit{font-size:11px;border-radius:999px;padding:1px 7px;border:1px solid var(--line)}.fit.great{color:var(--ok)}.fit.ok{color:var(--text)}.fit.warn{color:var(--warn)}
 .small{padding:5px 9px;font-size:12px}
+.toolBtn.active{border-color:var(--text);color:var(--text)}
+.toolList{display:grid;gap:8px;margin-top:10px}.toolRow{border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--bg)}
+.toolTop{display:flex;gap:10px;align-items:flex-start}.toolTop input{width:auto;margin-top:3px}.toolMain{flex:1;min-width:0}.toolName{font-weight:650}.toolDesc{color:var(--muted);font-size:12px;margin-top:2px}
+.toolMeta{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:7px}.tag{border:1px solid var(--line);border-radius:999px;padding:2px 7px;color:var(--muted);font-size:10px}
+.tag.execute{color:var(--warn)}.tag.read{color:var(--ok)}.approve{margin-left:auto}
+.toolTrace{display:grid;gap:7px;margin:0 0 10px}.toolCall{border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden}
+.toolCall summary{display:flex;align-items:center;gap:8px;cursor:pointer;padding:8px 10px;list-style:none}.toolCall summary::-webkit-details-marker{display:none}
+.toolCallName{font-weight:650;flex:1}.toolState{font-size:11px;color:var(--muted)}.toolState.done{color:var(--ok)}.toolState.error{color:var(--danger)}.toolState.running{color:var(--warn)}
+.toolPayload{border-top:1px solid var(--line);padding:9px 10px}.toolPayload strong{display:block;font-size:11px;color:var(--muted);margin:0 0 4px}.toolPayload pre{margin:0 0 8px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;color:var(--muted);background:var(--code);padding:8px;border-radius:7px}
+.mcpServer{display:flex;align-items:center;gap:8px;border-top:1px solid var(--line);padding:8px 0}.mcpServer:first-child{border-top:0}.mcpServer .grow{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media(max-width:760px){.app{grid-template-columns:1fr}.sidebar{display:none}.chat{padding:20px 12px}.composerWrap{padding:8px}.pill{display:none}.msg.user .body{max-width:92%}}
 `;
 
@@ -74,8 +84,12 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   const save = (key, value) => localStorage.setItem(key, JSON.stringify(value));
 
   let state = load('botconnector-local-chats-v1', { active: null, chats: [] });
-  let settings = load('botconnector-local-settings-v1', { system: '', temperature: 0.7, theme: 'dark', model: '' });
+  let settings = load('botconnector-local-settings-v1', { system: '', temperature: 0.7, theme: 'dark', model: '', tools: [] });
+  if (!Array.isArray(settings.tools)) settings.tools = [];
   let models = [];
+  let tools = [];
+  let mcpServers = [];
+  let approvedOnce = new Set();
   let attachments = [];
   let streaming = null; // { requestId, controller, chatId, message }
   let filter = '';
@@ -138,20 +152,60 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     }
   }
 
+  function toolTraceHtml(events) {
+    if (!Array.isArray(events) || !events.length) return '';
+    const calls = new Map();
+    const loose = [];
+    for (const event of events) {
+      if (!event || !String(event.type || '').startsWith('tool.')) continue;
+      if (!event.id) { loose.push(event); continue; }
+      const row = calls.get(event.id) || { id: event.id, name: event.name || 'Tool', source: event.source || '', permissionClass: event.permissionClass || '', status: 'running' };
+      if (event.name) row.name = event.name;
+      if (event.source) row.source = event.source;
+      if (event.permissionClass) row.permissionClass = event.permissionClass;
+      if (event.arguments !== undefined) row.arguments = event.arguments;
+      if (event.result !== undefined) row.result = event.result;
+      if (event.type === 'tool.completed') row.status = 'done';
+      if (event.type === 'tool.error') { row.status = 'error'; row.error = event.error || 'Tool failed.'; }
+      calls.set(event.id, row);
+    }
+    const rows = [...calls.values()];
+    for (const event of loose) {
+      if (event.type === 'tool.limit') rows.push({ id: 'limit-' + rows.length, name: 'Tool limit reached', status: 'error', error: 'Maximum tool rounds: ' + event.max_calls });
+      else if (event.type === 'tool.error') rows.push({ id: 'error-' + rows.length, name: event.name || 'Tool', status: 'error', error: event.error || 'Tool failed.' });
+    }
+    if (!rows.length) return '';
+    const json = (value) => {
+      try {
+        const out = JSON.stringify(value, null, 2);
+        return esc(out.length > 6000 ? out.slice(0, 6000) + '\n…[truncated]' : out);
+      } catch { return esc(String(value)); }
+    };
+    return '<div class="toolTrace">' + rows.map((row) => {
+      const state = row.status === 'done' ? 'Completed' : row.status === 'error' ? 'Failed' : 'Running';
+      const payload = (row.arguments !== undefined ? '<strong>Input</strong><pre>' + json(row.arguments) + '</pre>' : '') +
+        (row.result !== undefined ? '<strong>Result</strong><pre>' + json(row.result) + '</pre>' : '') +
+        (row.error ? '<strong>Error</strong><pre>' + esc(row.error) + '</pre>' : '');
+      return '<details class="toolCall"><summary><span class="toolCallName">' + esc(row.name) + '</span><span class="toolState ' + esc(row.status) + '">' + state + '</span></summary>' +
+        (payload ? '<div class="toolPayload">' + payload + '</div>' : '') + '</details>';
+    }).join('') + '</div>';
+  }
+
   function messageHtml(m, index, chat) {
     if (m.role === 'user') {
       return '<div class="msg user"><div class="body">' + esc(m.content) + '</div><div class="actions">' +
-        (m.files?.length ? '<span>📎 ' + esc(m.files.join(', ')) + '</span>' : '') +
+        (m.files?.length ? '<span>Files: ' + esc(m.files.join(', ')) + '</span>' : '') +
         '<button data-act="copy" data-i="' + index + '">Copy</button><button data-act="edit" data-i="' + index + '">Edit</button></div></div>';
     }
     const live = streaming && streaming.message === m;
     const think = m.reasoning ? '<details class="think"' + (live && !m.content ? ' open' : '') + '><summary>Thinking</summary><div>' + esc(m.reasoning) + '</div></details>' : '';
     const body = m.error ? '<p class="error">' + esc(m.error) + '</p>' : renderMarkdown(m.content || '');
+    const toolTrace = toolTraceHtml(m.toolEvents);
     const isLast = index === chat.messages.length - 1;
     const stats = m.stats ? '<span>' + esc(m.stats) + '</span>' : '';
     const actions = live ? '' : '<div class="actions"><button data-act="copy" data-i="' + index + '">Copy</button>' +
       (isLast ? '<button data-act="regen" data-i="' + index + '">Regenerate</button>' : '') + stats + '</div>';
-    return '<div class="msg assistant" data-i="' + index + '"><div class="who">◇ BotConnector Local</div><div class="md' + (live ? ' cursor' : '') + '">' + think + body + '</div>' + actions + '</div>';
+    return '<div class="msg assistant" data-i="' + index + '"><div class="who">BotConnector Local</div><div class="md' + (live ? ' cursor' : '') + '">' + think + toolTrace + body + '</div>' + actions + '</div>';
   }
 
   function renderChat() {
@@ -205,15 +259,19 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   async function run(chat) {
     const model = selectedModel();
     if (!model) { alert('No local model selected. Open Models to download or load one.'); return; }
-    const message = { role: 'assistant', content: '', reasoning: '', model: model.name || model.id };
+    const message = { role: 'assistant', content: '', reasoning: '', toolEvents: [], model: model.name || model.id };
     chat.messages.push(message);
     const history = chat.messages.slice(0, -1).map((m) => ({ role: m.role, content: m.content || '' }));
     const system = settings.system.trim() ? [{ role: 'system', content: settings.system.trim() }] : [];
     const requestId = crypto.randomUUID();
     streaming = { requestId, controller: new AbortController(), chatId: chat.id, message };
     const documentIds = attachments.map((a) => a.id);
+    const selectedTools = [...new Set(settings.tools.map(String).filter(Boolean))].slice(0, 24);
+    const approvedForTurn = [...approvedOnce].filter((id) => selectedTools.includes(id));
+    approvedOnce = new Set();
     attachments = [];
     renderAll();
+    renderTools();
     const started = performance.now();
     let firstAt = 0;
     try {
@@ -223,6 +281,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
         signal: streaming.controller.signal,
         body: JSON.stringify({
           model: model.id, runtime: model.runtime, stream: true, request_id: requestId, document_ids: documentIds,
+          tool_mode: selectedTools.length ? 'auto' : 'none', tools: selectedTools, approved_tools: approvedForTurn,
           options: { temperature: Number(settings.temperature) }, messages: [...system, ...history],
         }),
       });
@@ -241,12 +300,18 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
           if (!line.startsWith('data: ')) continue;
           const ev = JSON.parse(line.slice(6));
           if (ev.error) throw new Error(ev.error.message);
+          if (ev.tool_event) {
+            message.toolEvents.push(ev.tool_event);
+            renderStreaming();
+            continue;
+          }
           // The final "done" event repeats the whole answer; only its usage is new.
           if (!ev.done) {
             if (!firstAt && (ev.content || ev.reasoning)) firstAt = performance.now();
             if (ev.reasoning) message.reasoning += ev.reasoning;
             if (ev.content) message.content += ev.content;
           } else {
+            if (!message.toolEvents.length && Array.isArray(ev.tool_events)) message.toolEvents = ev.tool_events;
             const secs = (performance.now() - (firstAt || started)) / 1000;
             const tokens = Number(ev.usage?.completion_tokens) || Math.round((message.content.length + message.reasoning.length) / 4);
             message.stats = tokens + ' tokens · ' + (secs > 0 ? (tokens / secs).toFixed(1) : '–') + ' tok/s';
@@ -436,10 +501,90 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     } catch (e) { $('jobStatus').textContent = String(e.message || e); }
   }
 
+  // ---- tools ----
+  function renderTools() {
+    const box = $('toolsList');
+    if (!box) return;
+    const selected = new Set(settings.tools);
+    const visible = tools.filter((tool) => tool.status === 'READY');
+    box.innerHTML = visible.length ? '' : '<div class="muted">No local tools are available.</div>';
+    for (const tool of visible) {
+      const row = document.createElement('div');
+      row.className = 'toolRow';
+      const permission = String(tool.permissionClass || 'READ').toUpperCase();
+      const needsApproval = permission !== 'READ';
+      row.innerHTML = '<div class="toolTop"><input type="checkbox"><div class="toolMain"><div class="toolName"></div><div class="toolDesc"></div><div class="toolMeta"><span class="tag"></span><span class="tag permission"></span><button class="btn small approve" type="button"></button></div></div></div>';
+      const checkbox = row.querySelector('input');
+      checkbox.checked = selected.has(tool.id);
+      row.querySelector('.toolName').textContent = tool.name;
+      row.querySelector('.toolDesc').textContent = tool.description || '';
+      const tags = row.querySelectorAll('.tag');
+      tags[0].textContent = tool.source || 'local';
+      tags[1].textContent = permission;
+      tags[1].classList.add(permission === 'READ' ? 'read' : 'execute');
+      const approve = row.querySelector('.approve');
+      if (!needsApproval) approve.remove();
+      else {
+        approve.textContent = approvedOnce.has(tool.id) ? 'Approved for next message' : 'Approve once';
+        approve.onclick = () => {
+          if (!checkbox.checked) {
+            checkbox.checked = true;
+            if (!settings.tools.includes(tool.id)) settings.tools.push(tool.id);
+            persistSettings();
+          }
+          if (approvedOnce.has(tool.id)) approvedOnce.delete(tool.id);
+          else approvedOnce.add(tool.id);
+          renderTools();
+        };
+      }
+      checkbox.onchange = () => {
+        if (checkbox.checked) {
+          if (!settings.tools.includes(tool.id)) settings.tools.push(tool.id);
+        } else {
+          settings.tools = settings.tools.filter((id) => id !== tool.id);
+          approvedOnce.delete(tool.id);
+        }
+        persistSettings();
+        renderTools();
+      };
+      box.appendChild(row);
+    }
+    const count = settings.tools.length;
+    $('openTools').textContent = count ? 'Tools (' + count + ')' : 'Tools';
+    $('openTools').classList.toggle('active', count > 0);
+
+    const mcp = $('mcpServers');
+    mcp.innerHTML = mcpServers.length ? '' : '<div class="muted">No MCP server configured. Add servers in ~/.botconnector-device/mcp.json.</div>';
+    for (const server of mcpServers) {
+      const row = document.createElement('div');
+      row.className = 'mcpServer';
+      row.innerHTML = '<span class="grow"></span><span class="tag"></span>';
+      row.querySelector('.grow').textContent = server.name || server.id;
+      row.querySelector('.tag').textContent = server.status || 'UNKNOWN';
+      mcp.appendChild(row);
+    }
+  }
+
+  async function loadTools() {
+    try {
+      const [toolPayload, mcpPayload] = await Promise.all([api('/api/tools'), api('/api/mcp')]);
+      tools = Array.isArray(toolPayload.tools) ? toolPayload.tools : [];
+      mcpServers = Array.isArray(mcpPayload.servers) ? mcpPayload.servers : [];
+      const valid = new Set(tools.map((tool) => tool.id));
+      settings.tools = settings.tools.filter((id) => valid.has(id));
+      persistSettings();
+      renderTools();
+    } catch (error) {
+      tools = [];
+      mcpServers = [];
+      $('toolsList').innerHTML = '<div class="error">' + esc(error.message || error) + '</div>';
+    }
+  }
+
   // ---- settings ----
   function applySettings() {
     document.documentElement.dataset.theme = settings.theme;
-    $('themeBtn').textContent = settings.theme === 'light' ? '☾ Dark mode' : '☀ Light mode';
+    $('themeBtn').textContent = settings.theme === 'light' ? 'Dark mode' : 'Light mode';
     $('system').value = settings.system;
     $('temperature').value = settings.temperature;
     $('tempValue').textContent = Number(settings.temperature).toFixed(1);
@@ -459,6 +604,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   $('fileInput').onchange = (e) => uploadFiles([...e.target.files]).catch((err) => alert(err.message));
   $('modelSelect').onchange = () => { settings.model = $('modelSelect').value; persistSettings(); };
   $('openModels').onclick = () => { open('modelsPanel'); refresh(); loadRecommendations(); };
+  $('openTools').onclick = () => { open('toolsPanel'); loadTools(); };
   $('openSettings').onclick = () => open('settingsPanel');
   $('overlay').onclick = close;
   for (const b of document.querySelectorAll('[data-close]')) b.onclick = close;
@@ -495,6 +641,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   ensureChat();
   renderAll();
   refresh();
+  loadTools();
   loadFromDisk();
 }
 
@@ -505,14 +652,14 @@ function localUiHtml({ token, host, port }) {
     '<title>BotConnector Local</title>\n<link rel="icon" href="data:,">\n<style>' + STYLE + '</style>\n</head>\n<body>\n' +
     `<div class="app">
   <aside class="sidebar">
-    <div class="brand">◇ BotConnector Local</div>
-    <button class="newchat" id="newChat">＋ New chat</button>
+    <div class="brand">BotConnector Local</div>
+    <button class="newchat" id="newChat">New chat</button>
     <input class="search" id="search" placeholder="Search chats">
     <div class="history" id="history"></div>
     <div class="sideBottom">
-      <button id="openModels">▦ Models</button>
-      <button id="openSettings">⚙ Settings</button>
-      <button id="themeBtn">☀ Light mode</button>
+      <button id="openModels">Models</button>
+      <button id="openSettings">Settings</button>
+      <button id="themeBtn">Light mode</button>
     </div>
   </aside>
   <main class="main">
@@ -528,7 +675,8 @@ function localUiHtml({ token, host, port }) {
         <textarea id="prompt" rows="1" placeholder="Message your local model…  (Enter to send, Shift+Enter for a new line)"></textarea>
         <div class="bar">
           <input id="fileInput" type="file" hidden multiple accept=".txt,.md,.markdown,.csv,.json,.jsonl,.yaml,.yml,.xml,.html,.htm,.docx,.js,.ts,.tsx,.jsx,.py,.rs,.go,.java,.c,.cpp,.h,.hpp,.css,.sql,.sh,.ps1,.toml,.ini,.conf,.log">
-          <button class="btn" id="attachBtn">📎 Attach</button>
+          <button class="btn" id="attachBtn">Attach</button>
+          <button class="btn toolBtn" id="openTools">Tools</button>
           <button class="btn send" id="sendBtn">Send</button>
         </div>
       </div>
@@ -549,12 +697,17 @@ function localUiHtml({ token, host, port }) {
     <div id="results"></div></div>
   <div class="card"><h3>Local endpoint</h3><div class="muted">__LOCAL_URL__ · OpenAI-compatible API at /v1</div></div>
 </aside>
+<aside class="panel" id="toolsPanel">
+  <div class="row"><h2 class="grow">Tools</h2><button class="btn" data-close>Close</button></div>
+  <div class="card"><h3>Available tools</h3><div class="muted">Choose which local tools the model may use for the next messages. READ tools run when selected. EXECUTE tools also require a one-time approval for each message.</div><div class="toolList" id="toolsList"></div></div>
+  <div class="card"><h3>MCP servers</h3><div class="muted">Local MCP servers are loaded from ~/.botconnector-device/mcp.json.</div><div id="mcpServers"></div></div>
+</aside>
 <aside class="panel" id="settingsPanel">
   <div class="row"><h2 class="grow">Settings</h2><button class="btn" data-close>✕</button></div>
   <div class="card"><h3>System prompt</h3><textarea id="system" rows="5" placeholder="Optional instructions for every chat, e.g. Answer in Bahasa Indonesia."></textarea></div>
   <div class="card"><h3>Temperature <span class="muted" id="tempValue"></span></h3><input id="temperature" type="range" min="0" max="2" step="0.1">
     <div class="muted">Lower is more precise, higher is more creative.</div></div>
-  <div class="card"><h3>Privacy</h3><div class="muted">Chats are saved in this browser only. Nothing is sent to BotConnector cloud from this page.</div></div>
+  <div class="card"><h3>Local storage</h3><div class="muted">Chat history is stored on this device. Local model inference runs on this device; connected web features such as Web Search can access their configured external source when you explicitly select them.</div></div>
 </aside>
 `.replace('__LOCAL_URL__', localUrl) +
     '<script>\n' + renderMarkdown.toString() + '\n' + mergeChatStates.toString() + '\n(' + app.toString() + ')(' + JSON.stringify(token) + ', renderMarkdown, mergeChatStates);\n</script>\n</body>\n</html>';
