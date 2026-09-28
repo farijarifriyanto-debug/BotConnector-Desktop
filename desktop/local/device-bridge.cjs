@@ -195,7 +195,7 @@ class DeviceBridge {
 
   async pair(code) {
     const pairingCode = String(code || '').trim().toUpperCase();
-    if (!/^[A-Z0-9-]{6,32}$/.test(pairingCode)) throw new Error('Invalid pairing code.');
+    if (!/^[A-Z0-9_-]{6,32}$/.test(pairingCode)) throw new Error('Invalid pairing code.');
     const response = await fetch(`${this.cloudBase}/api/devices/pair/exchange`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', accept: 'application/json' },
