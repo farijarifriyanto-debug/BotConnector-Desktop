@@ -420,6 +420,8 @@ svg{display:block}
   border-radius:7px;
 }
 .actions button:hover{background:var(--surface-2);color:var(--text)}
+.responseStats{margin-left:3px;color:var(--muted-2);font-variant-numeric:tabular-nums}
+.send:disabled{opacity:.35;background:var(--surface-3);border-color:var(--line);color:var(--muted-2)}
 .error{color:var(--danger)}
 .cursor::after{content:"";display:inline-block;width:2px;height:1em;margin-left:3px;vertical-align:-2px;background:var(--text);animation:blink 1s steps(2) infinite}
 @keyframes blink{50%{opacity:0}}
@@ -723,6 +725,26 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     return p;
   }
   const selectedModel = () => models.find((m) => m.path === $('modelSelect').value) || null;
+  function friendlyModelName(model) {
+    const raw = String(model?.name || model?.id || 'Local model');
+    const leaf = raw.includes('/') ? raw.slice(raw.lastIndexOf('/') + 1) : raw;
+    return leaf
+      .replace(/\.gguf$/i, '')
+      .replace(/-GGUF$/i, '')
+      .replace(/[_-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+  function modelOptionLabel(model) {
+    return friendlyModelName(model) + (model?.quant ? ' · ' + model.quant : '');
+  }
+  function modelDetail(model) {
+    return [
+      String(model?.name || model?.id || '').trim(),
+      model?.quant || '',
+      model?.runtime || model?.source || '',
+    ].filter(Boolean).join(' · ');
+  }
 
   // ---- rendering ----
   function renderHistory() {
@@ -802,7 +824,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     const body = m.error ? '<p class="error">' + esc(m.error) + '</p>' : renderMarkdown(m.content || '');
     const toolTrace = toolTraceHtml(m.toolEvents);
     const isLast = index === chat.messages.length - 1;
-    const stats = m.stats ? '<span>' + esc(m.stats) + '</span>' : '';
+    const stats = m.stats ? '<span class="responseStats" title="Local generation performance">' + esc(m.stats) + '</span>' : '';
     const actions = live ? '' : '<div class="actions"><button data-act="copy" data-i="' + index + '">Copy</button>' +
       (isLast ? '<button data-act="regen" data-i="' + index + '">Regenerate</button>' : '') + stats + '</div>';
     return '<div class="msg assistant" data-i="' + index + '"><div class="who">BotConnector Local</div><div class="md' + (live ? ' cursor' : '') + '">' + think + toolTrace + body + '</div>' + actions + '</div>';
@@ -854,6 +876,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     button.title = streaming ? 'Stop generation' : 'Send message';
     button.setAttribute('aria-label', button.title);
     button.classList.add('send');
+    button.disabled = !streaming && !$('prompt').value.trim();
   }
 
   function renderAll() { renderHistory(); renderChat(); renderAttachments(); renderComposer(); }
@@ -942,6 +965,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     chat.messages.push({ role: 'user', content: text, files: attachments.map((a) => a.name) });
     $('prompt').value = '';
     autosize();
+    renderComposer();
     persist();
     await run(chat);
   }
@@ -958,6 +982,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     if (quick && !streaming) {
       $('prompt').value = quick.dataset.prompt || '';
       autosize();
+      renderComposer();
       $('prompt').focus();
       return;
     }
@@ -1027,11 +1052,15 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       for (const x of models.filter((m) => !/embed|rerank/i.test((m.name || '') + ' ' + (m.id || '')))) {
         const o = document.createElement('option');
         o.value = x.path;
-        o.textContent = (x.name || x.id) + (x.quant ? ' · ' + x.quant : '') + ' · ' + (x.source || x.runtime || 'local');
+        o.textContent = modelOptionLabel(x);
+        o.title = modelDetail(x);
         sel.appendChild(o);
       }
       if (models.some((x) => x.path === want)) sel.value = want;
+      const current = selectedModel();
+      sel.title = current ? modelDetail(current) : 'Select a local chat model';
       renderInstalled();
+      renderComposer();
     } catch (e) {
       $('runtime').textContent = String(e.message || e);
     }
@@ -1044,7 +1073,8 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       const row = document.createElement('div');
       row.className = 'model';
       row.innerHTML = '<span class="name"></span><button class="btn small">Load</button><button class="btn small">Unload</button><button class="btn small">Delete</button>';
-      row.querySelector('.name').textContent = (m.name || m.id) + (m.quant ? ' · ' + m.quant : '');
+      row.querySelector('.name').textContent = modelOptionLabel(m);
+      row.querySelector('.name').title = modelDetail(m);
       const [loadBtn, unloadBtn, delBtn] = row.querySelectorAll('button');
       const act = (action) => api('/api/models/' + action, { method: 'POST', body: JSON.stringify({ model: m.id, runtime: m.runtime }) }).then(refresh).catch((e) => alert(e.message));
       loadBtn.onclick = () => act('load');
@@ -1212,10 +1242,15 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   $('chat').onclick = onChatClick;
   $('sendBtn').onclick = send;
   $('prompt').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });
-  $('prompt').addEventListener('input', autosize);
+  $('prompt').addEventListener('input', () => { autosize(); renderComposer(); });
   $('attachBtn').onclick = () => $('fileInput').click();
   $('fileInput').onchange = (e) => uploadFiles([...e.target.files]).catch((err) => alert(err.message));
-  $('modelSelect').onchange = () => { settings.model = $('modelSelect').value; persistSettings(); };
+  $('modelSelect').onchange = () => {
+    settings.model = $('modelSelect').value;
+    const current = selectedModel();
+    $('modelSelect').title = current ? modelDetail(current) : 'Select a local chat model';
+    persistSettings();
+  };
   $('openModels').onclick = () => { open('modelsPanel'); refresh(); loadRecommendations(); };
   $('openTools').onclick = () => { open('toolsPanel'); loadTools(); };
   $('openSettings').onclick = () => open('settingsPanel');
