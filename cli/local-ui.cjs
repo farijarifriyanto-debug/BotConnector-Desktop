@@ -275,6 +275,9 @@ svg{display:block}
 .pillDot{width:6px;height:6px;border-radius:50%;background:var(--ok)}
 .pill.right{margin-left:auto}
 .modelActions{display:flex;gap:6px;align-items:center}
+.modelLoadState{min-height:30px;display:inline-flex;align-items:center;padding:0 9px;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:10.5px;font-weight:650;white-space:nowrap}
+.modelLoadState.loaded{border-color:color-mix(in srgb,var(--ok) 40%,var(--line));background:color-mix(in srgb,var(--ok) 8%,transparent);color:var(--ok)}
+.modelLoadState.unloaded{color:var(--muted)}
 .connectBtn{margin-left:auto;border-radius:999px;min-height:30px;padding:0 11px;font-size:11px}
 .connectBtn.connected{border-color:color-mix(in srgb,var(--ok) 40%,var(--line));color:var(--ok)}
 .chat{
@@ -762,6 +765,10 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   function renderModelActions() {
     const model = selectedModel();
     const loaded = modelIsLoaded(model);
+    const state = $('modelLoadState');
+    state.textContent = !model ? 'No model' : loaded ? 'Loaded' : 'Unloaded';
+    state.classList.toggle('loaded', Boolean(model && loaded));
+    state.classList.toggle('unloaded', Boolean(model && !loaded));
     $('loadSelected').hidden = !model || loaded;
     $('unloadSelected').hidden = !model || !loaded;
     $('loadSelected').disabled = !model;
@@ -987,6 +994,9 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       streaming = null;
       persist();
       renderAll();
+      // Chat can auto-load the selected model. Re-read runtime state so Load/Unload
+      // immediately reflects what is actually in RAM/VRAM.
+      await refresh().catch(() => {});
     }
   }
 
@@ -1359,6 +1369,12 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   $('disconnectWebApp').onclick = disconnectWebApp;
   $('mobileMenu').onclick = () => { $('sidebar').classList.add('mobileOpen'); $('overlay').classList.add('open'); };
   $('overlay').onclick = close;
+  window.addEventListener('focus', () => {
+    if (!streaming) refresh().catch(() => {});
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && !streaming) refresh().catch(() => {});
+  });
   for (const b of document.querySelectorAll('[data-close]')) b.onclick = close;
   $('themeBtn').onclick = () => { settings.theme = settings.theme === 'light' ? 'dark' : 'light'; persistSettings(); applySettings(); };
   $('system').oninput = (e) => { settings.system = e.target.value; persistSettings(); };
@@ -1439,6 +1455,7 @@ function localUiHtml({ token, host, port }) {
         <select id="modelSelect"><option value="">Detecting local models…</option></select>
       </div>
       <div class="modelActions">
+        <span class="modelLoadState" id="modelLoadState">Checking</span>
         <button class="btn small" id="loadSelected" hidden>Load</button>
         <button class="btn small" id="unloadSelected" hidden>Unload</button>
       </div>
