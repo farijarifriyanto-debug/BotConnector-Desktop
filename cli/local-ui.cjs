@@ -628,16 +628,28 @@ svg{display:block}
 @media(max-width:900px){
   .app{grid-template-columns:220px minmax(0,1fr)}
 }
+.mobileMenu{display:none}
 @media(max-width:760px){
-  body{overflow:auto}
+  body{overflow:hidden}
   .app{grid-template-columns:1fr}
-  .sidebar{display:none}
+  .sidebar{
+    position:fixed;
+    inset:0 auto 0 0;
+    width:min(300px,88vw);
+    display:flex;
+    transform:translateX(-102%);
+    transition:transform .2s ease;
+    z-index:23;
+    box-shadow:var(--shadow);
+  }
+  .sidebar.mobileOpen{transform:none}
+  .mobileMenu{display:grid;width:34px;padding:0}
   .chat{padding:26px 14px 150px}
   .composerWrap{padding:14px 10px 12px}
   .pill{display:none}
   .modelLabel{display:none}
   .topbar{padding:0 10px}
-  .topbar select{max-width:76vw}
+  .topbar select{max-width:calc(100vw - 76px)}
   .msg.user .body{max-width:92%}
   .empty{min-height:calc(100vh - 230px)}
   .quickGrid{grid-template-columns:1fr}
