@@ -154,3 +154,53 @@ test('agent chat requires approval for EXECUTE tools', async () => {
   assert.equal(result.tool_events[1].type, 'tool.error');
   assert.match(result.tool_events[1].error, /approval/i);
 });
+
+
+test('pair accepts Base64URL pairing codes with underscore', async (t) => {
+  const originalFetch = globalThis.fetch;
+  let exchangedCode = '';
+  globalThis.fetch = async (_url, init = {}) => {
+    const body = JSON.parse(String(init.body || '{}'));
+    exchangedCode = body.code;
+    return {
+      ok: true,
+      json: async () => ({
+        device_token: 'token-1',
+        device_id: 'device-1',
+        device_name: 'Test device',
+        ws_url: 'wss://app.botconnector.id/api/devices/socket',
+      }),
+    };
+  };
+  t.after(() => { globalThis.fetch = originalFetch; });
+
+  const values = {};
+  const bridge = new DeviceBridge({
+    settings: {
+      get: (key) => values[key] || null,
+      set: async (key, value) => { values[key] = value; },
+    },
+    detectHardware: async () => ({}),
+    tools: { list: () => [] },
+    launcher: { list: () => [] },
+    localAi: { enabled: true },
+    WebSocketImpl: null,
+  });
+
+  const status = await bridge.pair('F_NACCJH');
+  assert.equal(exchangedCode, 'F_NACCJH');
+  assert.equal(status.paired, true);
+  assert.equal(status.deviceId, 'device-1');
+});
+
+test('pair still rejects non-Base64URL characters', async () => {
+  const bridge = new DeviceBridge({
+    settings: { get: () => null, set: async () => {} },
+    detectHardware: async () => ({}),
+    tools: { list: () => [] },
+    launcher: { list: () => [] },
+    localAi: { enabled: true },
+    WebSocketImpl: null,
+  });
+  await assert.rejects(() => bridge.pair('ABC$123'), /Invalid pairing code/);
+});
