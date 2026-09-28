@@ -50,6 +50,7 @@ test('offline UI serves localhost HTML and protects local API with a session tok
   assert.match(html, /How can I help on this device\?/);
   assert.match(html, /id="openTools"/);
   assert.match(html, /On-device AI workspace/);
+  assert.match(html, /\[hidden\]\{display:none!important\}/);
 
   const anonymous = await fetch(server.url + '/api/status');
   assert.equal(anonymous.status, 401);
