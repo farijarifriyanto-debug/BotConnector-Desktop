@@ -10,6 +10,7 @@ const { LocalLauncher } = require('../desktop/local/launcher.cjs');
 const { LocalAiRuntime } = require('./local-runtime.cjs');
 const { ToolRegistry } = require('../desktop/local/tools.cjs');
 const { startOfflineServer, DEFAULT_PORT } = require('./offline-server.cjs');
+const { DeviceSettings } = require('./device-settings.cjs');
 
 const PUBLIC_PACKAGE_URL = 'https://app.botconnector.id/device-cli-launcher-v1.0.2.tgz';
 
@@ -79,9 +80,10 @@ Usage:
   npx --offline ${PUBLIC_PACKAGE_URL} offline --allow-local-ai
 
 Modes:
-  connect   Pair with app.botconnector.id. When Local AI is allowed, localhost
-            UI is also available as an offline fallback.
-  offline   No pairing or cloud connection. Opens the local browser UI only.
+  connect   Connect to app.botconnector.id. The first connection uses a pairing
+            code; later launches reuse the saved device credential automatically.
+  offline   Opens the local browser UI. If this device was paired before, it
+            also reconnects to the Web App automatically when internet is available.
 
 Options:
   --code <code>                  Pairing code from app.botconnector.id
@@ -101,7 +103,7 @@ Offline cold start:
 Security:
   - Local UI binds only to 127.0.0.1.
   - Local API requires a random in-memory session token and same-origin checks.
-  - Pairing credentials stay in process memory for the online session only.
+  - Pairing credentials are stored only in this OS user profile so the same device can reconnect after restart.
   - Local AI model management and inference require explicit session approval.
   - Arbitrary remote shell access is not available.
 `.trim());
@@ -254,7 +256,7 @@ async function runOffline(options) {
     throw new Error('Offline mode requires Local AI permission for this session.');
   }
 
-  const settings = new SessionSettings({
+  const settings = new DeviceSettings({
     launcherProfiles: {
       'desktop-commander-remote': false,
       'ollama-serve': true,
@@ -278,6 +280,12 @@ async function runOffline(options) {
     webAppController(bridge, options.origin),
   );
 
+  if (settings.get('devicePairing')) {
+    bridge.connect().catch((error) => {
+      console.error('[BotConnector] Saved Web App connection is unavailable: ' + (error?.message || error));
+    });
+  }
+
   const shutdown = () => {
     bridge.close();
     void localServer.close();
@@ -291,23 +299,26 @@ async function runOffline(options) {
   process.once('SIGTERM', shutdown);
 
   console.log(
-    '[BotConnector] Offline mode is ready. No BotConnector cloud pairing is active.',
+    settings.get('devicePairing')
+      ? '[BotConnector] Local mode is ready. Saved Web App pairing will reconnect automatically when online.'
+      : '[BotConnector] Local mode is ready. Pair with Web App once to enable automatic reconnect on future launches.',
   );
   const hold = setInterval(() => {}, 60_000);
   hold.unref();
 }
 
 async function connect(options) {
-  const code = await promptForCode(options);
   const allowLocalAi = await promptLocalAi(options);
   const allowDesktopCommander = await promptDesktopCommander(options);
 
-  const settings = new SessionSettings({
+  const settings = new DeviceSettings({
     launcherProfiles: {
       'desktop-commander-remote': allowDesktopCommander,
       'ollama-serve': allowLocalAi,
     },
   });
+  const savedPairing = settings.get('devicePairing');
+  const code = options.code || (!savedPairing ? await promptForCode(options) : '');
 
   const launcher = new LocalLauncher({ settings });
   const localAi = createLocalAi(allowLocalAi);
@@ -351,9 +362,16 @@ async function connect(options) {
   process.once('SIGINT', shutdown);
   process.once('SIGTERM', shutdown);
 
-  console.log(`[BotConnector] Pairing with ${options.origin}...`);
-  const status = await bridge.pair(code);
-  console.log(`[BotConnector] Pairing accepted. Device ID: ${status.deviceId}`);
+  let status;
+  if (code) {
+    console.log(`[BotConnector] Pairing with ${options.origin}...`);
+    status = await bridge.pair(code);
+    console.log(`[BotConnector] Pairing accepted. Device ID: ${status.deviceId}`);
+  } else {
+    console.log(`[BotConnector] Reconnecting saved device to ${options.origin}...`);
+    status = await bridge.connect();
+    console.log(`[BotConnector] Saved pairing loaded. Device ID: ${status.deviceId}`);
+  }
 
   // Keep this foreground process alive. The WebSocket itself also holds the
   // event loop, while this timer makes the intended session lifetime explicit.
