@@ -4,6 +4,19 @@ const { spawn } = require('node:child_process');
 
 const MAX_TOOL_CALLS_PER_TURN = 4;
 const TOOL_TIMEOUT_MS = 10_000;
+const CODE_TIMEOUT_MS = 9_000;
+
+function safeCodeEnv(env = process.env) {
+  const keys = [
+    'PATH', 'Path', 'PATHEXT', 'SystemRoot', 'SYSTEMROOT', 'WINDIR',
+    'HOME', 'USERPROFILE', 'TMP', 'TEMP', 'LANG', 'LC_ALL',
+  ];
+  const out = {};
+  for (const key of keys) {
+    if (env[key] != null) out[key] = String(env[key]);
+  }
+  return out;
+}
 
 const BUILTIN_TOOLS = [
   {
@@ -172,16 +185,26 @@ class ToolRegistry {
         const result = await new Promise((resolve, reject) => {
           const child = spawn(spec.command, spec.args, {
             cwd: this.modelsDir,
-            env: { ...process.env },
+            env: safeCodeEnv(),
             stdio: ['ignore', 'pipe', 'pipe'],
             windowsHide: true,
           });
-          let stdout = ''; let stderr = '';
+          let stdout = ''; let stderr = ''; let settled = false;
           const cap = 64 * 1024;
+          const finish = (fn, value) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            fn(value);
+          };
+          const timer = setTimeout(() => {
+            try { child.kill(); } catch {}
+            finish(reject, new Error('Code execution timed out.'));
+          }, CODE_TIMEOUT_MS);
           child.stdout.on('data', chunk => { if (stdout.length < cap) stdout += chunk.toString().slice(0, cap - stdout.length); });
           child.stderr.on('data', chunk => { if (stderr.length < cap) stderr += chunk.toString().slice(0, cap - stderr.length); });
-          child.once('error', reject);
-          child.once('exit', codeValue => resolve({ exit_code: codeValue, stdout, stderr }));
+          child.once('error', error => finish(reject, error));
+          child.once('exit', codeValue => finish(resolve, { exit_code: codeValue, stdout, stderr }));
         });
         return result;
       }
@@ -251,4 +274,4 @@ class ToolRegistry {
   }
 }
 
-module.exports = { ToolRegistry, BUILTIN_TOOLS, MAX_TOOL_CALLS_PER_TURN, validateArgs };
+module.exports = { ToolRegistry, BUILTIN_TOOLS, MAX_TOOL_CALLS_PER_TURN, validateArgs, safeCodeEnv };
