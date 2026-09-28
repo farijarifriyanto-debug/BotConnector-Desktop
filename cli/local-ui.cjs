@@ -1144,7 +1144,9 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       runtimeState = s.runtime || null;
       hardwareState = s.hardware || {};
       $('runtime').textContent = s.runtime?.available ? 'Ready · ' + (s.runtime.runtime || 'local runtime') : (s.runtime?.message || 'Runtime not ready');
-      $('runtimePill').innerHTML = '<span class="pillDot"></span>' + esc(s.runtime?.available ? (s.runtime.runtime || 'local runtime') : 'Runtime unavailable');
+      const selectedRuntime = selectedModel()?.runtime || s.runtime?.runtime || '';
+      $('runtimePill').innerHTML = '<span class="pillDot"></span>' + esc(s.runtime?.available ? (selectedRuntime || 'local runtime') : 'Runtime unavailable');
+      $('runtimePill').title = selectedRuntime ? 'Backend for selected model: ' + selectedRuntime : 'Local runtime status';
       $('prepareRuntime').hidden = Boolean(s.runtime?.available);
       const h = s.hardware || {};
       const gpu = [...(h.nvidia || []), ...(h.amd || []), ...(h.intel || [])][0];
@@ -1336,7 +1338,12 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     }
     if (key === 'npu') return h.npu?.name || (h.npu?.available ? 'NPU detected' : 'No NPU detected');
     if (key === 'system') return [h.platform, h.arch, h.release].filter(Boolean).join(' · ') || 'Unknown';
-    if (key === 'backend') return runtimeState?.runtime || 'Not ready';
+    if (key === 'backend') {
+      const runtimes = Array.isArray(runtimeState?.runtimes)
+        ? runtimeState.runtimes.map((item) => item?.runtime).filter(Boolean)
+        : [];
+      return runtimes.length ? [...new Set(runtimes)].join(' · ') : (runtimeState?.runtime || 'Not ready');
+    }
     return 'Unknown';
   }
 
