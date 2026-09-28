@@ -77,8 +77,39 @@ function normalizeMessages(messages) {
     const content = message?.content == null ? '' : String(message.content);
     total += content.length;
     if (total > MAX_CHAT_CHARS) throw new Error('Local chat payload is too large.');
-    return { role, content };
+    const normalized = { role, content };
+    if (role === 'tool' && message?.tool_call_id) normalized.tool_call_id = String(message.tool_call_id);
+    if (role === 'tool' && message?.name) normalized.name = String(message.name);
+    if (role === 'assistant' && Array.isArray(message?.tool_calls)) {
+      normalized.tool_calls = message.tool_calls.map((call) => ({
+        id: String(call?.id || crypto.randomUUID()),
+        type: 'function',
+        function: {
+          name: String(call?.function?.name || ''),
+          arguments:
+            typeof call?.function?.arguments === 'string'
+              ? call.function.arguments
+              : JSON.stringify(call?.function?.arguments || {}),
+        },
+      })).filter((call) => call.function.name);
+    }
+    return normalized;
   });
+}
+
+function normalizeTools(tools) {
+  if (!Array.isArray(tools)) return [];
+  return tools.slice(0, 32).map((tool) => ({
+    type: 'function',
+    function: {
+      name: String(tool?.function?.name || '').slice(0, 128),
+      description: String(tool?.function?.description || '').slice(0, 2000),
+      parameters:
+        tool?.function?.parameters && typeof tool.function.parameters === 'object'
+          ? tool.function.parameters
+          : { type: 'object', properties: {} },
+    },
+  })).filter((tool) => tool.function.name);
 }
 
 async function responseJson(response) {
@@ -1297,10 +1328,11 @@ class LocalAiRuntime {
     return { content, reasoning, usage };
   }
 
-  async chat({ model, messages, runtime: runtimeHint = '', options = {}, request_id: requestId = '', onDelta } = {}) {
+  async chat({ model, messages, runtime: runtimeHint = '', options = {}, request_id: requestId = '', tools = [], onDelta } = {}) {
     this.assertEnabled();
     const modelName = validModelName(model);
     const normalized = normalizeMessages(messages);
+    const toolSchemas = normalizeTools(tools);
     const runtime = runtimeHint || (await this.detect())?.kind;
     if (!runtime) throw new Error('No supported local AI runtime is available.');
     this.clearIdleTimer();
@@ -1318,7 +1350,13 @@ class LocalAiRuntime {
         await this.loadModel(modelName, runtime);
       }
       this.clearIdleTimer();
-      const body = { model: 'botconnector-local', messages: normalized, stream, temperature };
+      const body = {
+        model: 'botconnector-local',
+        messages: normalized,
+        stream,
+        temperature,
+        ...(toolSchemas.length ? { tools: toolSchemas, tool_choice: 'auto' } : {}),
+      };
       const url = `${MANAGED_LLAMA_BASE}/v1/chat/completions`;
       let result;
       if (stream) {
@@ -1331,6 +1369,9 @@ class LocalAiRuntime {
         );
         result = {
           content: String(payload?.choices?.[0]?.message?.content || ''),
+          tool_calls: Array.isArray(payload?.choices?.[0]?.message?.tool_calls)
+            ? payload.choices[0].message.tool_calls
+            : [],
           model: modelName,
           runtime,
           usage: payload?.usage,
@@ -1353,6 +1394,7 @@ class LocalAiRuntime {
           temperature,
           ...(options?.num_ctx ? { num_ctx: Math.max(512, Math.min(262144, Number(options.num_ctx) || 4096)) } : {}),
         },
+        ...(toolSchemas.length ? { tools: toolSchemas } : {}),
       };
       let payload;
       let content = '';
@@ -1375,6 +1417,7 @@ class LocalAiRuntime {
       }
       const result = {
         content,
+        tool_calls: Array.isArray(payload?.message?.tool_calls) ? payload.message.tool_calls : [],
         model: modelName,
         runtime: 'ollama',
         usage: {
@@ -1388,7 +1431,13 @@ class LocalAiRuntime {
 
     await this.loadModel(modelName, 'lemonade');
     this.clearIdleTimer();
-    const body = { model: modelName, messages: normalized, stream, temperature };
+    const body = {
+      model: modelName,
+      messages: normalized,
+      stream,
+      temperature,
+      ...(toolSchemas.length ? { tools: toolSchemas, tool_choice: 'auto' } : {}),
+    };
     const url = `${LEMONADE_BASE}/v1/chat/completions`;
     let result;
     if (stream) {
@@ -1401,6 +1450,9 @@ class LocalAiRuntime {
       );
       result = {
         content: String(payload?.choices?.[0]?.message?.content || ''),
+        tool_calls: Array.isArray(payload?.choices?.[0]?.message?.tool_calls)
+          ? payload.choices[0].message.tool_calls
+          : [],
         model: modelName,
         runtime: 'lemonade',
         usage: payload?.usage,
@@ -1461,6 +1513,7 @@ module.exports = {
   MANAGED_LLAMA_BASE,
   validModelName,
   normalizeMessages,
+  normalizeTools,
   encodeManagedModel,
   decodeManagedModel,
   chooseGgufGroup,

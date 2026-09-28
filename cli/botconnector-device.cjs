@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 const readline = require('node:readline/promises');
+const fsp = require('node:fs/promises');
+const os = require('node:os');
+const path = require('node:path');
 const process = require('node:process');
 const { stdin, stdout } = process;
 const { WebSocket } = require('ws');
@@ -7,6 +10,8 @@ const { WebSocket } = require('ws');
 const { DeviceBridge } = require('../desktop/local/device-bridge.cjs');
 const { detectHardware } = require('../desktop/local/hardware.cjs');
 const { LocalLauncher } = require('../desktop/local/launcher.cjs');
+const { ToolRegistry } = require('../desktop/local/tools.cjs');
+const { LocalAgent } = require('../desktop/local/agent.cjs');
 const { LocalAiRuntime } = require('./local-runtime.cjs');
 const { startOfflineServer, DEFAULT_PORT } = require('./offline-server.cjs');
 
@@ -152,6 +157,24 @@ async function promptLocalAi(options) {
   }
 }
 
+async function loadConfiguredMcp(tools, filePath = process.env.BOTCONNECTOR_MCP_CONFIG || path.join(os.homedir(), '.botconnector-device', 'mcp.json')) {
+  let payload;
+  try {
+    payload = JSON.parse(await fsp.readFile(filePath, 'utf8'));
+  } catch (error) {
+    if (error?.code === 'ENOENT') return [];
+    console.error(`[BotConnector] MCP config ignored: ${error?.message || error}`);
+    return [];
+  }
+  const servers = Array.isArray(payload) ? payload : Array.isArray(payload?.servers) ? payload.servers : [];
+  const results = [];
+  for (const server of servers.slice(0, 16)) {
+    if (!server || server.enabled === false) continue;
+    results.push(...(await tools.registerMcp(server)));
+  }
+  return results;
+}
+
 function createLocalAi(enabled) {
   return new LocalAiRuntime({
     enabled,
@@ -226,7 +249,16 @@ async function connect(options) {
 
   const launcher = new LocalLauncher({ settings });
   const localAi = createLocalAi(allowLocalAi);
-  const tools = { list: () => [] };
+  const tools = new ToolRegistry({
+    modelsDir: path.join(os.homedir(), '.botconnector-device'),
+    emit(event, payload) {
+      if (event === 'tool:activity') {
+        console.log(`[BotConnector] Tool ${payload?.name || 'unknown'} completed.`);
+      }
+    },
+  });
+  await loadConfiguredMcp(tools);
+  const agent = new LocalAgent({ localAi, tools });
 
   let localServer = null;
   if (allowLocalAi) {
@@ -247,6 +279,7 @@ async function connect(options) {
     tools,
     launcher,
     localAi,
+    agent,
     cloudBase: options.origin,
     WebSocketImpl: WebSocket,
     emit(event, payload) {
@@ -279,6 +312,7 @@ async function connect(options) {
     bridge.close();
     if (localServer) void localServer.close();
     localAi.close();
+    void tools.close();
     launcher.stopAll();
     console.log('\n[BotConnector] Device offline.');
     process.exit(0);
@@ -337,6 +371,7 @@ module.exports = {
   promptDesktopCommander,
   promptLocalAi,
   createLocalAi,
+  loadConfiguredMcp,
   startLocalUi,
   runOffline,
   connect,

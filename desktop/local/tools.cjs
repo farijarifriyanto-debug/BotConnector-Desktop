@@ -4,6 +4,19 @@ const { spawn } = require('node:child_process');
 
 const MAX_TOOL_CALLS_PER_TURN = 4;
 const TOOL_TIMEOUT_MS = 10_000;
+const CODE_TIMEOUT_MS = 9_000;
+
+function safeCodeEnv(env = process.env) {
+  const keys = [
+    'PATH', 'Path', 'PATHEXT', 'SystemRoot', 'SYSTEMROOT', 'WINDIR',
+    'HOME', 'USERPROFILE', 'TMP', 'TEMP', 'LANG', 'LC_ALL',
+  ];
+  const out = {};
+  for (const key of keys) {
+    if (env[key] != null) out[key] = String(env[key]);
+  }
+  return out;
+}
 
 const BUILTIN_TOOLS = [
   {
@@ -17,6 +30,18 @@ const BUILTIN_TOOLS = [
     description: 'Echo text supplied by the user for deterministic tool testing.',
     inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false },
     source: 'builtin', permissionClass: 'READ', enabled: false, status: 'READY',
+  },
+  {
+    id: 'web_search', name: 'web_search',
+    description: 'Search the public web for current information. Internet access is required.',
+    inputSchema: { type: 'object', properties: { query: { type: 'string' }, max_results: { type: 'integer' } }, required: ['query'], additionalProperties: false },
+    source: 'builtin', permissionClass: 'READ', enabled: false, status: 'READY',
+  },
+  {
+    id: 'run_code', name: 'run_code',
+    description: 'Run a short Python or JavaScript snippet locally on this device. Explicit approval is required for every invocation.',
+    inputSchema: { type: 'object', properties: { language: { type: 'string' }, code: { type: 'string' } }, required: ['language', 'code'], additionalProperties: false },
+    source: 'builtin', permissionClass: 'EXECUTE', enabled: false, status: 'READY',
   },
 ];
 
@@ -109,6 +134,80 @@ class ToolRegistry {
         catch { throw new Error(`Timezone tidak valid: ${timezone}`); }
       }
       if (name === 'echo_text') return { text: args.text };
+      if (name === 'web_search') {
+        const query = String(args.query || '').trim();
+        if (!query) throw new Error('Query web search kosong.');
+        const maxResults = Math.max(1, Math.min(8, Number(args.max_results) || 5));
+        const endpoint = String(process.env.BOTCONNECTOR_WEB_SEARCH_URL || '').trim();
+        if (endpoint) {
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', accept: 'application/json' },
+            body: JSON.stringify({ query, max_results: maxResults }),
+            signal: AbortSignal.timeout(TOOL_TIMEOUT_MS),
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(payload?.error?.message || `Web search HTTP ${response.status}`);
+          return payload;
+        }
+        const url = 'https://html.duckduckgo.com/html/?q=' + encodeURIComponent(query);
+        const response = await fetch(url, {
+          headers: { 'user-agent': 'BotConnector-Device/0.4 (+https://botconnector.id)' },
+          signal: AbortSignal.timeout(TOOL_TIMEOUT_MS),
+        });
+        if (!response.ok) throw new Error(`Web search HTTP ${response.status}`);
+        const html = await response.text();
+        const rows = [];
+        const rx = /<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?(?:<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>|<div[^>]+class="[^"]*result__snippet[^"]*"[^>]*>)([\s\S]*?)(?:<\/a>|<\/div>)/gi;
+        const strip = (value) => String(value || '').replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim();
+        for (let match; rows.length < maxResults && (match = rx.exec(html));) {
+          let href = strip(match[1]);
+          try {
+            const parsed = new URL(href, 'https://duckduckgo.com');
+            href = parsed.searchParams.get('uddg') || parsed.href;
+          } catch {}
+          rows.push({ title: strip(match[2]), url: href, snippet: strip(match[3]) });
+        }
+        return { query, results: rows };
+      }
+      if (name === 'run_code') {
+        const language = String(args.language || '').toLowerCase();
+        const code = String(args.code || '');
+        if (!code.trim()) throw new Error('Kode kosong.');
+        if (code.length > 20_000) throw new Error('Kode terlalu panjang.');
+        const spec = language === 'python' || language === 'py'
+          ? { command: process.env.BOTCONNECTOR_PYTHON || 'python', args: ['-c', code] }
+          : language === 'javascript' || language === 'js' || language === 'node'
+            ? { command: process.execPath, args: ['-e', code] }
+            : null;
+        if (!spec) throw new Error('Bahasa run_code harus python atau javascript.');
+        await fs.mkdir(this.modelsDir, { recursive: true });
+        const result = await new Promise((resolve, reject) => {
+          const child = spawn(spec.command, spec.args, {
+            cwd: this.modelsDir,
+            env: safeCodeEnv(),
+            stdio: ['ignore', 'pipe', 'pipe'],
+            windowsHide: true,
+          });
+          let stdout = ''; let stderr = ''; let settled = false;
+          const cap = 64 * 1024;
+          const finish = (fn, value) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            fn(value);
+          };
+          const timer = setTimeout(() => {
+            try { child.kill(); } catch {}
+            finish(reject, new Error('Code execution timed out.'));
+          }, CODE_TIMEOUT_MS);
+          child.stdout.on('data', chunk => { if (stdout.length < cap) stdout += chunk.toString().slice(0, cap - stdout.length); });
+          child.stderr.on('data', chunk => { if (stderr.length < cap) stderr += chunk.toString().slice(0, cap - stderr.length); });
+          child.once('error', error => finish(reject, error));
+          child.once('exit', codeValue => finish(resolve, { exit_code: codeValue, stdout, stderr }));
+        });
+        return result;
+      }
       throw new Error(`Tool '${name}' belum memiliki executor.`);
     };
     const result = await withTimeout(run(), TOOL_TIMEOUT_MS);
@@ -132,7 +231,7 @@ class ToolRegistry {
       await withTimeout(server.rpc.request('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'BotConnector', version: '0.2.0' } }), TOOL_TIMEOUT_MS, 'MCP server gagal diinisialisasi.');
       const discovered = await withTimeout(server.rpc.request('tools/list', {}), TOOL_TIMEOUT_MS, 'MCP discovery timed out.');
       server.tools = Array.isArray(discovered?.tools) ? discovered.tools.map(item => ({
-        id: `${id}:${item.name}`, name: `mcp_${id}_${item.name}`, remoteName: item.name, description: item.description || 'MCP tool', inputSchema: item.inputSchema || { type: 'object' }, source: `mcp:${id}`, permissionClass: 'READ', enabled: false, status: 'READY', serverId: id,
+        id: `${id}:${item.name}`, name: `mcp_${id}_${item.name}`, remoteName: item.name, description: item.description || 'MCP tool', inputSchema: item.inputSchema || { type: 'object' }, source: `mcp:${id}`, permissionClass: String(definition.permissionClass || 'EXECUTE').toUpperCase(), enabled: false, status: 'READY', serverId: id,
       })) : [];
       for (const tool of server.tools) this.tools.set(tool.id, tool);
       server.status = 'READY';
@@ -162,6 +261,9 @@ class ToolRegistry {
     const tool = this.findTool(name);
     if (!tool) throw new Error(`Tool tidak dikenal: ${name}`);
     if (!tool.enabled) throw new Error(`Tool '${name}' belum diaktifkan.`);
+    if (tool.permissionClass !== 'READ' && !options.approved) {
+      throw new Error(`Tool '${name}' membutuhkan persetujuan eksplisit.`);
+    }
     if (tool.serverId) return this.executeMcp(tool, args);
     return this.execute(name, args, options);
   }
@@ -172,4 +274,4 @@ class ToolRegistry {
   }
 }
 
-module.exports = { ToolRegistry, BUILTIN_TOOLS, MAX_TOOL_CALLS_PER_TURN, validateArgs };
+module.exports = { ToolRegistry, BUILTIN_TOOLS, MAX_TOOL_CALLS_PER_TURN, validateArgs, safeCodeEnv };

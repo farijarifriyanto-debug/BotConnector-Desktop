@@ -11,12 +11,13 @@ function wsState(socket) {
 }
 
 class DeviceBridge {
-  constructor({ settings, detectHardware, tools, launcher, localAi = null, catalog = defaultCatalog, emit = () => {}, seal = value => value, open = value => value, cloudBase = 'https://app.botconnector.id', WebSocketImpl = globalThis.WebSocket } = {}) {
+  constructor({ settings, detectHardware, tools, launcher, localAi = null, agent = null, catalog = defaultCatalog, emit = () => {}, seal = value => value, open = value => value, cloudBase = 'https://app.botconnector.id', WebSocketImpl = globalThis.WebSocket } = {}) {
     this.settings = settings;
     this.detectHardware = detectHardware;
     this.tools = tools;
     this.launcher = launcher;
     this.localAi = localAi;
+    this.agent = agent;
     this.catalog = catalog;
     this.emit = emit;
     this.seal = seal;
@@ -115,7 +116,9 @@ class DeviceBridge {
                 'model.load',
                 'model.unload',
                 'chat.completions',
+                'chat.agent',
                 'chat.cancel',
+                'tools.set_enabled',
               ]
             : []),
         ],
@@ -159,9 +162,13 @@ class DeviceBridge {
     if (method === 'launcher.start') return this.launcher.start(params.id);
     if (method === 'launcher.stop') return this.launcher.stop(params.id);
     if (method === 'tools.list') return this.tools.list().map(tool => ({
-      id: tool.id, name: tool.name, source: tool.source,
+      id: tool.id, name: tool.name, description: tool.description, source: tool.source,
       permissionClass: tool.permissionClass, enabled: Boolean(tool.enabled), status: tool.status,
+      inputSchema: tool.inputSchema,
     }));
+    if (method === 'tools.set_enabled') {
+      return this.tools.setEnabled(params.id || params.name, Boolean(params.enabled));
+    }
     if (method === 'runtime.status') return this.localAi.status();
     if (method === 'runtime.start') {
       const runtime = String(params.runtime || 'ollama').toLowerCase();
@@ -185,6 +192,10 @@ class DeviceBridge {
     if (method === 'model.load') return this.localAi.loadModel(params.model, params.runtime);
     if (method === 'model.unload') return this.localAi.unloadModel(params.model, params.runtime);
     if (method === 'chat.completions') return this.localAi.chat(params);
+    if (method === 'chat.agent') {
+      if (!this.agent) throw new Error('Local agent is not available.');
+      return this.agent.run(params);
+    }
     if (method === 'chat.cancel') return this.localAi.cancelChat(params.id);
     throw new Error('Remote capability is not allowed.');
   }

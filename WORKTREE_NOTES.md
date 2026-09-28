@@ -448,3 +448,16 @@ Untuk setiap perubahan pada source, UI, konfigurasi, dependency, dokumentasi, at
 - Artifact GitHub: `BotConnector-Windows-x64` (artifact id `10821605478`); run URL: `https://github.com/farijarifriyanto-debug/BotConnector-Desktop/actions/runs/36029630151`.
 - Workflow upload berikutnya dioptimalkan agar hanya mengunggah `*.exe`, `*.blockmap`, dan `*.yml`, bukan seluruh folder `win-unpacked`.
 - Build installer dilakukan seluruhnya di GitHub runner publik; laptop/VPS tidak dipakai untuk compile/package installer.
+
+## 2026-09-28 — Device local tool layer
+- Area/perubahan: Local Device tool-calling layer untuk app.botconnector.id; wiring ToolRegistry ke Device CLI/WebSocket bridge; native tool_calls untuk llama.cpp/Ollama/Lemonade; agent loop; builtin Web Search dan Run Code; MCP config lokal dengan approval boundary.
+- File/direktori: `desktop/local/tools.cjs`, `desktop/local/agent.cjs`, `desktop/local/agent.test.cjs`, `desktop/local/device-bridge.cjs`, `cli/local-runtime.cjs`, `cli/botconnector-device.cjs`, `package.json`.
+- Keamanan: tool EXECUTE dan MCP default membutuhkan approval eksplisit; MCP dikonfigurasi lokal melalui `~/.botconnector-device/mcp.json` / `BOTCONNECTOR_MCP_CONFIG`, bukan didaftarkan arbitrer dari cloud.
+- Verifikasi: test/CI belum dijalankan pada saat catatan ini ditulis; branch `feat/device-tool-layer-v0.4.13` belum di-merge dan belum dipublish/deploy.
+- Versi/artefak: source package masih 0.4.12; tidak ada release baru.
+
+### Verification update
+- Final-head Device CLI verification on commit `3d54ea08ef6c5332de5551f0ba72a17d656e553a`: `npm run check:device` PASS — 60 tests, 60 pass, 0 fail.
+- Security coverage PASS: EXECUTE requires approval, MCP requires approval through the common invoke gate, dan `run_code` does not inherit arbitrary BotConnector process secrets.
+- Package gate PASS: installer-free TGZ build, package-content check, fresh TGZ install, stable launcher check, and fresh-install smoke tests (7/7) passed on the Linux CI job.
+- Release publication remains skipped for the draft PR; no manifest/deployment change was made.

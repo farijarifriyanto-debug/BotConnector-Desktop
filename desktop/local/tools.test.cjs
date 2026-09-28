@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { ToolRegistry, MAX_TOOL_CALLS_PER_TURN, validateArgs } = require('./tools.cjs');
+const { ToolRegistry, MAX_TOOL_CALLS_PER_TURN, validateArgs, safeCodeEnv } = require('./tools.cjs');
 
 test('schema validation rejects missing, wrong, and unknown arguments', () => {
   const schema = { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false };
@@ -44,7 +44,11 @@ test('MCP fixture discovery, allowlist, invocation, and shutdown are isolated', 
   assert.ok(discovered);
   await assert.rejects(() => registry.invoke(discovered.name, { text: 'x' }), /belum diaktifkan/);
   await registry.setEnabled(discovered.id, true);
-  const result = await registry.invoke(discovered.name, { text: 'x' });
+  await assert.rejects(
+    () => registry.invoke(discovered.name, { text: 'x' }),
+    /persetujuan eksplisit/,
+  );
+  const result = await registry.invoke(discovered.name, { text: 'x' }, { approved: true });
   assert.deepEqual(result.content[0], { type: 'text', text: 'x' });
   await registry.close();
   assert.equal(registry.mcpStatus().length, 0);
@@ -56,4 +60,25 @@ test('bad MCP start reports FAILED without affecting registry', async () => {
   assert.equal(servers[0].status, 'FAILED');
   assert.equal(registry.list().some(tool => tool.serverId === 'bad-test'), false);
   await registry.close();
+});
+
+test('run_code requires approval and does not expose arbitrary process secrets', async () => {
+  const registry = new ToolRegistry();
+  registry.setEnabled('run_code', true);
+  await assert.rejects(
+    () => registry.invoke('run_code', { language: 'javascript', code: 'console.log("ok")' }),
+    /persetujuan eksplisit/,
+  );
+  const result = await registry.invoke(
+    'run_code',
+    { language: 'javascript', code: 'console.log(process.env.BOTCONNECTOR_TEST_SECRET || "hidden")' },
+    { approved: true },
+  );
+  assert.equal(result.exit_code, 0);
+  assert.match(result.stdout, /hidden/);
+
+  const env = safeCodeEnv({ PATH: '/bin', HOME: '/tmp', BOTCONNECTOR_TEST_SECRET: 'nope' });
+  assert.equal(env.PATH, '/bin');
+  assert.equal(env.HOME, '/tmp');
+  assert.equal(env.BOTCONNECTOR_TEST_SECRET, undefined);
 });
