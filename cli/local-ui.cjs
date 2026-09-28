@@ -655,7 +655,11 @@ svg{display:block}
   .pill{display:none}
   .modelLabel{display:none}
   .topbar{padding:0 10px}
-  .topbar select{max-width:calc(100vw - 76px)}
+  .modelControl{flex:1;min-width:0}
+  .modelActions{display:none}
+  .connectBtn{width:34px;padding:0;margin-left:auto;flex:0 0 34px}
+  .connectBtn span:last-child{display:none}
+  .topbar select{width:100%;max-width:calc(100vw - 104px)}
   .msg.user .body{max-width:92%}
   .empty{min-height:calc(100vh - 230px)}
   .quickGrid{grid-template-columns:1fr}
