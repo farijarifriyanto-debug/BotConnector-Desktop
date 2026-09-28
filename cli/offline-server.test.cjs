@@ -53,6 +53,10 @@ test('offline UI serves localhost HTML and protects local API with a session tok
   assert.match(html, /\[hidden\]\{display:none!important\}/);
   assert.match(html, /friendlyModelName/);
   assert.match(html, /button\.disabled = !streaming/);
+  assert.match(html, /id="loadSelected"/);
+  assert.match(html, /id="unloadSelected"/);
+  assert.match(html, /id="openWebApp"/);
+  assert.match(html, /Connect to Web App/);
 
   const anonymous = await fetch(server.url + '/api/status');
   assert.equal(anonymous.status, 401);
@@ -445,4 +449,60 @@ test('offline browser exposes selected tools and streams tool activity', async (
   assert.match(stream, /"arguments":\{"query":"BotConnector Local"\}/);
   assert.match(stream, /Local answer after tool result/);
   assert.equal(invoked, 1);
+});
+
+
+test('Local UI Web App pairing routes stay behind localhost session auth', async (t) => {
+  let pairedCode = '';
+  let disconnected = 0;
+  const webApp = {
+    origin: 'https://app.botconnector.id',
+    status: () => ({ paired: false, connection: 'DISCONNECTED', deviceName: 'Test device' }),
+    pair: async (code) => {
+      pairedCode = code;
+      return { paired: true, connection: 'CONNECTING', deviceId: 'device-1', deviceName: 'Test device' };
+    },
+    disconnect: async () => {
+      disconnected += 1;
+      return { paired: false, connection: 'DISCONNECTED', deviceName: 'Test device' };
+    },
+  };
+  const server = await startOfflineServer({
+    localAi: runtimeFixture(),
+    detectHardware: async () => ({ cpu: 'Test CPU', ramGb: 16 }),
+    webApp,
+    port: 0,
+    open: false,
+  });
+  t.after(() => server.close());
+
+  const unauthorized = await fetch(server.url + '/api/webapp/status');
+  assert.equal(unauthorized.status, 401);
+
+  const headers = {
+    origin: server.url,
+    'content-type': 'application/json',
+    'x-botconnector-local-token': server.token,
+  };
+  const status = await fetch(server.url + '/api/webapp/status', { headers });
+  assert.equal(status.status, 200);
+  const statusPayload = await status.json();
+  assert.equal(statusPayload.origin, 'https://app.botconnector.id');
+  assert.equal(statusPayload.available, true);
+
+  const pair = await fetch(server.url + '/api/webapp/pair', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ code: 'ABC-123' }),
+  });
+  assert.equal(pair.status, 200);
+  assert.equal(pairedCode, 'ABC-123');
+
+  const disconnect = await fetch(server.url + '/api/webapp/disconnect', {
+    method: 'POST',
+    headers,
+    body: '{}',
+  });
+  assert.equal(disconnect.status, 200);
+  assert.equal(disconnected, 1);
 });
