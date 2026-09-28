@@ -278,6 +278,12 @@ svg{display:block}
 .modelLoadState{min-height:30px;display:inline-flex;align-items:center;padding:0 9px;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:10.5px;font-weight:650;white-space:nowrap}
 .modelLoadState.loaded{border-color:color-mix(in srgb,var(--ok) 40%,var(--line));background:color-mix(in srgb,var(--ok) 8%,transparent);color:var(--ok)}
 .modelLoadState.unloaded{color:var(--muted)}
+.activeModelPill{max-width:220px;overflow:hidden;text-overflow:ellipsis}
+.fitGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:12px}
+.fitMetric{border:1px solid var(--line);border-radius:11px;background:var(--bg);padding:11px;min-width:0}
+.fitMetric span{display:block;color:var(--muted);font-size:9.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;margin-bottom:4px}
+.fitMetric strong{display:block;font-size:12px;font-weight:650;overflow-wrap:anywhere}
+.fitUseCase{min-height:36px;background:var(--surface-2);border:1px solid var(--line);border-radius:9px;padding:0 10px}
 .connectBtn{margin-left:auto;border-radius:999px;min-height:30px;padding:0 11px;font-size:11px}
 .connectBtn.connected{border-color:color-mix(in srgb,var(--ok) 40%,var(--line));color:var(--ok)}
 .connectBtn.paired{border-color:color-mix(in srgb,var(--warn) 40%,var(--line));color:var(--warn)}
@@ -661,6 +667,8 @@ svg{display:block}
   .topbar{padding:0 10px}
   .modelControl{flex:1;min-width:0}
   .modelActions{display:none}
+  .activeModelPill{display:none}
+  #openDeviceFit{display:none}
   .connectBtn{width:34px;padding:0;margin-left:auto;flex:0 0 34px}
   .connectBtn span:last-child{display:none}
   .topbar select{width:100%;max-width:calc(100vw - 104px)}
@@ -701,6 +709,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   if (!Array.isArray(settings.tools)) settings.tools = [];
   let models = [];
   let runtimeState = null;
+  let hardwareState = {};
   let webAppStatus = { paired: false, connection: 'DISCONNECTED', origin: 'https://app.botconnector.id' };
   let tools = [];
   let mcpServers = [];
@@ -763,6 +772,11 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     const loaded = Array.isArray(runtimeState.loadedModels) ? runtimeState.loadedModels.map(String) : [];
     return loaded.includes(String(model.id)) || String(runtimeState.activeModel || '') === String(model.id);
   }
+  function activeLoadedModel() {
+    const active = String(runtimeState?.activeModel || '');
+    if (!active) return null;
+    return models.find((model) => String(model.id) === active) || { id: active, name: active };
+  }
   function renderModelActions() {
     const model = selectedModel();
     const loaded = modelIsLoaded(model);
@@ -774,6 +788,13 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     $('unloadSelected').hidden = !model || !loaded;
     $('loadSelected').disabled = !model;
     $('unloadSelected').disabled = !model;
+
+    const active = activeLoadedModel();
+    const activePill = $('activeModelPill');
+    const selectedIsActive = Boolean(model && active && String(model.id) === String(active.id));
+    activePill.hidden = !active || selectedIsActive;
+    activePill.textContent = active && !selectedIsActive ? 'Loaded: ' + friendlyModelName(active) : '';
+    activePill.title = active && !selectedIsActive ? 'Currently loaded in memory: ' + modelDetail(active) : '';
   }
   function renderWebAppStatus() {
     const connected = webAppStatus.connection === 'CONNECTED';
@@ -1092,6 +1113,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       const [s, m] = await Promise.all([api('/api/status'), api('/api/models')]);
       models = Array.isArray(m.models) ? m.models : [];
       runtimeState = s.runtime || null;
+      hardwareState = s.hardware || {};
       $('runtime').textContent = s.runtime?.available ? 'Ready · ' + (s.runtime.runtime || 'local runtime') : (s.runtime?.message || 'Runtime not ready');
       $('runtimePill').innerHTML = '<span class="pillDot"></span>' + esc(s.runtime?.available ? (s.runtime.runtime || 'local runtime') : 'Runtime unavailable');
       $('prepareRuntime').hidden = Boolean(s.runtime?.available);
@@ -1123,6 +1145,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   async function selectedModelAction(action) {
     const model = selectedModel();
     if (!model) return;
+    const modelId = String(model.id);
     const button = action === 'load' ? $('loadSelected') : $('unloadSelected');
     button.disabled = true;
     button.textContent = action === 'load' ? 'Loading…' : 'Unloading…';
@@ -1132,6 +1155,13 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
         body: JSON.stringify({ model: model.id, runtime: model.runtime }),
       });
       await refresh();
+      let verified = action === 'load' ? modelIsLoaded(models.find((m) => String(m.id) === modelId)) : !modelIsLoaded({ id: modelId });
+      if (!verified) {
+        await new Promise((resolve) => setTimeout(resolve, 180));
+        await refresh();
+        verified = action === 'load' ? modelIsLoaded(models.find((m) => String(m.id) === modelId)) : !modelIsLoaded({ id: modelId });
+      }
+      if (!verified) throw new Error(action === 'load' ? 'Model load could not be verified.' : 'Model unload could not be verified.');
     } catch (error) {
       alert(error.message || error);
     } finally {
@@ -1190,7 +1220,17 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       row.querySelector('.name').textContent = modelOptionLabel(m);
       row.querySelector('.name').title = modelDetail(m);
       const [loadBtn, unloadBtn, delBtn] = row.querySelectorAll('button');
-      const act = (action) => api('/api/models/' + action, { method: 'POST', body: JSON.stringify({ model: m.id, runtime: m.runtime }) }).then(refresh).catch((e) => alert(e.message));
+      const loaded = modelIsLoaded(m);
+      loadBtn.hidden = loaded;
+      unloadBtn.hidden = !loaded;
+      const act = async (action) => {
+        try {
+          await api('/api/models/' + action, { method: 'POST', body: JSON.stringify({ model: m.id, runtime: m.runtime }) });
+          await refresh();
+        } catch (e) {
+          alert(e.message);
+        }
+      };
       loadBtn.onclick = () => act('load');
       unloadBtn.onclick = () => act('unload');
       delBtn.onclick = () => { if (confirm('Delete ' + (m.name || m.id) + ' from this device?')) act('delete'); };
@@ -1253,6 +1293,54 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       $('jobStatus').textContent = id + ' is ready. Pick it in the model menu.';
       await refresh();
     } catch (e) { $('jobStatus').textContent = String(e.message || e); }
+  }
+
+  // ---- device fit ----
+  function hardwareValue(h, key) {
+    const gpu = [...(h.nvidia || []), ...(h.amd || []), ...(h.intel || [])][0] || null;
+    if (key === 'cpu') return String(h.cpu || 'Unknown');
+    if (key === 'ram') return h.ramGb ? Number(h.ramGb).toFixed(1) + ' GB total' + (h.freeRamGb ? ' · ' + Number(h.freeRamGb).toFixed(1) + ' GB available' : '') : 'Unknown';
+    if (key === 'gpu') return gpu?.name || 'No GPU detected';
+    if (key === 'vram') {
+      const value = gpu?.vramGb ?? gpu?.vram_gb ?? gpu?.memoryGb ?? gpu?.memory_gb;
+      return value ? Number(value).toFixed(1) + ' GB' : (gpu ? 'Shared / dynamic or not reported' : 'Not available');
+    }
+    if (key === 'npu') return h.npu?.name || (h.npu?.available ? 'NPU detected' : 'No NPU detected');
+    if (key === 'system') return [h.platform, h.arch, h.release].filter(Boolean).join(' · ') || 'Unknown';
+    if (key === 'backend') return runtimeState?.runtime || 'Not ready';
+    return 'Unknown';
+  }
+
+  function renderFitHardware() {
+    const h = hardwareState || {};
+    const fields = {
+      fitCpu: hardwareValue(h, 'cpu'),
+      fitRam: hardwareValue(h, 'ram'),
+      fitGpu: hardwareValue(h, 'gpu'),
+      fitVram: hardwareValue(h, 'vram'),
+      fitNpu: hardwareValue(h, 'npu'),
+      fitSystem: hardwareValue(h, 'system'),
+      fitBackend: hardwareValue(h, 'backend'),
+    };
+    for (const [id, value] of Object.entries(fields)) $(id).textContent = value;
+  }
+
+  async function loadDeviceFit() {
+    $('fitRecommended').innerHTML = '<div class="muted">Checking models that fit this device…</div>';
+    try {
+      const status = await api('/api/status');
+      runtimeState = status.runtime || null;
+      hardwareState = status.hardware || {};
+      renderFitHardware();
+      const useCase = $('fitUseCase').value;
+      const payload = await api('/api/catalog/recommendations', {
+        method: 'POST',
+        body: JSON.stringify({ query: useCase === 'general' ? '' : useCase, limit: 10 }),
+      });
+      renderCatalog($('fitRecommended'), payload.models || []);
+    } catch (error) {
+      $('fitRecommended').innerHTML = '<div class="error">' + esc(error.message || error) + '</div>';
+    }
   }
 
   // ---- tools ----
@@ -1369,6 +1457,9 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   $('loadSelected').onclick = () => selectedModelAction('load');
   $('unloadSelected').onclick = () => selectedModelAction('unload');
   $('openModels').onclick = () => { open('modelsPanel'); refresh(); loadRecommendations(); };
+  $('openDeviceFit').onclick = () => { open('deviceFitPanel'); loadDeviceFit(); };
+  $('fitScan').onclick = loadDeviceFit;
+  $('fitUseCase').onchange = loadDeviceFit;
   $('openTools').onclick = () => { open('toolsPanel'); loadTools(); };
   $('openSettings').onclick = () => open('settingsPanel');
   $('openWebApp').onclick = () => { open('webAppPanel'); loadWebAppStatus(); };
@@ -1467,7 +1558,9 @@ function localUiHtml({ token, host, port }) {
         <button class="btn small" id="loadSelected" hidden>Load</button>
         <button class="btn small" id="unloadSelected" hidden>Unload</button>
       </div>
+      <span class="pill activeModelPill" id="activeModelPill" hidden></span>
       <span class="pill" id="runtimePill"><span class="pillDot"></span>Checking runtime</span>
+      <button class="btn" id="openDeviceFit">Device fit</button>
       <button class="btn connectBtn right" id="openWebApp"><span class="pillDot"></span><span>Connect Web App</span></button>
     </div>
     <div class="chat" id="chat"></div>
@@ -1498,6 +1591,30 @@ function localUiHtml({ token, host, port }) {
     <div class="row"><input class="grow" id="catalogQuery" placeholder="Search Qwen, Gemma, Llama, or enter a repo id"><button class="btn small" id="catalogSearch">Search</button></div>
     <div id="results"></div></div>
   <div class="card"><h3>Local endpoint</h3><div class="muted">__LOCAL_URL__ · OpenAI-compatible API at /v1</div></div>
+</aside>
+<aside class="panel deviceFitPanel" id="deviceFitPanel">
+  <div class="panelHead"><div class="row"><div class="grow"><h2>Device fit</h2><div class="panelLead">Hardware detected on this computer and local models that fit it.</div></div><button class="btn" data-close>Close</button></div></div>
+  <div class="row" style="margin-bottom:10px">
+    <select class="fitUseCase grow" id="fitUseCase" aria-label="Device fit use case">
+      <option value="general">General</option>
+      <option value="indonesia">Bahasa Indonesia</option>
+      <option value="coding">Coding</option>
+      <option value="reasoning">Reasoning</option>
+      <option value="vision">Vision</option>
+      <option value="tools">Tools</option>
+    </select>
+    <button class="btn" id="fitScan">Scan again</button>
+  </div>
+  <div class="fitGrid">
+    <div class="fitMetric"><span>CPU</span><strong id="fitCpu">Checking…</strong></div>
+    <div class="fitMetric"><span>RAM</span><strong id="fitRam">Checking…</strong></div>
+    <div class="fitMetric"><span>GPU</span><strong id="fitGpu">Checking…</strong></div>
+    <div class="fitMetric"><span>VRAM</span><strong id="fitVram">Checking…</strong></div>
+    <div class="fitMetric"><span>NPU</span><strong id="fitNpu">Checking…</strong></div>
+    <div class="fitMetric"><span>System</span><strong id="fitSystem">Checking…</strong></div>
+    <div class="fitMetric"><span>Backend</span><strong id="fitBackend">Checking…</strong></div>
+  </div>
+  <div class="card"><h3>Recommended local models</h3><div class="muted" style="margin-bottom:8px">Ranked for this hardware and the selected use case. Download keeps the model on this device.</div><div id="fitRecommended"></div></div>
 </aside>
 <aside class="panel" id="toolsPanel">
   <div class="panelHead"><div class="row"><div class="grow"><h2>Tools</h2><div class="panelLead">Choose capabilities the local model may use.</div></div><button class="btn" data-close>Close</button></div></div>
