@@ -1457,7 +1457,9 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   $('loadSelected').onclick = () => selectedModelAction('load');
   $('unloadSelected').onclick = () => selectedModelAction('unload');
   $('openModels').onclick = () => { open('modelsPanel'); refresh(); loadRecommendations(); };
-  $('openDeviceFit').onclick = () => { open('deviceFitPanel'); loadDeviceFit(); };
+  const openFit = () => { open('deviceFitPanel'); loadDeviceFit(); };
+  $('openDeviceFit').onclick = openFit;
+  $('openDeviceFitSide').onclick = openFit;
   $('fitScan').onclick = loadDeviceFit;
   $('fitUseCase').onchange = loadDeviceFit;
   $('openTools').onclick = () => { open('toolsPanel'); loadTools(); };
@@ -1542,6 +1544,7 @@ function localUiHtml({ token, host, port }) {
     <div class="history" id="history"></div>
     <div class="sideBottom">
       <button id="openModels"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16v12H4z"/><path d="M8 10h8M8 14h5"/></svg><span>Models</span></button>
+      <button id="openDeviceFitSide"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17V7M8 14V10M12 18V6M16 15V9M20 12v0"/></svg><span>Device fit</span></button>
       <button id="openSettings"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.8 1.8 0 0 0 .4 2l.1.1-2.8 2.8-.1-.1a1.8 1.8 0 0 0-2-.4 1.8 1.8 0 0 0-1 1.6v.2h-4V21a1.8 1.8 0 0 0-1-1.6 1.8 1.8 0 0 0-2 .4l-.1.1-2.8-2.8.1-.1a1.8 1.8 0 0 0 .4-2A1.8 1.8 0 0 0 3 14H2.8v-4H3a1.8 1.8 0 0 0 1.6-1 1.8 1.8 0 0 0-.4-2l-.1-.1L6.9 4l.1.1a1.8 1.8 0 0 0 2 .4A1.8 1.8 0 0 0 10 3V2.8h4V3a1.8 1.8 0 0 0 1 1.6 1.8 1.8 0 0 0 2-.4l.1-.1 2.8 2.8-.1.1a1.8 1.8 0 0 0-.4 2A1.8 1.8 0 0 0 21 10h.2v4H21a1.8 1.8 0 0 0-1.6 1Z"/></svg><span>Settings</span></button>
       <button id="themeBtn"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9Z"/></svg><span>Light mode</span></button>
     </div>
