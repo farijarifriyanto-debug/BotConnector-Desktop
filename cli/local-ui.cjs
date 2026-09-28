@@ -60,6 +60,7 @@ body{
 button,input,select,textarea{font:inherit;color:inherit}
 button{cursor:pointer}
 button:disabled{opacity:.45;cursor:not-allowed}
+[hidden]{display:none!important}
 button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{
   outline:2px solid color-mix(in srgb,var(--focus) 70%,transparent);
   outline-offset:2px;
