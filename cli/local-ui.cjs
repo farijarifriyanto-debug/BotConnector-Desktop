@@ -280,6 +280,7 @@ svg{display:block}
 .modelLoadState.unloaded{color:var(--muted)}
 .connectBtn{margin-left:auto;border-radius:999px;min-height:30px;padding:0 11px;font-size:11px}
 .connectBtn.connected{border-color:color-mix(in srgb,var(--ok) 40%,var(--line));color:var(--ok)}
+.connectBtn.paired{border-color:color-mix(in srgb,var(--warn) 40%,var(--line));color:var(--warn)}
 .chat{
   flex:1;
   overflow:auto;
@@ -776,15 +777,22 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   }
   function renderWebAppStatus() {
     const connected = webAppStatus.connection === 'CONNECTED';
+    const paired = Boolean(webAppStatus.paired);
     const button = $('openWebApp');
     button.classList.toggle('connected', connected);
-    button.innerHTML = '<span class="pillDot"></span><span>' + (connected ? 'Web App connected' : 'Connect Web App') + '</span>';
+    button.classList.toggle('paired', paired && !connected);
+    button.innerHTML = '<span class="pillDot"></span><span>' + (
+      connected ? 'Web App connected' : paired ? 'Web App paired' : 'Connect Web App'
+    ) + '</span>';
     $('webAppState').textContent = connected
       ? 'Connected as ' + (webAppStatus.deviceName || 'this device') + '. Local AI can be used from BotConnector Web App while this session stays open.'
-      : 'Not connected. Pair this Local session with your BotConnector account when you want to use this device from the Web App.';
-    $('webAppCode').disabled = connected;
-    $('pairWebApp').hidden = connected;
-    $('disconnectWebApp').hidden = !connected;
+      : paired
+        ? 'This device is already paired. BotConnector Local will reconnect to the Web App automatically when internet access is available.'
+        : 'Not paired yet. Pair this device once to use its local AI from BotConnector Web App.';
+    $('webAppCode').disabled = paired;
+    $('pairWebApp').hidden = paired;
+    $('disconnectWebApp').hidden = !paired;
+    $('disconnectWebApp').textContent = paired ? 'Forget pairing' : 'Disconnect';
   }
 
   // ---- rendering ----
@@ -1509,7 +1517,7 @@ function localUiHtml({ token, host, port }) {
     <div class="row" style="margin-top:10px"><input class="grow" id="webAppCode" placeholder="Enter pairing code" autocomplete="off"><button class="btn" id="pairWebApp">Connect</button><button class="btn" id="disconnectWebApp" hidden>Disconnect</button></div>
     <div class="muted" id="webAppMessage" style="margin-top:8px"></div>
   </div>
-  <div class="card"><h3>How it works</h3><div class="muted">The Web App becomes the interface. The selected local model remains loaded and inference still runs on this computer. Closing this Local session disconnects the device.</div></div>
+  <div class="card"><h3>How it works</h3><div class="muted">The Web App becomes the interface while inference still runs on this computer. Pairing is saved for this OS user, so after sleep, restart, or hours offline, BotConnector Local reconnects automatically the next time it runs. Use Forget pairing only when you want this device to require a new pairing code.</div></div>
 </aside>
 <aside class="panel" id="settingsPanel">
   <div class="panelHead"><div class="row"><div class="grow"><h2>Settings</h2><div class="panelLead">Tune the local chat experience on this device.</div></div><button class="btn" data-close>Close</button></div></div>
