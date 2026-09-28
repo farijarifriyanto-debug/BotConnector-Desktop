@@ -168,6 +168,7 @@ class ToolRegistry {
             ? { command: process.execPath, args: ['-e', code] }
             : null;
         if (!spec) throw new Error('Bahasa run_code harus python atau javascript.');
+        await fs.mkdir(this.modelsDir, { recursive: true });
         const result = await new Promise((resolve, reject) => {
           const child = spawn(spec.command, spec.args, {
             cwd: this.modelsDir,
@@ -207,7 +208,7 @@ class ToolRegistry {
       await withTimeout(server.rpc.request('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'BotConnector', version: '0.2.0' } }), TOOL_TIMEOUT_MS, 'MCP server gagal diinisialisasi.');
       const discovered = await withTimeout(server.rpc.request('tools/list', {}), TOOL_TIMEOUT_MS, 'MCP discovery timed out.');
       server.tools = Array.isArray(discovered?.tools) ? discovered.tools.map(item => ({
-        id: `${id}:${item.name}`, name: `mcp_${id}_${item.name}`, remoteName: item.name, description: item.description || 'MCP tool', inputSchema: item.inputSchema || { type: 'object' }, source: `mcp:${id}`, permissionClass: 'READ', enabled: false, status: 'READY', serverId: id,
+        id: `${id}:${item.name}`, name: `mcp_${id}_${item.name}`, remoteName: item.name, description: item.description || 'MCP tool', inputSchema: item.inputSchema || { type: 'object' }, source: `mcp:${id}`, permissionClass: String(definition.permissionClass || 'EXECUTE').toUpperCase(), enabled: false, status: 'READY', serverId: id,
       })) : [];
       for (const tool of server.tools) this.tools.set(tool.id, tool);
       server.status = 'READY';
