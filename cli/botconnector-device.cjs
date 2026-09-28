@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 const readline = require('node:readline/promises');
+const os = require('node:os');
+const path = require('node:path');
 const process = require('node:process');
 const { stdin, stdout } = process;
 const { WebSocket } = require('ws');
@@ -7,6 +9,8 @@ const { WebSocket } = require('ws');
 const { DeviceBridge } = require('../desktop/local/device-bridge.cjs');
 const { detectHardware } = require('../desktop/local/hardware.cjs');
 const { LocalLauncher } = require('../desktop/local/launcher.cjs');
+const { ToolRegistry } = require('../desktop/local/tools.cjs');
+const { LocalAgent } = require('../desktop/local/agent.cjs');
 const { LocalAiRuntime } = require('./local-runtime.cjs');
 const { startOfflineServer, DEFAULT_PORT } = require('./offline-server.cjs');
 
@@ -226,7 +230,15 @@ async function connect(options) {
 
   const launcher = new LocalLauncher({ settings });
   const localAi = createLocalAi(allowLocalAi);
-  const tools = { list: () => [] };
+  const tools = new ToolRegistry({
+    modelsDir: path.join(os.homedir(), '.botconnector-device'),
+    emit(event, payload) {
+      if (event === 'tool:activity') {
+        console.log(`[BotConnector] Tool ${payload?.name || 'unknown'} completed.`);
+      }
+    },
+  });
+  const agent = new LocalAgent({ localAi, tools });
 
   let localServer = null;
   if (allowLocalAi) {
@@ -247,6 +259,7 @@ async function connect(options) {
     tools,
     launcher,
     localAi,
+    agent,
     cloudBase: options.origin,
     WebSocketImpl: WebSocket,
     emit(event, payload) {
@@ -279,6 +292,7 @@ async function connect(options) {
     bridge.close();
     if (localServer) void localServer.close();
     localAi.close();
+    void tools.close();
     launcher.stopAll();
     console.log('\n[BotConnector] Device offline.');
     process.exit(0);
