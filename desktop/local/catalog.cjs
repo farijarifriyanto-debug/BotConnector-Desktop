@@ -90,6 +90,7 @@ async function recommendModels(cat, hardware, { query = '', limit } = {}) {
       const details = await cat.modelDetails(id, hardware);
       return {
         ...model,
+        ...details,
         capabilities: details?.capabilities || model?.capabilities || null,
         compatibility: details?.compatibility || model?.compatibility || null,
       };

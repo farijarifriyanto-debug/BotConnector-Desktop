@@ -18,6 +18,7 @@ function runtimeFixture() {
     runtimeJobStatus: () => ({ id: 'runtime-job', status: 'completed', percent: 100 }),
     startPull: async () => ({ id: 'pull-job', status: 'queued' }),
     jobStatus: () => ({ id: 'pull-job', status: 'completed', percent: 100 }),
+    cancelPull: (id) => ({ id, status: 'cancelled' }),
     loadModel: async (model, runtime) => ({ loaded: true, model, runtime }),
     unloadModel: async (model, runtime) => ({ loaded: false, model, runtime }),
     deleteModel: async (model, runtime) => ({ deleted: true, model, runtime }),
@@ -88,7 +89,27 @@ test('offline UI serves localhost HTML and protects local API with a session tok
   assert.match(html, /May be slow/);
   assert.match(html, /fitHardwareShell/);
   assert.match(html, /width:min\(680px/);
-  assert.match(html, /Est\. Q4 weights/);
+  assert.match(html, /id="fitRamAvailable"/);
+  assert.match(html, /fitCatalogSticky/);
+  assert.match(html, /id="fitFiltersBtn"/);
+  assert.match(html, /id="fitFilterSize"/);
+  assert.match(html, /id="fitFilterContext"/);
+  assert.match(html, /id="fitFilterQuant"/);
+  assert.match(html, /id="fitFilterPublisher"/);
+  assert.match(html, /id="fitFilterInstalled"/);
+  assert.match(html, /id="fitFilterBenchmarked"/);
+  assert.match(html, /id="fitCompareTray"/);
+  assert.match(html, /id="fitComparePanel"/);
+  assert.match(html, /Recommended for this device/);
+  assert.match(html, /fitDownloadProgress/);
+  assert.match(html, /catalogDisplayName/);
+  assert.match(html, /Official publisher/);
+  assert.match(html, /Community/);
+  assert.match(html, /Measured/);
+  assert.match(html, /Estimated/);
+  assert.match(html, /Use model/);
+  assert.match(html, /Downloading/);
+  assert.match(html, /\/api\/models\/pull\/cancel/);
   assert.match(html, /Benchmark all/);
   assert.match(html, /fitBenchmarkStop/);
   assert.match(html, /benchmarkScore/);
@@ -149,6 +170,29 @@ test('offline API rejects foreign origin and accepts same-origin local chat', as
   const result = await response.json();
   assert.equal(result.content, 'local:hello offline');
   assert.equal(result.request_id, 'req-1');
+});
+
+
+test('offline API can cancel an active model download', async (t) => {
+  const server = await startOfflineServer({
+    localAi: runtimeFixture(),
+    detectHardware: async () => ({ cpu: 'Test CPU', ramGb: 16 }),
+    port: 0,
+    open: false,
+  });
+  t.after(() => server.close());
+
+  const response = await fetch(server.url + '/api/models/pull/cancel', {
+    method: 'POST',
+    headers: {
+      origin: server.url,
+      'content-type': 'application/json',
+      'x-botconnector-local-token': server.token,
+    },
+    body: JSON.stringify({ id: 'pull-job' }),
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { id: 'pull-job', status: 'cancelled' });
 });
 
 

@@ -737,6 +737,76 @@ svg{display:block}
 .fitBrowse input:focus,.fitBrowse select:focus{outline:none;border-color:color-mix(in srgb,var(--text) 28%,var(--line));box-shadow:0 0 0 3px color-mix(in srgb,var(--text) 5%,transparent)}
 .fitBrowse select{appearance:none;-webkit-appearance:none;padding:0 34px 0 11px}
 .fitSortChevron{position:absolute;right:11px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:11px;pointer-events:none}
+.fitCatalogSticky{
+  position:sticky;top:76px;z-index:4;
+  margin:0 -4px 10px;padding:7px 4px 8px;
+  background:linear-gradient(180deg,color-mix(in srgb,var(--surface) 98%,transparent) 78%,color-mix(in srgb,var(--surface) 92%,transparent));
+  backdrop-filter:blur(14px);
+}
+.fitBrowse{grid-template-columns:minmax(0,1fr) auto 168px}
+.fitFilterField{position:relative}
+.fitFilterButton{min-height:38px;display:inline-flex;align-items:center;gap:7px;padding:0 11px;white-space:nowrap}
+.fitFilterCount{min-width:18px;height:18px;display:inline-grid;place-items:center;border-radius:999px;background:var(--surface-3);font-size:9px;color:var(--text)}
+.fitFilterMenu{
+  position:absolute;right:0;top:calc(100% + 7px);z-index:8;
+  width:min(330px,calc(100vw - 48px));padding:12px;
+  border:1px solid var(--line);border-radius:12px;background:var(--surface);
+  box-shadow:var(--shadow);
+}
+.fitFilterMenuGrid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.fitFilterMenu label{display:grid;gap:5px;color:var(--muted);font-size:10px}
+.fitFilterMenu select{width:100%;min-height:34px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:0 8px;color:var(--text)}
+.fitFilterChecks{display:flex;flex-wrap:wrap;gap:7px 14px;margin-top:11px;padding-top:10px;border-top:1px solid var(--line-soft)}
+.fitFilterChecks label{display:flex;align-items:center;gap:7px;color:var(--text);font-size:10.5px}
+.fitFilterChecks input{width:auto;accent-color:var(--text)}
+.fitFilterFooter{display:flex;justify-content:space-between;align-items:center;margin-top:11px}
+.fitIdentityMeta,.fitTrustMeta,.fitDownloadMeta{color:var(--muted);font-size:10.5px;line-height:1.4}
+.fitIdentityMeta{font-weight:580}
+.fitTrustMeta{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.fitTrustBadge,.fitConfidence{
+  display:inline-flex;align-items:center;min-height:19px;padding:0 6px;border:1px solid var(--line);
+  border-radius:999px;background:var(--surface-2);font-size:9px;font-weight:670;color:var(--muted)
+}
+.fitTrustBadge.official{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 28%,var(--line))}
+.fitConfidence.measured{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 28%,var(--line))}
+.fitDownloadMeta{margin-top:1px}
+.fitRecommendationHint{
+  display:grid;gap:2px;margin:1px 0 2px;padding:8px 9px;border:1px solid color-mix(in srgb,var(--ok) 24%,var(--line));
+  border-radius:9px;background:color-mix(in srgb,var(--ok) 5%,var(--surface-2))
+}
+.fitRecommendationHint strong{font-size:10px;color:var(--text)}
+.fitRecommendationHint span{font-size:9.8px;color:var(--muted);line-height:1.4}
+.fitTopRecommendation{background:linear-gradient(90deg,color-mix(in srgb,var(--ok) 3%,transparent),transparent 45%)}
+.fitDownloadProgress{display:grid;gap:6px;margin-top:2px;padding:8px 9px;border:1px solid var(--line-soft);border-radius:9px;background:var(--surface-2)}
+.fitDownloadProgressTop{display:flex;justify-content:space-between;gap:8px;color:var(--muted);font-size:9.8px}
+.fitProgressTrack{height:5px;border-radius:999px;background:var(--surface-3);overflow:hidden}
+.fitProgressBar{height:100%;width:0;background:var(--text);border-radius:999px;transition:width .2s ease}
+.fitCompareChoice{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:10px;margin-top:2px}
+.fitCompareChoice input{width:auto;accent-color:var(--text)}
+.fitCompareTray{
+  position:sticky;bottom:-1px;z-index:6;display:flex;align-items:center;gap:10px;
+  margin:10px -4px -4px;padding:10px 12px;border:1px solid var(--line);
+  border-radius:12px;background:color-mix(in srgb,var(--surface) 97%,transparent);box-shadow:0 -8px 24px color-mix(in srgb,#000 16%,transparent);backdrop-filter:blur(14px)
+}
+.fitCompareTray .grow{min-width:0}
+.fitCompareNames{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--muted);font-size:10px}
+.fitComparePanel{
+  position:sticky;bottom:58px;z-index:5;margin:10px -4px 0;padding:12px;
+  border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:var(--shadow);
+  max-height:50vh;overflow:auto
+}
+.fitCompareTable{width:100%;border-collapse:collapse;font-size:10px}
+.fitCompareTable th,.fitCompareTable td{padding:8px;border-bottom:1px solid var(--line-soft);vertical-align:top;text-align:left}
+.fitCompareTable th{color:var(--muted);font-weight:650;position:sticky;top:0;background:var(--surface)}
+.fitCompareTable td:first-child{color:var(--muted);width:110px}
+.fitStateBox{display:grid;place-items:center;text-align:center;gap:8px;min-height:190px;padding:28px;color:var(--muted)}
+.fitStateBox strong{font-size:12px;color:var(--text)}
+.fitSkeletonList{display:grid;gap:0}
+.fitSkeleton{padding:15px 2px;border-top:1px solid var(--line-soft)}
+.fitSkeleton:first-child{border-top:0}
+.fitSkeletonLine{height:10px;border-radius:6px;background:linear-gradient(90deg,var(--surface-2),var(--surface-3),var(--surface-2));background-size:220% 100%;animation:fitShimmer 1.2s linear infinite}
+.fitSkeletonLine.short{width:42%;margin-top:8px}.fitSkeletonLine.mid{width:68%;margin-top:8px}
+@keyframes fitShimmer{to{background-position:-220% 0}}
 .deviceFitPanel>.fitSection>.card{margin:0;padding:0 12px;border-radius:14px;background:var(--bg);overflow:hidden}
 .deviceFitPanel .model{
   display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:14px;row-gap:8px;
@@ -782,6 +852,9 @@ svg{display:block}
   .fitGrid{grid-template-columns:repeat(2,minmax(0,1fr))}
   .fitFilters{grid-template-columns:1fr}
   .fitBrowse{grid-template-columns:1fr}
+  .fitCatalogSticky{top:72px}
+  .fitFilterMenu{position:fixed;left:12px;right:12px;top:auto;bottom:12px;width:auto}
+  .fitFilterMenuGrid{grid-template-columns:1fr}
   .deviceFitPanel .model{grid-template-columns:minmax(0,1fr)}
   .deviceFitPanel .model>.fit{grid-column:1;grid-row:auto;justify-self:start}
   .deviceFitPanel .modelActions{grid-column:1;grid-row:auto;flex-direction:row;min-width:0}
@@ -929,6 +1002,21 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     benchmarkStop: false,
     benchmarkProgress: null,
     loading: false,
+    error: '',
+    details: {},
+    detailLoading: {},
+    downloads: {},
+    compare: [],
+    compareOpen: false,
+    filtersOpen: false,
+    filters: {
+      maxSizeGb: '',
+      minContext: '',
+      quant: '',
+      publisher: '',
+      installedOnly: false,
+      benchmarkedOnly: false,
+    },
   };
   let fitSearchTimer = 0;
   let webAppStatus = { paired: false, connection: 'DISCONNECTED', origin: 'https://app.botconnector.id' };
@@ -1586,7 +1674,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   function hardwareValue(h, key) {
     const gpu = [...(h.nvidia || []), ...(h.amd || []), ...(h.intel || [])][0] || null;
     if (key === 'cpu') return String(h.cpu || 'Unknown');
-    if (key === 'ram') return h.ramGb ? Number(h.ramGb).toFixed(1) + ' GB total' + (h.freeRamGb ? ' · ' + Number(h.freeRamGb).toFixed(1) + ' GB available' : '') : 'Unknown';
+    if (key === 'ram') return h.ramGb ? Number(h.ramGb).toFixed(1) + ' GB total' : 'Unknown';
     if (key === 'gpu') return gpu?.name || 'No GPU detected';
     if (key === 'vram') {
       const value = gpu?.vramGb ?? gpu?.vram_gb ?? gpu?.memoryGb ?? gpu?.memory_gb;
@@ -1615,6 +1703,9 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       fitBackend: hardwareValue(h, 'backend'),
     };
     for (const [id, value] of Object.entries(fields)) $(id).textContent = value;
+    $('fitRamAvailable').textContent = h.freeRamGb
+      ? Number(h.freeRamGb).toFixed(1) + ' GB available now'
+      : 'Available memory not reported';
   }
 
   function fitUseCaseMatches(model, useCase) {
@@ -1717,12 +1808,175 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     return fitState.benchmarks[benchmarkKey(local.id, local.runtime)] || null;
   }
 
+  function formatGb(value) {
+    const n = Number(value || 0);
+    if (!n) return '';
+    return n >= 10 ? n.toFixed(1) : n.toFixed(1);
+  }
+
+  function formatBytes(value) {
+    const n = Number(value || 0);
+    if (!n) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let size = n;
+    let index = 0;
+    while (size >= 1024 && index < units.length - 1) {
+      size /= 1024;
+      index += 1;
+    }
+    const digits = index >= 3 ? 1 : index === 2 ? 0 : 1;
+    return size.toFixed(digits) + ' ' + units[index];
+  }
+
+  function fitModelData(model) {
+    if (!model) return model;
+    const id = String(model?.id || model?.name || '');
+    const details = fitState.details[id];
+    if (!details) return model;
+    return {
+      ...model,
+      ...details,
+      _local: model._local,
+      _installed: model._installed,
+      capabilities: details.capabilities || model.capabilities,
+      compatibility: details.compatibility || model.compatibility,
+    };
+  }
+
+  function catalogDisplayName(model) {
+    const m = fitModelData(model) || {};
+    const raw = String(m.id || m.name || 'Local model');
+    const leaf = raw.includes('/') ? raw.slice(raw.lastIndexOf('/') + 1) : raw;
+    const clean = leaf
+      .replace(/\.gguf$/i, '')
+      .replace(/[-_.]?GGUF$/i, '')
+      .replace(/[-_.](?:IQ\d(?:_[A-Z0-9]+)?|Q\d(?:_[A-Z0-9]+){0,3}|F16|BF16|F32)(?=$|[-_.])/gi, '-');
+    const params = Number(m?.compatibility?.paramsB || 0) ||
+      Number((clean.match(/(?:^|[-_.])(\d+(?:\.\d+)?)B(?:$|[-_.])/i) || [])[1] || 0);
+    const paramLabel = params ? String(params).replace(/\.0$/, '') + 'B' : '';
+    const rules = [
+      [/qwen[-_. ]*(\d+(?:\.\d+)?)/i, 'Qwen'],
+      [/gemma[-_. ]*(\d+(?:\.\d+)?)/i, 'Gemma'],
+      [/llama[-_. ]*(\d+(?:\.\d+)?)/i, 'Llama'],
+      [/mistral[-_. ]*(\d+(?:\.\d+)?)/i, 'Mistral'],
+      [/phi[-_. ]*(\d+(?:\.\d+)?)/i, 'Phi'],
+      [/glm[-_. ]*(\d+(?:\.\d+)?)/i, 'GLM'],
+    ];
+    for (const [pattern, family] of rules) {
+      const hit = clean.match(pattern);
+      if (!hit) continue;
+      let name = family + ' ' + hit[1];
+      if (/coder/i.test(clean) && !/coder/i.test(name)) name += ' Coder';
+      else if (/(?:^|[-_.])vl(?:$|[-_.])|vision/i.test(clean)) name += ' VL';
+      else if (/flash/i.test(clean)) name += ' Flash';
+      if (paramLabel && !name.toLowerCase().includes(paramLabel.toLowerCase())) name += ' ' + paramLabel;
+      return name.replace(/\s+/g, ' ').trim();
+    }
+    if (/deepseek/i.test(clean)) {
+      return ('DeepSeek' + (/coder/i.test(clean) ? ' Coder' : '') + (paramLabel ? ' ' + paramLabel : '')).trim();
+    }
+    const words = clean.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim().split(' ');
+    const paramIndex = words.findIndex((word) => /^\d+(?:\.\d+)?B$/i.test(word));
+    const endAt = paramIndex >= 0 ? Math.min(words.length, paramIndex + 1) : Math.min(words.length, 5);
+    const fallback = words.slice(0, endAt).join(' ');
+    return fallback || friendlyModelName(m);
+  }
+
+  function fitPublisher(model) {
+    const m = fitModelData(model) || {};
+    if (m.author) return String(m.author);
+    const raw = String(m.id || '');
+    if (raw.includes('/')) return raw.split('/')[0];
+    return String(m?._local?.source || 'Local model');
+  }
+
+  function fitLicenseLabel(model) {
+    const value = String(fitModelData(model)?.license || '').trim();
+    if (!value) return 'License not listed';
+    return value.split('-').map((part, index) => index === 0 ? part.charAt(0).toUpperCase() + part.slice(1) : part.toUpperCase()).join('-');
+  }
+
+  function fitPreferredQuant(model) {
+    const m = fitModelData(model) || {};
+    if (m.preferredDownload?.quant) return String(m.preferredDownload.quant);
+    if (m.quant) return String(m.quant);
+    const raw = String(m.id || m.name || '');
+    const hit = raw.toUpperCase().match(/(?:^|[-_.])(IQ\d(?:_[A-Z0-9]+)?|Q\d(?:_[A-Z0-9]+){0,3}|F16|BF16|F32)(?:$|[-_.])/);
+    return hit?.[1] || '';
+  }
+
+  function fitDownloadGb(model) {
+    const m = fitModelData(model) || {};
+    const bytes = Number(m.preferredDownload?.size || 0);
+    if (bytes > 0) return { gb: bytes / 1024 ** 3, estimated: false };
+    const estimated = Number(m.estimatedDownloadGb || m?.compatibility?.estimatedQ4Gb || 0);
+    return estimated > 0 ? { gb: estimated, estimated: true } : { gb: 0, estimated: true };
+  }
+
+  function fitRecommendedRamGb(model) {
+    const download = fitDownloadGb(model).gb;
+    if (!download) return 0;
+    return Math.ceil(download * 1.25 * 10) / 10;
+  }
+
+  function fitHeadroomGb(model) {
+    const free = Number(hardwareState?.freeRamGb || 0);
+    const ram = fitRecommendedRamGb(model);
+    return free && ram ? +(free - ram).toFixed(1) : null;
+  }
+
+  function fitContextLabel(model) {
+    const n = Number(fitModelData(model)?.contextLength || 0);
+    if (!n) return '';
+    if (n >= 1024 * 1024) return (n / (1024 * 1024)).toFixed(n % (1024 * 1024) ? 1 : 0) + 'M';
+    if (n >= 1024) return (n / 1024).toFixed(n % 1024 ? 1 : 0) + 'K';
+    return String(n);
+  }
+
   function fitResourceSummary(model) {
-    const c = model?.compatibility || {};
+    const m = fitModelData(model) || {};
+    const c = m.compatibility || {};
     const bits = [];
-    if (c.estimatedQ4Gb) bits.push('Est. Q4 weights ' + Number(c.estimatedQ4Gb).toFixed(1) + ' GB');
     if (c.paramsB) bits.push(Number(c.paramsB).toFixed(1).replace(/\.0$/, '') + 'B parameters');
+    const context = fitContextLabel(m);
+    if (context) bits.push('Context ' + context);
     return bits.join(' · ');
+  }
+
+  function fitDownloadSummary(model) {
+    const download = fitDownloadGb(model);
+    const ram = fitRecommendedRamGb(model);
+    const headroom = fitHeadroomGb(model);
+    const bits = [];
+    if (download.gb) bits.push((download.estimated ? '~' : '') + formatGb(download.gb) + ' GB download' + (download.estimated ? ' est.' : ''));
+    if (ram) bits.push('~' + formatGb(ram) + ' GB RAM recommended');
+    if (headroom != null) {
+      if (headroom >= 0) bits.push('~' + formatGb(headroom) + ' GB headroom after load');
+      else bits.push(formatGb(Number(hardwareState?.freeRamGb || 0)) + ' GB RAM available now');
+    }
+    return bits.join(' · ');
+  }
+
+  function fitIdentitySummary(model) {
+    const m = fitModelData(model) || {};
+    const quant = fitPreferredQuant(m);
+    return [fitPublisher(m), 'GGUF', quant || 'quant resolves on download'].filter(Boolean).join(' · ');
+  }
+
+  function fitTrustSummary(model) {
+    const m = fitModelData(model) || {};
+    const parts = [];
+    const isLocalOnly = Boolean(m?._local && !m.author && !String(m.id || '').includes('/'));
+    parts.push(isLocalOnly ? 'Local model' : (m.publisherType === 'official' ? 'Official publisher' : 'Community'));
+    parts.push(fitLicenseLabel(m));
+    parts.push(m.source || m?._local?.source || (String(m.id || '').includes('/') ? 'Hugging Face' : 'Local device'));
+    return parts;
+  }
+
+  function fitBenchmarkForModel(model) {
+    const local = model?._local || installedMatch(model);
+    const bench = modelBenchmark(local);
+    return bench && benchmarkMatchesHardware(bench) ? bench : null;
   }
 
   function fitBenchmarkSummary(model) {
@@ -1732,9 +1986,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     const bits = [];
     const current = benchmarkMatchesHardware(bench);
     if (bench.promptTokensPerSecond) bits.push('Prompt <strong>' + Number(bench.promptTokensPerSecond).toFixed(1) + ' tok/s</strong>');
-    if (bench.tokensPerSecond) {
-      bits.push((bench.source === 'runtime' ? 'Generate ' : 'Overall ~') + '<strong>' + Number(bench.tokensPerSecond).toFixed(1) + ' tok/s</strong>');
-    }
+    if (bench.tokensPerSecond) bits.push((bench.source === 'runtime' ? 'Generate ' : 'Overall ~') + '<strong>' + Number(bench.tokensPerSecond).toFixed(1) + ' tok/s</strong>');
     if (bench.loadMs) bits.push('Load ' + (Number(bench.loadMs) / 1000).toFixed(2) + ' s');
     if (bench.wallMs) bits.push('End-to-end ' + (Number(bench.wallMs) / 1000).toFixed(2) + ' s');
     if (bench.contextTokens) bits.push('Context ' + Math.round(Number(bench.contextTokens) / 1024) + 'K');
@@ -1742,24 +1994,49 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     return bits.join(' · ');
   }
 
+  function fitStatusText(model, local, loaded) {
+    const m = fitModelData(model) || {};
+    const level = String(m?.compatibility?.level || (loaded ? 'loaded' : local ? 'installed' : 'unknown'));
+    const bench = fitBenchmarkForModel(m);
+    const base = fitStatusLabel(level);
+    return bench?.tokensPerSecond ? base + ' · ' + Number(bench.tokensPerSecond).toFixed(1) + ' tok/s' : base + ' · Estimated';
+  }
+
   function fitReasonText(model) {
-    const c = model?.compatibility || {};
+    const m = fitModelData(model) || {};
+    const c = m.compatibility || {};
     const reasons = [];
     const level = String(c.level || 'unknown');
     if (level === 'great') reasons.push('Fits comfortably on the detected hardware.');
     else if (level === 'ok') reasons.push('Fits the detected hardware with moderate headroom.');
     else if (level === 'warn') reasons.push('Expected to run, but memory or speed headroom may be limited.');
-    if (c.estimatedQ4Gb) reasons.push('Q4 model weights are estimated at about ' + Number(c.estimatedQ4Gb).toFixed(1) + ' GB before runtime overhead.');
+    const download = fitDownloadGb(m);
+    if (download.gb) reasons.push((download.estimated ? 'Estimated' : 'Selected') + ' model download is about ' + formatGb(download.gb) + ' GB.');
+    const ram = fitRecommendedRamGb(m);
+    if (ram) reasons.push('Recommended memory budget is about ' + formatGb(ram) + ' GB including runtime overhead.');
     const useCases = fitSpecificUseCases().filter((item) => item !== 'general');
     if (useCases.length) reasons.push('Matches selected capability: ' + useCases.join(', ') + '.');
-    const p = fitParams(model);
+    const p = fitParams(m);
     if (p) reasons.push('The ' + fitState.preference + ' preference ranks this ' + p + 'B model against the other compatible choices.');
-    const local = model?._local || installedMatch(model);
-    const bench = modelBenchmark(local);
-    if (bench?.tokensPerSecond && benchmarkMatchesHardware(bench)) {
-      reasons.push('Measured on this device at ' + Number(bench.tokensPerSecond).toFixed(1) + ' tok/s; this measured speed contributes to the ranking.');
-    }
+    const bench = fitBenchmarkForModel(m);
+    if (bench?.tokensPerSecond) reasons.push('Measured on this device at ' + Number(bench.tokensPerSecond).toFixed(1) + ' tok/s; this measured speed contributes to the ranking.');
+    else reasons.push('Performance is estimated until this model is installed and benchmarked on this device.');
     return reasons.join(' ');
+  }
+
+  function fitRecommendationSummary(model) {
+    const m = fitModelData(model) || {};
+    const bits = [];
+    const ram = fitRecommendedRamGb(m);
+    const free = Number(hardwareState?.freeRamGb || 0);
+    if (ram && free && ram <= free * 0.45) bits.push('Low memory footprint');
+    else if (fitHeadroomGb(m) != null && fitHeadroomGb(m) >= 4) bits.push('Comfortable memory headroom');
+    const selected = fitSpecificUseCases().filter((item) => item !== 'general');
+    if (selected.length) bits.push('Matches ' + selected.join(' + '));
+    const bench = fitBenchmarkForModel(m);
+    if (bench?.tokensPerSecond) bits.push(Number(bench.tokensPerSecond).toFixed(1) + ' tok/s measured');
+    else if (String(m?.compatibility?.level) === 'great') bits.push('Great estimated fit');
+    return bits.slice(0, 3).join(' · ') || 'Best current match for this device and profile';
   }
 
   async function benchmarkOne(local) {
@@ -1803,17 +2080,9 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     for (let i = 0; i < rows.length; i++) {
       if (fitState.benchmarkStop) break;
       const local = rows[i];
-      fitState.benchmarkProgress = {
-        ...fitState.benchmarkProgress,
-        current: i + 1,
-        model: friendlyModelName(local),
-      };
+      fitState.benchmarkProgress = { ...fitState.benchmarkProgress, current: i + 1, model: friendlyModelName(local) };
       renderDeviceFitModels();
-      try {
-        await benchmarkOne(local);
-      } catch {
-        fitState.benchmarkProgress.failed += 1;
-      }
+      try { await benchmarkOne(local); } catch { fitState.benchmarkProgress.failed += 1; }
       renderDeviceFitModels();
     }
 
@@ -1821,11 +2090,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     fitState.benchmarkRunning = false;
     fitState.benchmarkStop = false;
     const progress = fitState.benchmarkProgress || { current: 0, total: rows.length, failed: 0 };
-    fitState.benchmarkProgress = {
-      ...progress,
-      done: true,
-      stopped,
-    };
+    fitState.benchmarkProgress = { ...progress, done: true, stopped };
     await refresh().catch(() => {});
     renderDeviceFitModels();
   }
@@ -1834,22 +2099,43 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     const id = String(candidate?.id || candidate?.name || '').toLowerCase();
     const leaf = id.split('/').pop().replace(/[-_.]?gguf$/i, '');
     return models.find((local) => {
-      const hay = [local?.id, local?.name, local?.path].filter(Boolean).join(' ').toLowerCase();
+      const hay = [local?.id, local?.name, local?.repoId, local?.path].filter(Boolean).join(' ').toLowerCase();
       return (id && hay.includes(id)) || (leaf && leaf.length > 5 && hay.includes(leaf));
     }) || null;
+  }
+
+  function fitModelPassesFilters(model) {
+    const m = fitModelData(model) || {};
+    const f = fitState.filters;
+    if (f.maxSizeGb) {
+      const size = fitDownloadGb(m).gb;
+      if (!size || size > Number(f.maxSizeGb)) return false;
+    }
+    if (f.minContext) {
+      if (Number(m.contextLength || 0) < Number(f.minContext)) return false;
+    }
+    if (f.quant && fitPreferredQuant(m).toUpperCase() !== String(f.quant).toUpperCase()) return false;
+    if (f.publisher && String(m.publisherType || 'community') !== f.publisher) return false;
+    const local = m._local || installedMatch(m);
+    if (f.installedOnly && !local) return false;
+    if (f.benchmarkedOnly && !fitBenchmarkForModel({ ...m, _local: local })) return false;
+    return true;
   }
 
   function compatibleFiltered() {
     const query = fitState.query.trim().toLowerCase();
     return fitState.compatible
+      .map(fitModelData)
       .filter((model) => model?.compatibility?.level !== 'no' && catalogCapabilities(model).chat !== false)
       .filter((model) => fitSpecificUseCases().every((useCase) => fitUseCaseMatches(model, useCase)))
+      .filter(fitModelPassesFilters)
       .filter((model) => !query || normalizedFitSearch(model).includes(query));
   }
 
   function recommendedFiltered() {
     const pool = new Map();
-    for (const model of [...fitState.recommended, ...fitState.compatible]) {
+    for (const base of [...fitState.recommended, ...fitState.compatible]) {
+      const model = fitModelData(base);
       const id = String(model?.id || model?.name || '');
       if (id && !pool.has(id)) pool.set(id, model);
     }
@@ -1857,38 +2143,45 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     return [...pool.values()]
       .filter((model) => model?.compatibility?.level !== 'no' && catalogCapabilities(model).chat !== false)
       .filter((model) => fitSpecificUseCases().every((useCase) => fitUseCaseMatches(model, useCase)))
+      .filter(fitModelPassesFilters)
       .filter((model) => !query || normalizedFitSearch(model).includes(query))
       .sort((a, b) => fitScore(b) - fitScore(a))
       .slice(0, 12);
   }
 
   function installedFitModels() {
-    const candidates = [...fitState.recommended, ...fitState.compatible];
+    const candidates = [...fitState.recommended, ...fitState.compatible].map(fitModelData);
     return models.map((local) => {
-      const hay = [local?.id, local?.name, local?.path].filter(Boolean).join(' ').toLowerCase();
+      const hay = [local?.id, local?.name, local?.repoId, local?.path].filter(Boolean).join(' ').toLowerCase();
       const matched = candidates.find((candidate) => {
         const id = String(candidate?.id || '').toLowerCase();
         const leaf = id.split('/').pop().replace(/[-_.]?gguf$/i, '');
         return (id && hay.includes(id)) || (leaf && leaf.length > 5 && hay.includes(leaf));
       });
-      return {
-        id: local.name || local.id,
-        name: local.name || local.id,
+      const row = {
+        ...(matched || {}),
+        id: matched?.id || local.repoId || local.name || local.id,
+        name: local.name || matched?.name || local.id,
+        author: matched?.author || (local.repoId ? String(local.repoId).split('/')[0] : null),
         capabilities: matched?.capabilities || local.capabilities || null,
         compatibility: matched?.compatibility || { level: modelIsLoaded(local) ? 'loaded' : 'installed' },
         downloads: matched?.downloads || 0,
         _local: local,
         _installed: true,
       };
+      return row;
+    }).filter(fitModelPassesFilters).filter((model) => {
+      const query = fitState.query.trim().toLowerCase();
+      return !query || normalizedFitSearch(model).includes(query);
     });
   }
 
   function sortFitModels(list) {
     const rows = [...list];
     const sort = fitState.sort;
-    if (sort === 'smallest') return rows.sort((a, b) => (fitParams(a) || 999) - (fitParams(b) || 999) || String(a.id || '').localeCompare(String(b.id || '')));
+    if (sort === 'smallest') return rows.sort((a, b) => (fitDownloadGb(a).gb || 999) - (fitDownloadGb(b).gb || 999) || String(a.id || '').localeCompare(String(b.id || '')));
     if (sort === 'popular') return rows.sort((a, b) => Number(b.downloads || 0) - Number(a.downloads || 0));
-    if (sort === 'name') return rows.sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')));
+    if (sort === 'name') return rows.sort((a, b) => catalogDisplayName(a).localeCompare(catalogDisplayName(b)));
     return rows.sort((a, b) => fitScore(b) - fitScore(a));
   }
 
@@ -1918,67 +2211,371 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     $('fitPreferenceDescription').textContent = fitPreferenceCopy(fitState.preference);
   }
 
+  function activeFitFilterCount() {
+    const f = fitState.filters;
+    return [f.maxSizeGb, f.minContext, f.quant, f.publisher, f.installedOnly, f.benchmarkedOnly].filter(Boolean).length;
+  }
+
+  function renderFitFilters() {
+    $('fitFilterSize').value = fitState.filters.maxSizeGb;
+    $('fitFilterContext').value = fitState.filters.minContext;
+    $('fitFilterQuant').value = fitState.filters.quant;
+    $('fitFilterPublisher').value = fitState.filters.publisher;
+    $('fitFilterInstalled').checked = fitState.filters.installedOnly;
+    $('fitFilterBenchmarked').checked = fitState.filters.benchmarkedOnly;
+    $('fitFilterMenu').hidden = !fitState.filtersOpen;
+    const count = activeFitFilterCount();
+    $('fitFilterCount').hidden = count === 0;
+    $('fitFilterCount').textContent = String(count);
+    $('fitFiltersBtn').classList.toggle('active', count > 0);
+  }
+
+  async function ensureFitDetails(model) {
+    const id = String(model?.id || '');
+    if (!id.includes('/') || fitState.details[id] || fitState.detailLoading[id]) return;
+    fitState.detailLoading[id] = true;
+    try {
+      fitState.details[id] = await api('/api/catalog/details', {
+        method: 'POST',
+        body: JSON.stringify({ id }),
+      });
+      renderDeviceFitModels();
+    } catch {
+      // Estimated metadata remains usable if a detail lookup is unavailable or rate-limited.
+    } finally {
+      delete fitState.detailLoading[id];
+    }
+  }
+
+  function fitDownloadState(model) {
+    return fitState.downloads[String(model?.id || '')] || null;
+  }
+
+  function fitDownloadStatusText(job) {
+    if (!job) return '';
+    const percent = Number(job.percent || 0);
+    const completed = Number(job.completed || 0);
+    const total = Number(job.total || 0);
+    const speed = Number(job.bytesPerSecond || 0);
+    if (job.status === 'verifying' || String(job.detail || '').toLowerCase().includes('verifying')) return 'Verifying downloaded model…';
+    if (job.status === 'rate-limited') {
+      const seconds = Math.max(1, Math.ceil(Number(job.retryAfterMs || 0) / 1000));
+      return 'Hugging Face rate limit · retrying automatically in ' + seconds + 's';
+    }
+    if (job.status === 'retrying') return job.detail || 'Connection interrupted · resuming automatically';
+    if (job.status === 'failed') return 'Download failed · ' + (job.error || 'Retry available');
+    if (job.status === 'cancelled') return 'Download cancelled';
+    if (job.status === 'completed') return 'Installed';
+    const bits = ['Downloading ' + percent + '%'];
+    if (total) bits.push(formatBytes(completed) + ' / ' + formatBytes(total));
+    if (speed) bits.push(formatBytes(speed) + '/s');
+    return bits.join(' · ');
+  }
+
+  async function downloadFitModel(model) {
+    const m = fitModelData(model);
+    const id = String(m?.id || '');
+    if (!id) return;
+    const active = Object.values(fitState.downloads).filter((job) => ['queued','resolving','downloading','verifying','retrying','rate-limited'].includes(String(job?.status || ''))).length;
+    if (active >= 2 && !fitState.downloads[id]) {
+      alert('Two model downloads are already active. Wait for one to finish or cancel it first.');
+      return;
+    }
+    fitState.downloads[id] = { model: id, status: 'resolving', percent: 0, completed: 0, total: 0 };
+    renderDeviceFitModels();
+    try {
+      const status = await api('/api/status');
+      if (!status.runtime?.available) await prepareRuntime();
+      const start = await api('/api/models/pull', { method: 'POST', body: JSON.stringify({ model: id }) });
+      fitState.downloads[id] = { ...start, model: id };
+      renderDeviceFitModels();
+      for (;;) {
+        const job = await api('/api/models/pull/status', { method: 'POST', body: JSON.stringify({ id: start.id }) });
+        fitState.downloads[id] = { ...job, model: id };
+        renderDeviceFitModels();
+        if (job.status === 'completed') {
+          await refresh();
+          await loadDeviceFit(false);
+          return;
+        }
+        if (job.status === 'failed' || job.status === 'cancelled') return;
+        await new Promise((resolve) => setTimeout(resolve, 650));
+      }
+    } catch (error) {
+      fitState.downloads[id] = { ...(fitState.downloads[id] || {}), model: id, status: 'failed', error: String(error.message || error) };
+      renderDeviceFitModels();
+    }
+  }
+
+  async function cancelFitDownload(model) {
+    const id = String(model?.id || '');
+    const job = fitState.downloads[id];
+    if (!job?.id) return;
+    try {
+      const state = await api('/api/models/pull/cancel', { method: 'POST', body: JSON.stringify({ id: job.id }) });
+      fitState.downloads[id] = { ...state, model: id };
+    } catch (error) {
+      fitState.downloads[id] = { ...job, status: 'failed', error: String(error.message || error) };
+    }
+    renderDeviceFitModels();
+  }
+
+  function useFitModel(local) {
+    if (!local?.path) return;
+    const option = [...$('modelSelect').options].find((item) => item.value === local.path);
+    if (!option) return;
+    $('modelSelect').value = local.path;
+    settings.model = local.path;
+    $('modelSelect').title = modelDetail(local);
+    persistSettings();
+    renderModelActions();
+    close();
+    $('prompt').focus();
+  }
+
+  function fitCompareId(model) {
+    return String(model?.id || model?.name || '');
+  }
+
+  function toggleFitCompare(model) {
+    const id = fitCompareId(model);
+    if (!id) return;
+    if (fitState.compare.includes(id)) fitState.compare = fitState.compare.filter((item) => item !== id);
+    else {
+      if (fitState.compare.length >= 3) {
+        alert('Compare supports up to 3 models at a time.');
+        return;
+      }
+      fitState.compare.push(id);
+    }
+    if (fitState.compare.length < 2) fitState.compareOpen = false;
+    renderDeviceFitModels();
+  }
+
+  function knownFitModels() {
+    const map = new Map();
+    for (const model of [...fitState.recommended, ...fitState.compatible, ...installedFitModels()]) {
+      const m = fitModelData(model);
+      const id = fitCompareId(m);
+      if (id && !map.has(id)) map.set(id, m);
+    }
+    return map;
+  }
+
+  function renderFitCompare() {
+    const map = knownFitModels();
+    fitState.compare = fitState.compare.filter((id) => map.has(id));
+    const selected = fitState.compare.map((id) => map.get(id)).filter(Boolean);
+    const tray = $('fitCompareTray');
+    tray.hidden = selected.length === 0;
+    $('fitCompareTitle').textContent = selected.length + ' model' + (selected.length === 1 ? '' : 's') + ' selected';
+    $('fitCompareNames').textContent = selected.map(catalogDisplayName).join(' · ');
+    $('fitCompareOpen').disabled = selected.length < 2;
+    $('fitCompareOpen').textContent = fitState.compareOpen ? 'Hide comparison' : 'Compare';
+
+    const panel = $('fitComparePanel');
+    panel.hidden = !fitState.compareOpen || selected.length < 2;
+    if (panel.hidden) return;
+
+    const cell = (value) => '<td>' + esc(value || '—') + '</td>';
+    const row = (label, values) => '<tr><td>' + esc(label) + '</td>' + values.map(cell).join('') + '</tr>';
+    const header = '<tr><th>Compare</th>' + selected.map((m) => '<th title="' + esc(m.id || '') + '">' + esc(catalogDisplayName(m)) + '</th>').join('') + '</tr>';
+    const capabilities = (m) => Object.entries(catalogCapabilities(m)).filter(([, value]) => value === true).map(([key]) => key === 'chat' ? 'Text' : key.charAt(0).toUpperCase() + key.slice(1)).join(', ');
+    panel.innerHTML =
+      '<div class="row" style="margin-bottom:8px"><strong class="grow">Model comparison</strong><button class="btn small" type="button" id="fitCompareClose">Close</button></div>' +
+      '<table class="fitCompareTable"><thead>' + header + '</thead><tbody>' +
+      row('Fit', selected.map((m) => fitStatusText(m, m._local || installedMatch(m), Boolean((m._local || installedMatch(m)) && modelIsLoaded(m._local || installedMatch(m)))))) +
+      row('Parameters', selected.map((m) => m?.compatibility?.paramsB ? Number(m.compatibility.paramsB).toFixed(1).replace(/\.0$/, '') + 'B' : '—')) +
+      row('RAM recommended', selected.map((m) => fitRecommendedRamGb(m) ? '~' + formatGb(fitRecommendedRamGb(m)) + ' GB' : '—')) +
+      row('Measured speed', selected.map((m) => fitBenchmarkForModel(m)?.tokensPerSecond ? Number(fitBenchmarkForModel(m).tokensPerSecond).toFixed(1) + ' tok/s' : 'Not benchmarked')) +
+      row('Context', selected.map((m) => fitContextLabel(m) || 'Not listed')) +
+      row('Capabilities', selected.map(capabilities)) +
+      row('Publisher', selected.map((m) => fitPublisher(m) + ' · ' + (m.publisherType === 'official' ? 'Official' : 'Community'))) +
+      row('License', selected.map(fitLicenseLabel)) +
+      '</tbody></table>';
+    $('fitCompareClose').onclick = () => { fitState.compareOpen = false; renderFitCompare(); };
+  }
+
+  function renderFitSkeleton(label = 'Finding compatible models…') {
+    $('fitModels').innerHTML =
+      '<div class="fitStateBox" style="min-height:70px;padding-bottom:4px"><strong>' + esc(label) + '</strong></div>' +
+      '<div class="fitSkeletonList">' +
+      Array.from({ length: 4 }, () => '<div class="fitSkeleton"><div class="fitSkeletonLine"></div><div class="fitSkeletonLine mid"></div><div class="fitSkeletonLine short"></div></div>').join('') +
+      '</div>';
+  }
+
+  function renderFitError(error) {
+    const box = $('fitModels');
+    box.innerHTML = '<div class="fitStateBox"><strong>Catalog unavailable</strong><span>' + esc(error || 'Could not load compatible models.') + '</span><button class="btn small" type="button">Retry</button></div>';
+    box.querySelector('button').onclick = () => loadDeviceFit(true);
+  }
+
   function renderFitCatalog(list) {
     const box = $('fitModels');
-    box.innerHTML = list.length ? '' : '<div class="muted">No models match these filters.</div>';
-    for (const m of list) {
+    if (!list.length) {
+      const useCases = fitSpecificUseCases().filter((item) => item !== 'general');
+      const label = useCases.length
+        ? 'No ' + useCases.map((item) => item.charAt(0).toUpperCase() + item.slice(1)).join(' + ') + ' models fit this profile'
+        : 'No models match these filters';
+      box.innerHTML = '<div class="fitStateBox"><strong>' + esc(label) + '</strong><span>Try another profile, clear filters, or scan the device again.</span><button class="btn small" type="button">Clear filters</button></div>';
+      box.querySelector('button').onclick = () => {
+        fitState.filters = { maxSizeGb: '', minContext: '', quant: '', publisher: '', installedOnly: false, benchmarkedOnly: false };
+        fitState.query = '';
+        $('fitSearch').value = '';
+        renderDeviceFitModels();
+      };
+      renderFitCompare();
+      return;
+    }
+
+    box.innerHTML = '';
+    list.forEach((base, index) => {
+      const m = fitModelData(base);
       const local = m._local || installedMatch(m);
       const loaded = local ? modelIsLoaded(local) : false;
-      const level = local ? (loaded ? 'loaded' : 'installed') : (m.compatibility?.level || 'unknown');
+      const level = String(m?.compatibility?.level || (loaded ? 'loaded' : local ? 'installed' : 'unknown'));
+      const bench = fitBenchmarkForModel({ ...m, _local: local });
+      const downloadJob = fitDownloadState(m);
+      const selectedCompare = fitState.compare.includes(fitCompareId(m));
       const row = document.createElement('div');
-      row.className = 'model fitModelCard';
-      row.innerHTML = '<div class="modelInfo"><span class="name"></span><div class="capabilities"></div><div class="fitMeta"></div><div class="fitBenchmarkMetrics"></div><button class="fitWhy" type="button">Why this model?</button><div class="fitReason" hidden></div></div><span class="fit ' + esc(level) + '">' + esc(fitStatusLabel(level)) + '</span><div class="modelActions"><button class="btn small primary"></button><button class="btn small benchmark" type="button" hidden>Benchmark</button></div>';
-      const size = m.compatibility?.paramsB ? ' · ' + m.compatibility.paramsB + 'B' : '';
-      row.querySelector('.name').textContent = (m.id || m.name || 'Local model') + size;
-      row.querySelector('.name').title = m.id || m.name || '';
+      row.className = 'model fitModelCard' + (fitState.view === 'recommended' && index === 0 ? ' fitTopRecommendation' : '');
+      row.innerHTML =
+        '<div class="modelInfo">' +
+          '<span class="name"></span>' +
+          '<div class="fitIdentityMeta"></div>' +
+          '<div class="fitRecommendationHint" hidden><strong>Recommended for this device</strong><span></span></div>' +
+          '<div class="capabilities"></div>' +
+          '<div class="fitMeta"></div>' +
+          '<div class="fitTrustMeta"></div>' +
+          '<div class="fitDownloadMeta"></div>' +
+          '<div class="fitBenchmarkMetrics"></div>' +
+          '<div class="fitDownloadProgress" hidden><div class="fitDownloadProgressTop"><span class="fitDownloadProgressText"></span><span class="fitDownloadProgressPct"></span></div><div class="fitProgressTrack"><div class="fitProgressBar"></div></div></div>' +
+          '<button class="fitWhy" type="button">Why this model?</button>' +
+          '<div class="fitReason" hidden></div>' +
+          '<label class="fitCompareChoice"><input type="checkbox"> Compare</label>' +
+        '</div>' +
+        '<span class="fit ' + esc(level) + '"></span>' +
+        '<div class="modelActions"><button class="btn small primary"></button><button class="btn small secondary" type="button" hidden></button><button class="btn small benchmark" type="button" hidden>Benchmark</button><button class="btn small cancelDownload" type="button" hidden>Cancel</button></div>';
+
+      const name = row.querySelector('.name');
+      name.textContent = catalogDisplayName(m);
+      name.title = m.id || m.name || '';
+
+      row.querySelector('.fitIdentityMeta').textContent = fitIdentitySummary(m);
+      const recommendedHint = row.querySelector('.fitRecommendationHint');
+      if (fitState.view === 'recommended' && index === 0) {
+        recommendedHint.hidden = false;
+        recommendedHint.querySelector('span').textContent = fitRecommendationSummary(m);
+      }
+
       const badges = modelCapabilityBadges(catalogCapabilities(m));
       const capabilityBox = row.querySelector('.capabilities');
       capabilityBox.innerHTML = badges;
       capabilityBox.hidden = !badges;
+
       const meta = row.querySelector('.fitMeta');
       meta.textContent = fitResourceSummary(m);
       meta.hidden = !meta.textContent;
+
+      const trust = row.querySelector('.fitTrustMeta');
+      const trustParts = fitTrustSummary(m);
+      trust.innerHTML =
+        '<span class="fitTrustBadge ' + (m.publisherType === 'official' ? 'official' : '') + '">' + esc(trustParts[0]) + '</span>' +
+        '<span>' + esc(trustParts[1]) + '</span><span>·</span><span>' + esc(trustParts[2]) + '</span>' +
+        '<span class="fitConfidence ' + (bench ? 'measured' : '') + '">' + (bench ? 'Measured' : 'Estimated') + '</span>';
+
+      const downloadMeta = row.querySelector('.fitDownloadMeta');
+      downloadMeta.textContent = fitDownloadSummary(m);
+      downloadMeta.hidden = !downloadMeta.textContent;
+
       const perf = row.querySelector('.fitBenchmarkMetrics');
-      perf.innerHTML = fitBenchmarkSummary(m);
+      perf.innerHTML = fitBenchmarkSummary({ ...m, _local: local });
       perf.hidden = !perf.textContent;
+
+      const status = row.querySelector('.fit');
+      status.textContent = fitStatusText({ ...m, _local: local }, local, loaded);
+
       const why = row.querySelector('.fitWhy');
       const reason = row.querySelector('.fitReason');
-      reason.textContent = fitReasonText(m);
+      reason.textContent = fitReasonText({ ...m, _local: local });
       why.hidden = fitState.view !== 'recommended' || !reason.textContent;
       why.onclick = () => {
         reason.hidden = !reason.hidden;
         why.classList.toggle('expanded', !reason.hidden);
         why.textContent = reason.hidden ? 'Why this model?' : 'Hide details';
       };
-      const button = row.querySelector('.primary');
+
+      const compare = row.querySelector('.fitCompareChoice input');
+      compare.checked = selectedCompare;
+      compare.onchange = () => toggleFitCompare(m);
+
+      const primary = row.querySelector('.primary');
+      const secondary = row.querySelector('.secondary');
       const benchmark = row.querySelector('.benchmark');
-      if (local) {
+      const cancel = row.querySelector('.cancelDownload');
+      const progressBox = row.querySelector('.fitDownloadProgress');
+
+      if (downloadJob && !['completed'].includes(downloadJob.status)) {
+        const active = ['queued','resolving','downloading','verifying','retrying','rate-limited'].includes(String(downloadJob.status || ''));
+        const text = fitDownloadStatusText(downloadJob);
+        progressBox.hidden = false;
+        progressBox.querySelector('.fitDownloadProgressText').textContent = text;
+        progressBox.querySelector('.fitDownloadProgressPct').textContent = Number(downloadJob.percent || 0) + '%';
+        progressBox.querySelector('.fitProgressBar').style.width = Math.max(0, Math.min(100, Number(downloadJob.percent || 0))) + '%';
+        if (active) {
+          primary.disabled = true;
+          primary.textContent = downloadJob.status === 'verifying' ? 'Verifying…' : 'Downloading…';
+          cancel.hidden = false;
+          cancel.onclick = () => cancelFitDownload(m);
+        } else {
+          primary.textContent = 'Retry download';
+          primary.onclick = () => downloadFitModel(m);
+        }
+      } else if (local) {
         benchmark.hidden = catalogCapabilities(m).chat === false;
         benchmark.disabled = fitState.benchmarkRunning;
         benchmark.onclick = () => benchmarkLocalModel(local, benchmark);
-        button.disabled = fitState.benchmarkRunning;
-        button.textContent = loaded ? 'Unload' : 'Load';
-        button.onclick = async () => {
-          button.disabled = true;
-          try {
-            await api('/api/models/' + (loaded ? 'unload' : 'load'), {
-              method: 'POST',
-              body: JSON.stringify({ model: local.id, runtime: local.runtime }),
-            });
-            await refresh();
-            renderDeviceFitModels();
-          } catch (error) {
-            alert(error.message || error);
-          } finally {
-            button.disabled = false;
-          }
-        };
+        if (loaded) {
+          primary.textContent = 'Use model';
+          primary.onclick = () => useFitModel(local);
+          secondary.hidden = false;
+          secondary.textContent = 'Unload';
+          secondary.onclick = async () => {
+            secondary.disabled = true;
+            try {
+              await api('/api/models/unload', { method: 'POST', body: JSON.stringify({ model: local.id, runtime: local.runtime }) });
+              await refresh();
+              renderDeviceFitModels();
+            } catch (error) { alert(error.message || error); }
+          };
+        } else {
+          primary.textContent = 'Load';
+          primary.disabled = fitState.benchmarkRunning;
+          primary.onclick = async () => {
+            primary.disabled = true;
+            primary.textContent = 'Loading…';
+            try {
+              await api('/api/models/load', { method: 'POST', body: JSON.stringify({ model: local.id, runtime: local.runtime }) });
+              await refresh();
+              renderDeviceFitModels();
+            } catch (error) {
+              alert(error.message || error);
+              primary.disabled = false;
+              primary.textContent = 'Load';
+            }
+          };
+        }
       } else {
-        button.textContent = 'Download';
-        button.onclick = () => download(m.id).then(() => loadDeviceFit(false));
+        primary.textContent = 'Download';
+        primary.onclick = () => downloadFitModel(m);
       }
+
+      row.onmouseenter = () => ensureFitDetails(m);
+      row.onfocusin = () => ensureFitDetails(m);
       box.appendChild(row);
-    }
+    });
+
+    renderFitCompare();
   }
 
   function renderDeviceFitModels() {
@@ -1994,6 +2591,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       tab.setAttribute('aria-selected', active ? 'true' : 'false');
     }
     renderFitPreference();
+    renderFitFilters();
     $('fitSort').value = fitState.sort;
     const lead = fitState.view === 'recommended'
       ? 'Ranked for this hardware, selected capabilities, preference, and measured performance when available.'
@@ -2016,6 +2614,14 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
           : progress.done
             ? 'Benchmark complete · ' + progress.total + ' models' + (progress.failed ? ' · ' + progress.failed + ' failed' : '')
             : '';
+    if (fitState.loading) {
+      renderFitSkeleton('Finding compatible models…');
+      return;
+    }
+    if (fitState.error) {
+      renderFitError(fitState.error);
+      return;
+    }
     const source = fitState.view === 'recommended' ? recommended : fitState.view === 'installed' ? installed : compatible;
     renderFitCatalog(fitState.view === 'installed' ? source : sortFitModels(source));
   }
@@ -2042,7 +2648,8 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
 
   async function loadDeviceFit(scanHardware = true) {
     fitState.loading = true;
-    $('fitModels').innerHTML = '<div class="muted">Checking models that fit this device…</div>';
+    fitState.error = '';
+    renderFitSkeleton(scanHardware ? 'Scanning hardware…' : 'Finding compatible models…');
     try {
       if (scanHardware) {
         const status = await api('/api/status');
@@ -2050,6 +2657,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
         hardwareState = status.hardware || {};
         renderFitHardware();
         $('fitScanStatus').textContent = 'Detected locally · updated just now';
+        renderFitSkeleton('Finding compatible models…');
       }
       const [recommended, , benchmarkPayload] = await Promise.all([
         api('/api/catalog/recommendations', { method: 'POST', body: JSON.stringify({ limit: 24 }) }),
@@ -2061,11 +2669,11 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
         (Array.isArray(benchmarkPayload?.benchmarks) ? benchmarkPayload.benchmarks : [])
           .map((item) => [benchmarkKey(item?.model, item?.runtime), item]),
       );
-      renderDeviceFitModels();
     } catch (error) {
-      $('fitModels').innerHTML = '<div class="error">' + esc(error.message || error) + '</div>';
+      fitState.error = String(error.message || error);
     } finally {
       fitState.loading = false;
+      renderDeviceFitModels();
     }
   }
 
@@ -2192,7 +2800,11 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     button.onclick = () => toggleFitUseCase(button.dataset.fitUsecase);
   }
   for (const tab of document.querySelectorAll('[data-fit-view]')) {
-    tab.onclick = () => { fitState.view = tab.dataset.fitView; renderDeviceFitModels(); };
+    tab.onclick = () => {
+      fitState.view = tab.dataset.fitView;
+      fitState.compareOpen = false;
+      renderDeviceFitModels();
+    };
   }
   for (const button of document.querySelectorAll('[data-fit-preference]')) {
     button.onclick = () => {
@@ -2200,6 +2812,30 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       renderDeviceFitModels();
     };
   }
+  $('fitFiltersBtn').onclick = () => {
+    fitState.filtersOpen = !fitState.filtersOpen;
+    renderFitFilters();
+  };
+  $('fitFilterSize').onchange = (event) => { fitState.filters.maxSizeGb = event.target.value; renderDeviceFitModels(); };
+  $('fitFilterContext').onchange = (event) => { fitState.filters.minContext = event.target.value; renderDeviceFitModels(); };
+  $('fitFilterQuant').onchange = (event) => { fitState.filters.quant = event.target.value; renderDeviceFitModels(); };
+  $('fitFilterPublisher').onchange = (event) => { fitState.filters.publisher = event.target.value; renderDeviceFitModels(); };
+  $('fitFilterInstalled').onchange = (event) => { fitState.filters.installedOnly = event.target.checked; renderDeviceFitModels(); };
+  $('fitFilterBenchmarked').onchange = (event) => { fitState.filters.benchmarkedOnly = event.target.checked; renderDeviceFitModels(); };
+  $('fitFiltersClear').onclick = () => {
+    fitState.filters = { maxSizeGb: '', minContext: '', quant: '', publisher: '', installedOnly: false, benchmarkedOnly: false };
+    renderDeviceFitModels();
+  };
+  $('fitCompareOpen').onclick = () => {
+    if (fitState.compare.length < 2) return;
+    fitState.compareOpen = !fitState.compareOpen;
+    renderFitCompare();
+  };
+  $('fitCompareClear').onclick = () => {
+    fitState.compare = [];
+    fitState.compareOpen = false;
+    renderDeviceFitModels();
+  };
   $('fitBenchmarkAll').onclick = benchmarkAllInstalled;
   $('fitBenchmarkStop').onclick = () => {
     if (!fitState.benchmarkRunning) return;
@@ -2368,8 +3004,8 @@ function localUiHtml({ token, host, port }) {
     <div class="fitHardwareShell">
       <div class="fitGrid">
         <div class="fitMetric"><span>Processor</span><strong id="fitCpu">Checking…</strong></div>
-        <div class="fitMetric"><span>Memory</span><strong id="fitRam">Checking…</strong></div>
-        <div class="fitMetric"><span>Graphics</span><strong id="fitGpu">Checking…</strong><div class="fitMetricSub">VRAM · <strong id="fitVram">Checking…</strong></div></div>
+        <div class="fitMetric"><span>Memory</span><strong id="fitRam">Checking…</strong><div class="fitMetricSub" id="fitRamAvailable">Checking available memory…</div></div>
+        <div class="fitMetric"><span>Graphics</span><strong id="fitGpu">Checking…</strong><div class="fitMetricSub">GPU memory · <strong id="fitVram">Checking…</strong></div></div>
         <div class="fitMetric"><span>Accelerator</span><strong id="fitNpu">Checking…</strong></div>
       </div>
       <div class="fitHardwareMeta">
@@ -2410,35 +3046,86 @@ function localUiHtml({ token, host, port }) {
   </section>
 
   <section class="fitSection">
-    <div class="fitTabs" role="tablist" aria-label="Device fit model views">
-      <button class="fitTab active" id="fitTabRecommended" data-fit-view="recommended" role="tab"><span>Recommended</span><span class="fitTabCount" id="fitTabRecommendedCount">0</span></button>
-      <button class="fitTab" id="fitTabInstalled" data-fit-view="installed" role="tab"><span>Installed</span><span class="fitTabCount" id="fitTabInstalledCount">0</span></button>
-      <button class="fitTab" id="fitTabAll" data-fit-view="all" role="tab"><span>All compatible</span><span class="fitTabCount" id="fitTabAllCount">0</span></button>
-    </div>
-    <div class="fitActionBar">
-      <div class="muted fitViewLead" id="fitViewLead">Ranked for this hardware, selected capabilities, and preference.</div>
-      <div class="row">
-        <button class="btn small" id="fitBenchmarkAll" hidden>Benchmark all</button>
-        <button class="btn small" id="fitBenchmarkStop" hidden>Stop</button>
+    <div class="fitCatalogSticky">
+      <div class="fitTabs" role="tablist" aria-label="Device fit model views">
+        <button class="fitTab active" id="fitTabRecommended" data-fit-view="recommended" role="tab"><span>Recommended</span><span class="fitTabCount" id="fitTabRecommendedCount">0</span></button>
+        <button class="fitTab" id="fitTabInstalled" data-fit-view="installed" role="tab"><span>Installed</span><span class="fitTabCount" id="fitTabInstalledCount">0</span></button>
+        <button class="fitTab" id="fitTabAll" data-fit-view="all" role="tab"><span>All compatible</span><span class="fitTabCount" id="fitTabAllCount">0</span></button>
       </div>
-    </div>
-    <div class="muted fitBenchmarkStatus" id="fitBenchmarkStatus"></div>
-    <div class="fitBrowse">
-      <div class="fitSearchField">
-        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-        <input id="fitSearch" placeholder="Search model, capability, or family">
+      <div class="fitActionBar">
+        <div class="muted fitViewLead" id="fitViewLead">Ranked for this hardware, selected capabilities, and preference.</div>
+        <div class="row">
+          <button class="btn small" id="fitBenchmarkAll" hidden>Benchmark all</button>
+          <button class="btn small" id="fitBenchmarkStop" hidden>Stop</button>
+        </div>
       </div>
-      <div class="fitSortField">
-        <select id="fitSort" aria-label="Sort models">
-          <option value="best">Best fit</option>
-          <option value="smallest">Smallest first</option>
-          <option value="popular">Most popular</option>
-          <option value="name">Name</option>
-        </select>
-        <span class="fitSortChevron">⌄</span>
+      <div class="muted fitBenchmarkStatus" id="fitBenchmarkStatus"></div>
+      <div class="fitBrowse">
+        <div class="fitSearchField">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input id="fitSearch" placeholder="Search model, capability, or family">
+        </div>
+        <div class="fitFilterField">
+          <button class="btn fitFilterButton" type="button" id="fitFiltersBtn">Filters <span class="fitFilterCount" id="fitFilterCount" hidden>0</span></button>
+          <div class="fitFilterMenu" id="fitFilterMenu" hidden>
+            <div class="fitFilterMenuGrid">
+              <label>Model size
+                <select id="fitFilterSize">
+                  <option value="">Any size</option>
+                  <option value="4">Up to 4 GB</option>
+                  <option value="8">Up to 8 GB</option>
+                  <option value="16">Up to 16 GB</option>
+                </select>
+              </label>
+              <label>Context
+                <select id="fitFilterContext">
+                  <option value="">Any context</option>
+                  <option value="8192">8K+</option>
+                  <option value="32768">32K+</option>
+                  <option value="131072">128K+</option>
+                </select>
+              </label>
+              <label>Quantization
+                <select id="fitFilterQuant">
+                  <option value="">Any quantization</option>
+                  <option value="Q4_K_M">Q4_K_M</option>
+                  <option value="Q5_K_M">Q5_K_M</option>
+                  <option value="Q8_0">Q8_0</option>
+                </select>
+              </label>
+              <label>Publisher
+                <select id="fitFilterPublisher">
+                  <option value="">Any publisher</option>
+                  <option value="official">Official publisher</option>
+                  <option value="community">Community</option>
+                </select>
+              </label>
+            </div>
+            <div class="fitFilterChecks">
+              <label><input type="checkbox" id="fitFilterInstalled"> Installed only</label>
+              <label><input type="checkbox" id="fitFilterBenchmarked"> Benchmarked only</label>
+            </div>
+            <div class="fitFilterFooter"><span class="muted">Filters apply locally.</span><button class="btn small" id="fitFiltersClear" type="button">Clear filters</button></div>
+          </div>
+        </div>
+        <div class="fitSortField">
+          <select id="fitSort" aria-label="Sort models">
+            <option value="best">Best fit</option>
+            <option value="smallest">Smallest first</option>
+            <option value="popular">Most popular</option>
+            <option value="name">Name</option>
+          </select>
+          <span class="fitSortChevron">⌄</span>
+        </div>
       </div>
     </div>
     <div class="card"><div id="fitModels"></div></div>
+    <div class="fitComparePanel" id="fitComparePanel" hidden></div>
+    <div class="fitCompareTray" id="fitCompareTray" hidden>
+      <div class="grow"><strong id="fitCompareTitle">Compare models</strong><div class="fitCompareNames" id="fitCompareNames"></div></div>
+      <button class="btn small" id="fitCompareClear" type="button">Clear</button>
+      <button class="btn small primary" id="fitCompareOpen" type="button">Compare</button>
+    </div>
   </section>
 </aside>
 <aside class="panel" id="toolsPanel">
