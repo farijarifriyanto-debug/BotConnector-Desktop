@@ -1316,6 +1316,21 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     }
   }
 
+  function catalogCapabilities(model) {
+    const c = { ...(model?.capabilities || {}) };
+    const tags = Array.isArray(model?.tags) ? model.tags.map(String) : [];
+    const hay = [model?.id, model?.name, ...tags].filter(Boolean).join(' ').toLowerCase();
+    const pipeline = String(model?.pipeline_tag || model?.pipeline || '').toLowerCase();
+    if (c.vision == null) c.vision = /vision-language|\bvlm\b|image-text-to-text|multimodal|smolvlm|llava/.test(hay + ' ' + pipeline);
+    if (c.coding == null) c.coding = /coder|coding|codegen|programming|fill-in-the-middle|\bfim\b/.test(hay);
+    if (c.tools == null) c.tools = /tool[-_ ]?(use|calling)|function[-_ ]?calling/.test(hay);
+    if (c.reasoning == null) c.reasoning = /reasoning|reasoner|thinking|qwq|gpt-oss|deepseek-r1|r1-distill|spark-reasoning/.test(hay);
+    if (c.embeddings == null) c.embeddings = /embedding|embeddings|sentence-transformers/.test(hay) || ['feature-extraction', 'sentence-similarity'].includes(pipeline);
+    if (c.audio == null) c.audio = /whisper|speech|audio/.test(hay) || /audio|speech/.test(pipeline);
+    if (c.chat == null) c.chat = !c.embeddings && !c.audio;
+    return c;
+  }
+
   function modelCapabilityBadges(capabilities) {
     const c = capabilities || {};
     const items = [
@@ -1343,7 +1358,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       const size = m.compatibility?.paramsB ? ' · ' + m.compatibility.paramsB + 'B' : '';
       row.querySelector('.name').textContent = m.id + size;
       row.querySelector('.name').title = m.id;
-      const badges = modelCapabilityBadges(m.capabilities);
+      const badges = modelCapabilityBadges(catalogCapabilities(m));
       const capabilityBox = row.querySelector('.capabilities');
       capabilityBox.innerHTML = badges;
       capabilityBox.hidden = !badges;
@@ -1431,7 +1446,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
 
   function fitUseCaseMatches(model, useCase) {
     if (useCase === 'general') return true;
-    const c = model?.capabilities || {};
+    const c = catalogCapabilities(model);
     if (useCase === 'coding') return c.coding === true;
     if (useCase === 'reasoning') return c.reasoning === true;
     if (useCase === 'vision') return c.vision === true;
@@ -1485,7 +1500,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   }
 
   function normalizedFitSearch(model) {
-    const caps = model?.capabilities || {};
+    const caps = catalogCapabilities(model);
     return [
       model?.id, model?.name, ...(Array.isArray(model?.tags) ? model.tags : []),
       caps.vision ? 'vision' : '', caps.tools ? 'tools' : '', caps.coding ? 'coding' : '',
@@ -1505,7 +1520,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   function compatibleFiltered() {
     const query = fitState.query.trim().toLowerCase();
     return fitState.compatible
-      .filter((model) => model?.compatibility?.level !== 'no' && model?.capabilities?.chat !== false)
+      .filter((model) => model?.compatibility?.level !== 'no' && catalogCapabilities(model).chat !== false)
       .filter((model) => fitSpecificUseCases().every((useCase) => fitUseCaseMatches(model, useCase)))
       .filter((model) => !query || normalizedFitSearch(model).includes(query));
   }
@@ -1518,7 +1533,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     }
     const query = fitState.query.trim().toLowerCase();
     return [...pool.values()]
-      .filter((model) => model?.compatibility?.level !== 'no' && model?.capabilities?.chat !== false)
+      .filter((model) => model?.compatibility?.level !== 'no' && catalogCapabilities(model).chat !== false)
       .filter((model) => fitSpecificUseCases().every((useCase) => fitUseCaseMatches(model, useCase)))
       .filter((model) => !query || normalizedFitSearch(model).includes(query))
       .sort((a, b) => fitScore(b) - fitScore(a))
@@ -1568,7 +1583,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       const size = m.compatibility?.paramsB ? ' · ' + m.compatibility.paramsB + 'B' : '';
       row.querySelector('.name').textContent = (m.id || m.name || 'Local model') + size;
       row.querySelector('.name').title = m.id || m.name || '';
-      const badges = modelCapabilityBadges(m.capabilities);
+      const badges = modelCapabilityBadges(catalogCapabilities(m));
       const capabilityBox = row.querySelector('.capabilities');
       capabilityBox.innerHTML = badges;
       capabilityBox.hidden = !badges;
