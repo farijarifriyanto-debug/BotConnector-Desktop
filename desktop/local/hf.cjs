@@ -21,6 +21,28 @@ function inferCapabilities(item) {
   return {chat,tools,vision,coding,reasoning,embeddings,audio};
 }
 
+const OFFICIAL_PUBLISHERS = new Set([
+  'qwen','google','google-deepmind','meta-llama','mistralai','microsoft','deepseek-ai','zai-org',
+  'nvidia','ibm-granite','tiiuae','allenai','cohereforai','01-ai','internlm','openbmb','minimaxai',
+  'moonshotai','baichuan-inc','stabilityai','huggingface'
+]);
+
+function publisherType(author='') {
+  return OFFICIAL_PUBLISHERS.has(String(author || '').trim().toLowerCase()) ? 'official' : 'community';
+}
+
+function contextLengthFromConfig(config={}) {
+  const candidates = [
+    config?.max_position_embeddings,
+    config?.max_sequence_length,
+    config?.seq_length,
+    config?.context_length,
+    config?.n_positions,
+    config?.model_max_length,
+  ].map(Number).filter((n)=>Number.isFinite(n) && n > 0 && n < 10_000_000);
+  return candidates.length ? Math.max(...candidates) : null;
+}
+
 function estimateCompatibility(item, hardware) {
   // Some GGUF uploads (e.g. NVFP4 packs) report a tiny tensor total; the size in the repo name is the safer floor.
   const named = String(item.id || item.modelId || '').match(/(?:^|[-_/.])(\d+(?:\.\d+)?)[bB](?=$|[-_.])/);
@@ -69,14 +91,24 @@ async function searchModels({query='',limit=80,hardware,token,sort='',pipeline='
   if (pipeline) url.searchParams.set('pipeline_tag',pipeline);
   url.searchParams.set('direction','-1');
   url.searchParams.set('limit',String(Math.min(150,Math.max(1,limit))));
-  for (const field of ['author','downloads','likes','tags','pipeline_tag','gated','lastModified','trendingScore','gguf','safetensors']) url.searchParams.append('expand',field);
+  for (const field of ['author','downloads','likes','tags','pipeline_tag','gated','lastModified','trendingScore','gguf','safetensors','cardData','config','library_name']) url.searchParams.append('expand',field);
   const items=await requestJson(url,token);
-  return items.map(x=>({
-    id:x.id,author:x.author||String(x.id||'').split('/')[0]||'',downloads:x.downloads||0,likes:x.likes||0,
-    lastModified:x.lastModified||x.last_modified||null,tags:Array.isArray(x.tags)?x.tags:[],pipeline_tag:x.pipeline_tag||x.pipelineTag||null,
-    gated:x.gated||false,private:Boolean(x.private),trendingScore:x.trendingScore||x.trending_score||0,gguf:x.gguf||null,safetensors:x.safetensors||null,
-    capabilities:inferCapabilities(x),compatibility:hardware?estimateCompatibility(x,hardware):null,url:`${HF}/${x.id}`
-  }));
+  return items.map(x=>{
+    const author=x.author||String(x.id||'').split('/')[0]||'';
+    const compatibility=hardware?estimateCompatibility(x,hardware):null;
+    return {
+      id:x.id,author,downloads:x.downloads||0,likes:x.likes||0,
+      lastModified:x.lastModified||x.last_modified||null,tags:Array.isArray(x.tags)?x.tags:[],pipeline_tag:x.pipeline_tag||x.pipelineTag||null,
+      gated:x.gated||false,private:Boolean(x.private),trendingScore:x.trendingScore||x.trending_score||0,gguf:x.gguf||null,safetensors:x.safetensors||null,
+      cardData:x.cardData||null,config:x.config||null,libraryName:x.library_name||null,
+      license:x.cardData?.license||null,baseModel:x.cardData?.base_model||null,
+      contextLength:contextLengthFromConfig(x.config||{}),
+      publisherType:publisherType(author),source:'Hugging Face',
+      capabilities:inferCapabilities(x),compatibility,
+      estimatedDownloadGb:compatibility?.estimatedQ4Gb||null,
+      url:`${HF}/${x.id}`
+    };
+  });
 }
 
 function fileSize(f){ return Number(f?.size || f?.lfs?.size || 0); }
@@ -110,17 +142,27 @@ function groupGgufFiles(files) {
   return {groups,projectors:projectorFiles.map(f=>({path:f.path,size:fileSize(f),quant:quantFromName(f.path)||'projector'})).sort((a,b)=>a.size-b.size)};
 }
 
+function preferredGgufGroup(details) {
+  const groups=Array.isArray(details?.files)?details.files:[];
+  if(!groups.length) return null;
+  return groups.find((group)=>/Q4_K_M/i.test(String(group?.quant||group?.key||''))) ||
+    groups.find((group)=>/Q5_K_M/i.test(String(group?.quant||group?.key||''))) ||
+    groups.slice().sort((a,b)=>Number(a?.size||0)-Number(b?.size||0))[0] || null;
+}
+
 async function modelDetails({id,hardware,token}) {
   if (!id || !id.includes('/')) throw new Error('Invalid Hugging Face model id');
   const enc=id.split('/').map(encodeURIComponent).join('/');
-  const info=await requestJson(`${HF}/api/models/${enc}`,token);
+  const infoUrl=new URL(`${HF}/api/models/${enc}`);
+  for (const field of ['author','downloads','likes','tags','pipeline_tag','gated','lastModified','gguf','safetensors','cardData','config','library_name']) infoUrl.searchParams.append('expand',field);
+  const info=await requestJson(infoUrl,token);
   let tree=[]; let cursor=null; let pages=0;
   do {
     const url=new URL(`${HF}/api/models/${enc}/tree/main`);
     url.searchParams.set('recursive','true');
     url.searchParams.set('expand','false');
     if(cursor) url.searchParams.set('cursor',cursor);
-    const res=await fetch(url,{headers:{'User-Agent':UA,'Accept':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})}});
+    const res=await fetch(url,{headers:{'User-Agent':UA,'Accept':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})},cache:'no-store'});
     if(!res.ok) throw new Error(`Hugging Face tree ${res.status}`);
     const page=await res.json();
     tree.push(...page);
@@ -130,8 +172,17 @@ async function modelDetails({id,hardware,token}) {
     pages++;
   } while(cursor && pages<10);
   const grouped=groupGgufFiles(tree);
-  const base={id:info.id||id,author:info.author||id.split('/')[0],tags:info.tags||[],pipeline_tag:info.pipeline_tag||null,gated:info.gated||false,downloads:info.downloads||0,likes:info.likes||0,lastModified:info.lastModified||info.last_modified||null,gguf:info.gguf||null,safetensors:info.safetensors||null};
-  return {...base,capabilities:inferCapabilities(base),compatibility:estimateCompatibility(base,hardware),files:grouped.groups,projectors:grouped.projectors,homepage:`${HF}/${id}`};
+  const author=info.author||id.split('/')[0];
+  const base={
+    id:info.id||id,author,tags:info.tags||[],pipeline_tag:info.pipeline_tag||null,gated:info.gated||false,
+    downloads:info.downloads||0,likes:info.likes||0,lastModified:info.lastModified||info.last_modified||null,
+    gguf:info.gguf||null,safetensors:info.safetensors||null,cardData:info.cardData||null,config:info.config||null,
+    libraryName:info.library_name||null,license:info.cardData?.license||null,baseModel:info.cardData?.base_model||null,
+    contextLength:contextLengthFromConfig(info.config||{}),publisherType:publisherType(author),source:'Hugging Face'
+  };
+  const details={...base,capabilities:inferCapabilities(base),compatibility:estimateCompatibility(base,hardware),files:grouped.groups,projectors:grouped.projectors,homepage:`${HF}/${id}`};
+  const preferred=preferredGgufGroup(details);
+  return {...details,preferredDownload:preferred?{quant:preferred.quant,size:preferred.size,key:preferred.key}:null};
 }
 
 function resolveUrl(repoId,filePath,revision='main') {
@@ -140,4 +191,4 @@ function resolveUrl(repoId,filePath,revision='main') {
   return `${HF}/${repo}/resolve/${encodeURIComponent(revision)}/${p}?download=true`;
 }
 
-module.exports={searchModels,modelDetails,resolveUrl,inferCapabilities,estimateCompatibility,quantFromName};
+module.exports={searchModels,modelDetails,resolveUrl,inferCapabilities,estimateCompatibility,quantFromName,preferredGgufGroup,publisherType,contextLengthFromConfig};

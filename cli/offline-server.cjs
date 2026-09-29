@@ -532,6 +532,11 @@ async function startOfflineServer({
         sendJson(res, 200, localAi.jobStatus(body.id));
         return;
       }
+      if (req.method === 'POST' && url.pathname === '/api/models/pull/cancel') {
+        if (!localAi.cancelPull) throw new Error('Download cancellation is unavailable in this local runtime.');
+        sendJson(res, 200, localAi.cancelPull(body.id));
+        return;
+      }
       if (req.method === 'POST' && url.pathname === '/api/models/benchmark') {
         if (!localAi.benchmarkModel) throw new Error('Benchmarking is unavailable in this local runtime.');
         sendJson(res, 200, await localAi.benchmarkModel(body.model, body.runtime));

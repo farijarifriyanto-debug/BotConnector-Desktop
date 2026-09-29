@@ -993,6 +993,10 @@ class LocalAiRuntime {
         metadata: {
           capabilities: details.capabilities || {},
           pipeline_tag: details.pipeline_tag || null,
+          author: details.author || null,
+          license: details.license || null,
+          publisherType: details.publisherType || null,
+          contextLength: details.contextLength || null,
         },
       });
       job.childJobId = child.id;
@@ -1010,7 +1014,10 @@ class LocalAiRuntime {
           job.total > 0
             ? Math.max(0, Math.min(100, Math.round((job.completed / job.total) * 100)))
             : 0;
-        job.detail = state.status;
+        job.detail = state.detail || state.status;
+        job.bytesPerSecond = Number(state.bytesPerSecond || 0);
+        job.retryAfterMs = Number(state.retryAfterMs || 0);
+        job.retryAt = state.retryAt || null;
         this.emit('local-ai:download', this.publicJob(job));
 
         if (state.status === 'completed') break;
