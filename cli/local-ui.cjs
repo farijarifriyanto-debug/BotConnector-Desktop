@@ -3159,18 +3159,45 @@ function localUiHtml({ token, host, port }) {
     </div>
     <div class="chat" id="chat"></div>
     <div class="composerWrap">
+      <div class="agentContext">
+        <div class="contextPicker">
+          <button class="contextTrigger" id="workspaceTrigger" type="button">
+            <span class="contextIcon">▣</span><span class="contextLabel" id="workspaceLabel">Choose workspace</span><span class="contextChevron">⌄</span>
+          </button>
+          <div class="contextMenu" id="workspaceMenu" hidden></div>
+        </div>
+        <div class="contextPicker">
+          <button class="contextTrigger" id="modeTrigger" type="button">
+            <span class="contextIcon">⌘</span><span class="contextLabel" id="modeLabel">Standard mode</span><span class="contextChevron">⌄</span>
+          </button>
+          <div class="contextMenu modeMenu" id="modeMenu" hidden>
+            <div class="contextMenuTitle">Agent mode</div>
+            <button class="contextOption" data-agent-mode="standard"><span><strong>Standard mode</strong><span>Native workspace + selected tools for normal work.</span></span><span class="check"></span></button>
+            <button class="contextOption" data-agent-mode="ptc"><span><strong>PTC mode</strong><span>One multi-step tool program for orchestrating several tools.</span></span><span class="check"></span></button>
+            <button class="contextOption" data-agent-mode="minimal"><span><strong>Minimal mode</strong><span>Small read-focused workspace tool surface for local models.</span></span><span class="check"></span></button>
+            <button class="contextOption" data-agent-mode="creator"><span><strong>Creator mode</strong><span>Expanded native tool surface for building and debugging workflows.</span></span><span class="check"></span></button>
+          </div>
+        </div>
+        <span class="sessionModeHint" id="sessionModeHint"></span>
+      </div>
       <div class="composer" id="composer">
         <div class="attachments" id="attachments"></div>
-        <textarea id="prompt" rows="1" placeholder="Message your local model"></textarea>
+        <textarea id="prompt" rows="1" placeholder="Describe what you want to do"></textarea>
         <div class="bar">
           <input id="fileInput" type="file" hidden multiple accept=".txt,.md,.markdown,.csv,.json,.jsonl,.yaml,.yml,.xml,.html,.htm,.docx,.js,.ts,.tsx,.jsx,.py,.rs,.go,.java,.c,.cpp,.h,.hpp,.css,.sql,.sh,.ps1,.toml,.ini,.conf,.log">
-          <button class="btn" id="attachBtn"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.4 11.6-8.5 8.5a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg><span>Attach</span></button>
+          <button class="btn" id="attachBtn"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.4 11.6-8.5 8.5a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 1 1-2.8-2.8l8.5-8.5"/></svg><span>Attach</span></button>
+          <select class="permissionSelect" id="permissionPreset" aria-label="Workspace permission">
+            <option value="read-only">Read only</option>
+            <option value="workspace-write">Workspace Write</option>
+            <option value="full-access">Full access</option>
+          </select>
           <button class="btn toolBtn" id="openTools"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14.7 6.3 3-3a4.2 4.2 0 0 1-5.5 5.5l-6.7 6.7a2 2 0 1 1-2.8-2.8l6.7-6.7a4.2 4.2 0 0 1 5.5-5.5l-3 3 2.8 2.8Z"/></svg><span class="toolBtnLabel">Tools</span></button>
           <button class="btn send" id="sendBtn" aria-label="Send message"></button>
         </div>
       </div>
-      <div class="hint">Local model inference runs on this device. Optional connected tools run only when selected.</div>
+      <div class="hint">Workspace and mode are session-scoped. Changing either starts a fresh chat when the current session already has messages.</div>
     </div>
+
   </main>
 </div>
 <div class="overlay" id="overlay"></div>
@@ -3350,6 +3377,19 @@ function localUiHtml({ token, host, port }) {
     <div class="muted" id="webAppMessage" style="margin-top:8px"></div>
   </div>
   <div class="card"><h3>How it works</h3><div class="muted">The Web App becomes the interface while inference still runs on this computer. Pairing is saved for this OS user, so after sleep, restart, or hours offline, BotConnector Local reconnects automatically the next time it runs. Use Forget pairing only when you want this device to require a new pairing code.</div></div>
+</aside>
+<aside class="panel" id="workspacePanel">
+  <div class="panelHead"><div class="row"><div class="grow"><h2>Workspaces</h2><div class="panelLead">A workspace is a real local folder root for agent file access and session context.</div></div><button class="btn" data-close>Close</button></div></div>
+  <div class="card">
+    <h3>Add workspace</h3>
+    <div class="muted">Enter an absolute folder path on this computer. BotConnector canonicalizes it and confines workspace file tools to this root.</div>
+    <input id="workspaceRoot" class="workspacePath" placeholder="C:\Users\you\Projects\my-project" style="margin-top:10px">
+    <input id="workspaceName" placeholder="Display name (optional)" style="margin-top:8px">
+    <button class="btn" id="saveWorkspace" style="margin-top:9px">Add workspace</button>
+    <div class="muted" id="workspaceMessage" style="margin-top:8px"></div>
+  </div>
+  <div class="card"><h3>Saved workspaces</h3><div id="workspaceRows"></div></div>
+  <div class="card"><h3>Session behavior</h3><div class="muted">Each chat keeps its workspace, mode, and permission preset. Changing one after messages already exist starts a fresh chat so contexts do not mix.</div></div>
 </aside>
 <aside class="panel" id="settingsPanel">
   <div class="panelHead"><div class="row"><div class="grow"><h2>Settings</h2><div class="panelLead">Tune the local chat experience on this device.</div></div><button class="btn" data-close>Close</button></div></div>
