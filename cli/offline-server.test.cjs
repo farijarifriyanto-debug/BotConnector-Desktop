@@ -228,7 +228,10 @@ test('Local workspace API persists project mode, permission, model and selected 
   assert.equal(addResponse.status, 201);
   const added = await addResponse.json();
   assert.equal(added.active.name, 'Project A');
-  assert.equal(added.active.path, fs.realpathSync(project));
+  const canonicalProject = fs.realpathSync.native
+    ? fs.realpathSync.native(project)
+    : fs.realpathSync(project);
+  assert.equal(added.active.path, canonicalProject);
 
   const updateResponse = await fetch(server.url + '/api/workspaces/update', {
     method: 'POST',
