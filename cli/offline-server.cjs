@@ -6,7 +6,11 @@ const path = require('node:path');
 const http = require('node:http');
 const { spawn } = require('node:child_process');
 const defaultCatalog = require('../desktop/local/catalog.cjs');
-const { runToolAgent } = require('../desktop/local/device-bridge.cjs');
+const {
+  runToolAgent,
+  agentWorkspaceMessage,
+} = require('../desktop/local/device-bridge.cjs');
+const { WorkspaceStore } = require('../desktop/local/workspaces.cjs');
 const { recommendModels } = defaultCatalog;
 const { localUiHtml } = require('./local-ui.cjs');
 const { createDocumentStore } = require('./local-documents.cjs');
@@ -327,12 +331,14 @@ async function startOfflineServer({
   catalog = defaultCatalog,
   tools = null,
   webApp = null,
+  workspaces = null,
 } = {}) {
   if (!localAi) throw new Error('Local AI runtime is required.');
   if (!detectHardware) throw new Error('Hardware detector is required.');
 
   const token = crypto.randomBytes(32).toString('base64url');
   const documentStore = createDocumentStore();
+  const workspaceStore = workspaces || new WorkspaceStore({ dataDir, defaultPath: os.homedir() });
   const chatsFile = path.join(dataDir, 'local-chats.json');
   const server = http.createServer(async (req, res) => {
     try {
@@ -457,6 +463,13 @@ async function startOfflineServer({
         sendJson(res, 200, { ...status, origin: webApp?.origin || 'https://app.botconnector.id', available: Boolean(webApp) });
         return;
       }
+      if (req.method === 'GET' && url.pathname === '/api/workspaces') {
+        sendJson(res, 200, {
+          active: workspaceStore.active(),
+          workspaces: workspaceStore.list(),
+        });
+        return;
+      }
       // Chat history lives on disk, not in localStorage: the browser keys storage by port, and the port can move.
       if (req.method === 'GET' && url.pathname === '/api/chats') {
         let saved = {};
@@ -486,6 +499,39 @@ async function startOfflineServer({
 
       const body = req.method === 'POST' ? await readJson(req) : {};
 
+      if (req.method === 'POST' && url.pathname === '/api/workspaces/add') {
+        const item = workspaceStore.add({ path: body.path, name: body.name });
+        sendJson(res, 201, {
+          active: item,
+          workspaces: workspaceStore.list(),
+        });
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/workspaces/select') {
+        const item = workspaceStore.select(body.id);
+        sendJson(res, 200, {
+          active: item,
+          workspaces: workspaceStore.list(),
+        });
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/workspaces/update') {
+        const item = workspaceStore.update(body.id, body.patch || {});
+        sendJson(res, 200, {
+          active: workspaceStore.active(),
+          workspace: item,
+          workspaces: workspaceStore.list(),
+        });
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/workspaces/remove') {
+        const result = workspaceStore.remove(body.id);
+        sendJson(res, 200, {
+          ...result,
+          workspaces: workspaceStore.list(),
+        });
+        return;
+      }
       if (req.method === 'POST' && url.pathname === '/api/chats') {
         const isObject = (v) => v && typeof v === 'object' && !Array.isArray(v);
         if (!isObject(body.state) || !Array.isArray(body.state.chats) || (body.settings != null && !isObject(body.settings))) {
@@ -566,7 +612,7 @@ async function startOfflineServer({
       }
       if (req.method === 'POST' && url.pathname === '/api/chat') {
         const context = documentStore.buildContext(body.document_ids, 12000);
-        const messages = Array.isArray(body.messages)
+        let messages = Array.isArray(body.messages)
           ? body.messages.map((message) => ({ ...message }))
           : [];
         if (context) {
@@ -581,9 +627,50 @@ async function startOfflineServer({
           }
           if (!attached) messages.push({ role: 'user', content: '[Local attached document context]\n' + context });
         }
-        const useTools = body.tool_mode === 'auto' && tools && Array.isArray(body.tools) && body.tools.length > 0;
+
+        const workspace = workspaceStore.active();
+        const mode = String(workspace?.mode || 'standard');
+        const permission = String(workspace?.permission || 'workspace-write');
+        const selectedTools = Array.isArray(workspace?.tools) ? workspace.tools : [];
+        const params = {
+          ...body,
+          stream: false,
+          messages,
+          mode,
+          permission,
+          workspace: workspace
+            ? { id: workspace.id, name: workspace.name, path: workspace.path }
+            : null,
+          tools: selectedTools,
+          custom_prompt: workspace?.customPrompt || '',
+        };
+        const modeUsesAgent =
+          Boolean(tools) &&
+          (
+            mode === 'ptc' ||
+            (mode === 'minimal' && permission !== 'read-only') ||
+            ((mode === 'standard' || mode === 'custom') && selectedTools.length > 0)
+          );
+
+        if (!modeUsesAgent) {
+          const prefix = [];
+          const workspaceMessage = agentWorkspaceMessage(params.workspace, permission);
+          if (workspaceMessage) prefix.push(workspaceMessage);
+          if (mode === 'minimal' && tools?.minimalPrompt) {
+            prefix.unshift({
+              role: 'system',
+              content: tools.minimalPrompt({ workspacePath: workspace?.path || '' }),
+            });
+          } else if (mode === 'custom' && String(workspace?.customPrompt || '').trim()) {
+            prefix.unshift({
+              role: 'system',
+              content: 'Custom workspace mode instructions:\n' + String(workspace.customPrompt).trim(),
+            });
+          }
+          messages = [...prefix, ...messages];
+        }
+
         if (body.stream === true) {
-          // Server-sent events so the UI can render both model output and tool activity.
           res.writeHead(200, {
             'content-type': 'text/event-stream; charset=utf-8',
             'cache-control': 'no-store',
@@ -592,19 +679,28 @@ async function startOfflineServer({
           });
           const event = (payload) => res.write('data: ' + JSON.stringify(payload) + '\n\n');
           try {
-            if (useTools) {
+            if (modeUsesAgent) {
               const result = await runToolAgent({
                 localAi,
                 tools,
-                params: { ...body, stream: false, messages },
+                params,
                 onEvent: (toolEvent) => event({ tool_event: toolEvent }),
               });
               if (result?.reasoning) event({ reasoning: String(result.reasoning) });
               if (result?.content) event({ content: String(result.content) });
-              event({ done: true, usage: result?.usage, tool_events: result?.tool_events || [] });
+              event({
+                done: true,
+                usage: result?.usage,
+                tool_events: result?.tool_events || [],
+                workspace: { id: workspace?.id, mode, permission },
+              });
             } else {
               const result = await localAi.chat({ ...body, messages, onDelta: event });
-              event({ done: true, ...result });
+              event({
+                done: true,
+                ...result,
+                workspace: { id: workspace?.id, mode, permission },
+              });
             }
           } catch (error) {
             event({ error: { message: String(error?.message || error) } });
@@ -612,8 +708,9 @@ async function startOfflineServer({
           res.end();
           return;
         }
-        if (useTools) {
-          sendJson(res, 200, await runToolAgent({ localAi, tools, params: { ...body, messages } }));
+
+        if (modeUsesAgent) {
+          sendJson(res, 200, await runToolAgent({ localAi, tools, params }));
           return;
         }
         sendJson(res, 200, await localAi.chat({ ...body, messages }));

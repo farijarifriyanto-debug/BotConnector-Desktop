@@ -116,14 +116,53 @@ function deviceContextMessage(hardware, benchmarks = []) {
 }
 
 
+function normalizeAgentMode(value) {
+  const mode = String(value || 'standard').toLowerCase();
+  return ['standard', 'ptc', 'minimal', 'custom'].includes(mode) ? mode : 'standard';
+}
+
+function normalizePermission(value) {
+  const permission = String(value || 'workspace-write').toLowerCase();
+  return ['read-only', 'workspace-write', 'full-access'].includes(permission)
+    ? permission
+    : 'workspace-write';
+}
+
+function agentWorkspaceMessage(workspace = {}, permission = 'workspace-write') {
+  const root = String(workspace?.path || '').trim();
+  if (!root) return null;
+  return {
+    role: 'system',
+    content:
+      'BotConnector workspace context. Root directory: ' + root +
+      '. Permission preset: ' + permission +
+      '. Treat this root as the active project for this turn.',
+  };
+}
+
 async function runToolAgent({ localAi, tools, params = {}, onEvent = () => {} } = {}) {
-  const selected = Array.isArray(params.tools)
+  const mode = normalizeAgentMode(params.mode);
+  const permission = normalizePermission(params.permission);
+  const workspace = params.workspace && typeof params.workspace === 'object' ? params.workspace : {};
+  const workspacePath = String(workspace.path || '');
+  const requested = Array.isArray(params.tools)
     ? [...new Set(params.tools.map(String).filter(Boolean))].slice(0, 24)
     : [];
-  const toolSchemas = tools?.schemas ? tools.schemas(selected) : [];
-  if (!selected.length || !toolSchemas.length) {
-    return localAi.chat({ ...params, tools: [] });
+
+  let selected = requested;
+  if (mode === 'ptc' && !selected.length && tools?.list) {
+    selected = tools.list()
+      .filter((tool) => tool.status === 'READY')
+      .map((tool) => tool.id)
+      .slice(0, 24);
+  } else if (mode === 'minimal') {
+    selected = permission === 'read-only' ? [] : ['run_code'];
   }
+
+  const options = { permission, workspacePath };
+  const toolSchemas = mode === 'ptc'
+    ? (tools?.ptcSchema ? tools.ptcSchema(selected, options) : [])
+    : (tools?.schemas ? tools.schemas(selected, options) : []);
 
   const approved = new Set(
     Array.isArray(params.approved_tools) ? params.approved_tools.map(String) : [],
@@ -131,6 +170,24 @@ async function runToolAgent({ localAi, tools, params = {}, onEvent = () => {} } 
   const messages = Array.isArray(params.messages)
     ? params.messages.map(message => ({ ...message }))
     : [];
+
+  const workspaceMessage = agentWorkspaceMessage(workspace, permission);
+  if (workspaceMessage) messages.unshift(workspaceMessage);
+  if (mode === 'ptc' && tools?.ptcPrompt) {
+    messages.unshift({ role: 'system', content: tools.ptcPrompt(selected, options) });
+  } else if (mode === 'minimal' && tools?.minimalPrompt) {
+    messages.unshift({ role: 'system', content: tools.minimalPrompt(options) });
+  } else if (mode === 'custom' && String(params.custom_prompt || '').trim()) {
+    messages.unshift({
+      role: 'system',
+      content: 'Custom workspace mode instructions:\n' + String(params.custom_prompt).trim(),
+    });
+  }
+
+  if (!toolSchemas.length) {
+    return localAi.chat({ ...params, messages, tools: [] });
+  }
+
   const events = [];
   const record = (event) => {
     events.push(event);
@@ -156,18 +213,6 @@ async function runToolAgent({ localAi, tools, params = {}, onEvent = () => {} } 
 
     for (const call of calls) {
       const name = String(call?.function?.name || '');
-      const tool = tools.findTool(name);
-      if (!tool || (!selected.includes(tool.id) && !selected.includes(tool.name))) {
-        const error = `Tool '${name || 'unknown'}' was not selected for this turn.`;
-        record({ type: 'tool.error', name, error });
-        messages.push({
-          role: 'tool',
-          tool_call_id: String(call?.id || crypto.randomUUID()),
-          content: JSON.stringify({ error }),
-        });
-        continue;
-      }
-
       const callId = String(call?.id || crypto.randomUUID());
       let args;
       try {
@@ -183,6 +228,61 @@ async function runToolAgent({ localAi, tools, params = {}, onEvent = () => {} } 
         continue;
       }
 
+      if (mode === 'ptc') {
+        if (name !== 'run_code' || !tools?.runPtc) {
+          const error = "PTC mode only exposes the generated run_code orchestration tool.";
+          record({ type: 'tool.error', id: callId, name, error });
+          messages.push({ role: 'tool', tool_call_id: callId, content: JSON.stringify({ error }) });
+          continue;
+        }
+        record({
+          type: 'tool.started',
+          id: callId,
+          name: 'run_code',
+          source: 'ptc',
+          permissionClass: 'ORCHESTRATE',
+          arguments: args,
+        });
+        try {
+          const result = await tools.runPtc(args.code, {
+            selected,
+            approved,
+            permission,
+            workspacePath,
+          });
+          record({
+            type: 'tool.completed',
+            id: callId,
+            name: 'run_code',
+            source: 'ptc',
+            permissionClass: 'ORCHESTRATE',
+            result,
+          });
+          messages.push({
+            role: 'tool',
+            tool_call_id: callId,
+            content: toolResultContent(result),
+          });
+        } catch (error) {
+          const message = error?.message || String(error);
+          record({ type: 'tool.error', id: callId, name: 'run_code', source: 'ptc', error: message });
+          messages.push({ role: 'tool', tool_call_id: callId, content: JSON.stringify({ error: message }) });
+        }
+        continue;
+      }
+
+      const tool = tools.findTool(name);
+      if (!tool || (!selected.includes(tool.id) && !selected.includes(tool.name))) {
+        const error = `Tool '${name || 'unknown'}' was not selected for this turn.`;
+        record({ type: 'tool.error', name, error });
+        messages.push({
+          role: 'tool',
+          tool_call_id: callId,
+          content: JSON.stringify({ error }),
+        });
+        continue;
+      }
+
       record({
         type: 'tool.started',
         id: callId,
@@ -194,7 +294,12 @@ async function runToolAgent({ localAi, tools, params = {}, onEvent = () => {} } 
       try {
         const result = await tools.invoke(name, args, {
           selected: true,
-          approved: approved.has(tool.id) || approved.has(tool.name),
+          approved:
+            permission === 'full-access' ||
+            approved.has(tool.id) ||
+            approved.has(tool.name),
+          permission,
+          workspacePath,
         });
         record({
           type: 'tool.completed',
@@ -464,4 +569,7 @@ module.exports = {
   needsDeviceContext,
   publicHardwareSnapshot,
   deviceContextMessage,
+  normalizeAgentMode,
+  normalizePermission,
+  agentWorkspaceMessage,
 };

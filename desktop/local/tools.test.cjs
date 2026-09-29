@@ -148,3 +148,65 @@ test('DuckDuckGo Lite fallback accepts href before class on result links', async
     else process.env.BOTCONNECTOR_WEB_SEARCH_URL = previousUrl;
   }
 });
+
+
+test('PTC executes generated SDK calls instead of exposing every tool schema', async () => {
+  const registry = new ToolRegistry();
+  const result = await registry.runPtc(
+    'const first = await tools.echo_text({ text: "ptc" }); return { value: first.text };',
+    { selected: ['echo_text'], permission: 'workspace-write' },
+  );
+  assert.deepEqual(result, { value: 'ptc' });
+  const schema = registry.ptcSchema(['echo_text']);
+  assert.equal(schema.length, 1);
+  assert.equal(schema[0].function.name, 'run_code');
+  assert.match(registry.ptcPrompt(['echo_text']), /tools\.echo_text/);
+});
+
+test('PTC and native Run Code obey workspace permission gates', async () => {
+  const registry = new ToolRegistry();
+  await assert.rejects(
+    () => registry.runPtc(
+      'return await tools.run_code({ language: "javascript", code: "console.log(1)" });',
+      { selected: ['run_code'], permission: 'read-only' },
+    ),
+    /run_code is not a function|not callable|undefined/,
+  );
+
+  await assert.rejects(
+    () => registry.invoke(
+      'run_code',
+      { language: 'javascript', code: 'console.log(1)' },
+      { selected: true, permission: 'workspace-write' },
+    ),
+    /persetujuan eksplisit/,
+  );
+});
+
+test('Run Code uses the active workspace as its working directory when approved', async () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bc-run-code-workspace-'));
+  try {
+    const registry = new ToolRegistry();
+    const result = await registry.invoke(
+      'run_code',
+      {
+        language: 'javascript',
+        code: 'await import("node:fs/promises").then(fs => fs.writeFile("workspace-proof.txt", "ok")); console.log(process.cwd())',
+      },
+      {
+        selected: true,
+        approved: true,
+        permission: 'workspace-write',
+        workspacePath: root,
+      },
+    );
+    assert.equal(result.exitCode, 0);
+    assert.equal(fs.readFileSync(path.join(root, 'workspace-proof.txt'), 'utf8'), 'ok');
+    assert.equal(path.resolve(result.stdout.trim()), path.resolve(root));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

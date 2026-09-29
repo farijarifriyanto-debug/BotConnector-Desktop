@@ -2,12 +2,16 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const { spawn } = require('node:child_process');
+const { Worker } = require('node:worker_threads');
 
 const MAX_TOOL_CALLS_PER_TURN = 4;
 const TOOL_TIMEOUT_MS = 10_000;
 const WEB_SEARCH_TIMEOUT_MS = 15_000;
 const RUN_CODE_TIMEOUT_MS = 8_000;
 const MAX_TOOL_OUTPUT_CHARS = 32 * 1024;
+const PTC_TIMEOUT_MS = 30_000;
+const PTC_WORKER_SOURCE = "const { parentPort, workerData } = require('node:worker_threads');\nconst vm = require('node:vm');\n\nlet sequence = 0;\nconst pending = new Map();\n\nfunction bridge(name, argsJson = '{}') {\n  return new Promise((resolve, reject) => {\n    const id = String(++sequence);\n    pending.set(id, { resolve, reject });\n    parentPort.postMessage({ type: 'tool.call', id, name: String(name), argsJson: String(argsJson || '{}') });\n  });\n}\nObject.setPrototypeOf(bridge, null);\nObject.freeze(bridge);\n\nparentPort.on('message', (message) => {\n  if (message?.type !== 'tool.result') return;\n  const row = pending.get(String(message.id));\n  if (!row) return;\n  pending.delete(String(message.id));\n  if (message.ok) row.resolve(String(message.value || 'null'));\n  else row.reject(new Error(String(message.error || 'PTC tool failed.')));\n});\n\n(async () => {\n  try {\n    const sdkEntries = workerData.toolNames.map((name) =>\n      JSON.stringify(name) +\n      ': async (args = {}) => JSON.parse(await __bcCall(' +\n      JSON.stringify(name) +\n      ', JSON.stringify(args)))'\n    ).join(',');\n\n    const context = vm.createContext(\n      { __bcCall: bridge },\n      {\n        name: 'BotConnector PTC',\n        codeGeneration: { strings: false, wasm: false },\n      },\n    );\n    const script = new vm.Script(\n      '(async () => { \"use strict\"; const tools = Object.freeze({' + sdkEntries + '});\\n' +\n      workerData.source +\n      '\\n})()',\n      { filename: 'botconnector-ptc.js' },\n    );\n    const value = await Promise.resolve(script.runInContext(context, { timeout: 1000 }));\n    parentPort.postMessage({\n      type: 'done',\n      value: JSON.stringify(value === undefined ? null : value),\n    });\n  } catch (error) {\n    parentPort.postMessage({\n      type: 'error',\n      error: String(error?.message || error),\n    });\n  }\n})();";
+
 
 const BUILTIN_TOOLS = [
   {
@@ -167,7 +171,7 @@ async function webSearch(args = {}) {
   };
 }
 
-async function runCode(args = {}) {
+async function runCode(args = {}, { cwd = '' } = {}) {
   const language = String(args.language || '').trim().toLowerCase();
   const code = String(args.code || '');
   if (!code.trim()) throw new Error('Code is required.');
@@ -189,7 +193,7 @@ async function runCode(args = {}) {
   try {
     const result = await new Promise((resolve, reject) => {
       const child = spawn(command, commandArgs, {
-        cwd: tempDir,
+        cwd: cwd ? path.resolve(cwd) : tempDir,
         env: {
           PATH: process.env.PATH || '',
           Path: process.env.Path || '',
@@ -276,6 +280,48 @@ function openRpcProcess(server) {
   return { child, request };
 }
 
+
+function ptcSdkSignature(tool) {
+  const props = tool?.inputSchema?.properties || {};
+  const required = new Set(tool?.inputSchema?.required || []);
+  const fields = Object.entries(props).map(([name, spec]) => {
+    const type = spec?.type === 'integer' || spec?.type === 'number'
+      ? 'number'
+      : spec?.type === 'boolean'
+        ? 'boolean'
+        : spec?.type === 'array'
+          ? 'unknown[]'
+          : spec?.type === 'object'
+            ? 'Record<string, unknown>'
+            : 'string';
+    return `${name}${required.has(name) ? '' : '?'}: ${type}`;
+  });
+  return `tools.${tool.name}({ ${fields.join(', ')} })`;
+}
+
+function ptcSystemPrompt(toolRows, workspacePath = '') {
+  const catalog = toolRows.map((tool) =>
+    `- ${ptcSdkSignature(tool)} // ${tool.description || tool.name}`
+  ).join('\n');
+  return [
+    'PTC mode is active.',
+    'You receive one model-facing tool named run_code. Write a JavaScript async orchestration program in its code field.',
+    'The program has a global object named tools. Call only the generated SDK methods below.',
+    'Return the final useful value from the program. Use Promise.all when independent calls can run concurrently.',
+    workspacePath ? `Workspace root: ${workspacePath}` : '',
+    'Generated SDK:',
+    catalog || '- No callable SDK tools are available in this permission profile.',
+  ].filter(Boolean).join('\n');
+}
+
+function minimalSystemPrompt(workspacePath = '') {
+  return [
+    'Minimal mode is active.',
+    'Keep tool use and context small. Use run_code only when execution is necessary; otherwise answer directly.',
+    workspacePath ? `Workspace root: ${workspacePath}` : '',
+  ].filter(Boolean).join('\n');
+}
+
 class ToolRegistry {
   constructor({ modelsDir, emit = () => {} } = {}) {
     this.modelsDir = path.resolve(modelsDir || process.cwd());
@@ -286,19 +332,59 @@ class ToolRegistry {
 
   list() { return [...this.tools.values()].map(clone); }
   findTool(name) { return this.tools.get(String(name)) || [...this.tools.values()].find(tool => tool.name === String(name)); }
-  schemas(selected = null) {
+  selectedTools(selected = null, { permission = 'workspace-write' } = {}) {
     const wanted = Array.isArray(selected) && selected.length
       ? new Set(selected.map(String))
       : null;
     return this.list()
       .filter(tool =>
         tool.status === 'READY' &&
-        (wanted ? (wanted.has(tool.id) || wanted.has(tool.name)) : tool.enabled)
-      )
+        (wanted ? (wanted.has(tool.id) || wanted.has(tool.name)) : tool.enabled) &&
+        !(permission === 'read-only' && tool.permissionClass !== 'READ')
+      );
+  }
+
+  schemas(selected = null, options = {}) {
+    return this.selectedTools(selected, options)
       .map(tool => ({
         type: 'function',
         function: { name: tool.name, description: tool.description, parameters: tool.inputSchema },
       }));
+  }
+
+  ptcSchema(selected = null, options = {}) {
+    const rows = this.selectedTools(selected, options);
+    return [{
+      type: 'function',
+      function: {
+        name: 'run_code',
+        description:
+          'Execute a JavaScript orchestration program using the generated BotConnector tools SDK. ' +
+          'The code receives a global tools object and should return its final value.',
+        parameters: {
+          type: 'object',
+          properties: {
+            code: {
+              type: 'string',
+              description: 'JavaScript body for an async function. Example: return await tools.web_search({query:"OpenAI"});',
+            },
+          },
+          required: ['code'],
+          additionalProperties: false,
+        },
+      },
+    }];
+  }
+
+  ptcPrompt(selected = null, options = {}) {
+    return ptcSystemPrompt(
+      this.selectedTools(selected, options),
+      String(options.workspacePath || ''),
+    );
+  }
+
+  minimalPrompt(options = {}) {
+    return minimalSystemPrompt(String(options.workspacePath || ''));
   }
   setEnabled(id, enabled) {
     const tool = this.tools.get(String(id));
@@ -308,11 +394,16 @@ class ToolRegistry {
     return clone(tool);
   }
 
-  async execute(name, args = {}, { approved = false, selected = false } = {}) {
+  async execute(name, args = {}, { approved = false, selected = false, permission = 'workspace-write', workspacePath = '' } = {}) {
     const tool = this.findTool(name);
     if (!tool) throw new Error(`Tool tidak dikenal: ${name}`);
     if (!tool.enabled && !selected) throw new Error(`Tool '${name}' belum diaktifkan.`);
-    if (tool.permissionClass !== 'READ' && !approved) throw new Error(`Tool '${name}' membutuhkan persetujuan eksplisit.`);
+    if (permission === 'read-only' && tool.permissionClass !== 'READ') {
+      throw new Error(`Tool '${name}' diblokir oleh permission Read only.`);
+    }
+    if (tool.permissionClass !== 'READ' && !approved && permission !== 'full-access') {
+      throw new Error(`Tool '${name}' membutuhkan persetujuan eksplisit.`);
+    }
     const validation = validateArgs(tool.inputSchema, args);
     if (validation) throw new Error(validation);
     const run = async () => {
@@ -324,7 +415,7 @@ class ToolRegistry {
       }
       if (name === 'echo_text') return { text: args.text };
       if (name === 'web_search') return webSearch(args);
-      if (name === 'run_code') return runCode(args);
+      if (name === 'run_code') return runCode(args, { cwd: workspacePath });
       throw new Error(`Tool '${name}' belum memiliki executor.`);
     };
     const result = await withTimeout(run(), TOOL_TIMEOUT_MS);
@@ -399,11 +490,126 @@ class ToolRegistry {
     const tool = this.findTool(name);
     if (!tool) throw new Error(`Tool tidak dikenal: ${name}`);
     if (!tool.enabled && !options.selected) throw new Error(`Tool '${name}' belum diaktifkan.`);
-    if (tool.permissionClass !== 'READ' && !options.approved) {
+    if (options.permission === 'read-only' && tool.permissionClass !== 'READ') {
+      throw new Error(`Tool '${name}' diblokir oleh permission Read only.`);
+    }
+    if (
+      tool.permissionClass !== 'READ' &&
+      !options.approved &&
+      options.permission !== 'full-access'
+    ) {
       throw new Error(`Tool '${name}' membutuhkan persetujuan eksplisit.`);
     }
     if (tool.serverId) return this.executeMcp(tool, args);
     return this.execute(name, args, options);
+  }
+
+  async runPtc(
+    code,
+    {
+      selected = null,
+      approved = [],
+      permission = 'workspace-write',
+      workspacePath = '',
+    } = {},
+  ) {
+    const source = String(code || '');
+    if (!source.trim()) throw new Error('PTC code is required.');
+    if (source.length > 30_000) throw new Error('PTC code is too large.');
+
+    const approvedSet = approved instanceof Set ? approved : new Set((approved || []).map(String));
+    const rows = this.selectedTools(selected, { permission });
+    const allowed = new Map(rows.map((tool) => [tool.name, tool]));
+
+    return await new Promise((resolve, reject) => {
+      const worker = new Worker(PTC_WORKER_SOURCE, {
+        eval: true,
+        workerData: {
+          source,
+          toolNames: rows.map((tool) => tool.name),
+        },
+      });
+      let settled = false;
+      let timer = null;
+      const finish = async (error, value) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        worker.removeAllListeners();
+        try { await worker.terminate(); } catch {}
+        if (error) reject(error);
+        else resolve(value);
+      };
+      timer = setTimeout(
+        () => finish(new Error('PTC program timed out.')),
+        PTC_TIMEOUT_MS,
+      );
+
+      worker.on('message', async (message) => {
+        if (message?.type === 'tool.call') {
+          const tool = allowed.get(String(message.name));
+          if (!tool) {
+            worker.postMessage({
+              type: 'tool.result',
+              id: message.id,
+              ok: false,
+              error: 'PTC tool is not allowed: ' + String(message.name),
+            });
+            return;
+          }
+          let args;
+          try {
+            args = JSON.parse(String(message.argsJson || '{}'));
+          } catch {
+            worker.postMessage({
+              type: 'tool.result',
+              id: message.id,
+              ok: false,
+              error: 'PTC tool arguments must be JSON serializable.',
+            });
+            return;
+          }
+          try {
+            const result = await this.invoke(tool.name, args, {
+              selected: true,
+              approved:
+                permission === 'full-access' ||
+                approvedSet.has(tool.id) ||
+                approvedSet.has(tool.name),
+              permission,
+              workspacePath,
+            });
+            worker.postMessage({
+              type: 'tool.result',
+              id: message.id,
+              ok: true,
+              value: JSON.stringify(result === undefined ? null : result),
+            });
+          } catch (error) {
+            worker.postMessage({
+              type: 'tool.result',
+              id: message.id,
+              ok: false,
+              error: String(error?.message || error),
+            });
+          }
+          return;
+        }
+        if (message?.type === 'done') {
+          let value = null;
+          try { value = JSON.parse(String(message.value || 'null')); }
+          catch { return finish(new Error('PTC result was not valid JSON.')); }
+          return finish(null, value);
+        }
+        if (message?.type === 'error') {
+          return finish(new Error(String(message.error || 'PTC program failed.')));
+        }
+      });
+      worker.on('error', (error) => finish(error));
+      worker.on('exit', (code) => {
+        if (!settled && code !== 0) finish(new Error('PTC worker exited with code ' + code + '.'));
+      });
+    });
   }
 
   async close() {
@@ -412,4 +618,13 @@ class ToolRegistry {
   }
 }
 
-module.exports = { ToolRegistry, BUILTIN_TOOLS, MAX_TOOL_CALLS_PER_TURN, validateArgs, webSearch, runCode };
+module.exports = {
+  ToolRegistry,
+  BUILTIN_TOOLS,
+  MAX_TOOL_CALLS_PER_TURN,
+  validateArgs,
+  webSearch,
+  runCode,
+  ptcSystemPrompt,
+  minimalSystemPrompt,
+};

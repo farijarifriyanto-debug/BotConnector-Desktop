@@ -333,3 +333,127 @@ test('Web App local agent mode also receives automatic current-device context', 
   assert.match(calls[0].messages[0].content, /RTX 3090/);
   assert.match(calls[0].messages[0].content, /64/);
 });
+
+
+test('PTC mode exposes only run_code and executes the generated tools SDK', async () => {
+  const calls = [];
+  const localAi = {
+    enabled: true,
+    async chat(params) {
+      calls.push(params);
+      if (calls.length === 1) {
+        return {
+          content: '',
+          tool_calls: [{
+            id: 'ptc-1',
+            type: 'function',
+            function: {
+              name: 'run_code',
+              arguments: JSON.stringify({
+                code: 'return await tools.echo_text({ text: "hello" });',
+              }),
+            },
+          }],
+        };
+      }
+      return { content: 'PTC finished', tool_calls: [] };
+    },
+  };
+  const tool = {
+    id: 'echo_text',
+    name: 'echo_text',
+    description: 'Echo',
+    inputSchema: { type: 'object' },
+    source: 'builtin',
+    permissionClass: 'READ',
+    status: 'READY',
+  };
+  const tools = {
+    list: () => [tool],
+    ptcSchema: () => [{
+      type: 'function',
+      function: {
+        name: 'run_code',
+        description: 'PTC runner',
+        parameters: { type: 'object', properties: { code: { type: 'string' } } },
+      },
+    }],
+    ptcPrompt: () => 'PTC generated SDK: tools.echo_text({ text: string })',
+    runPtc: async (code, options) => {
+      assert.match(code, /tools\.echo_text/);
+      assert.deepEqual(options.selected, ['echo_text']);
+      assert.equal(options.workspacePath, '/tmp/project');
+      return { text: 'hello' };
+    },
+  };
+  const bridge = new DeviceBridge({
+    settings: { get: () => null, set: async () => {} },
+    detectHardware: async () => ({}),
+    tools,
+    launcher: { list: () => [] },
+    localAi,
+    WebSocketImpl: null,
+  });
+
+  const result = await bridge.agentChat({
+    model: 'qwen:test',
+    runtime: 'ollama',
+    mode: 'ptc',
+    permission: 'workspace-write',
+    workspace: { id: 'ws-1', name: 'Project', path: '/tmp/project' },
+    messages: [{ role: 'user', content: 'orchestrate this' }],
+    tools: ['echo_text'],
+  });
+
+  assert.equal(result.content, 'PTC finished');
+  assert.equal(calls[0].tools.length, 1);
+  assert.equal(calls[0].tools[0].function.name, 'run_code');
+  assert.match(calls[0].messages[0].content + calls[0].messages[1].content, /PTC|Workspace root|workspace/i);
+  assert.ok(result.tool_events.some((event) => event.source === 'ptc' && event.type === 'tool.completed'));
+});
+
+test('Minimal mode limits the model-facing tool set to run_code', async () => {
+  const calls = [];
+  const selectedArgs = [];
+  const localAi = {
+    enabled: true,
+    async chat(params) {
+      calls.push(params);
+      return { content: 'minimal answer', tool_calls: [] };
+    },
+  };
+  const tools = {
+    schemas: (selected) => {
+      selectedArgs.push([...selected]);
+      return [{
+        type: 'function',
+        function: {
+          name: 'run_code',
+          description: 'Run code',
+          parameters: { type: 'object' },
+        },
+      }];
+    },
+    minimalPrompt: () => 'Minimal mode: keep context small.',
+  };
+  const bridge = new DeviceBridge({
+    settings: { get: () => null, set: async () => {} },
+    detectHardware: async () => ({}),
+    tools,
+    launcher: { list: () => [] },
+    localAi,
+    WebSocketImpl: null,
+  });
+
+  const result = await bridge.agentChat({
+    mode: 'minimal',
+    permission: 'workspace-write',
+    workspace: { path: '/tmp/project' },
+    tools: ['web_search', 'echo_text'],
+    messages: [{ role: 'user', content: 'hello' }],
+  });
+
+  assert.equal(result.content, 'minimal answer');
+  assert.deepEqual(selectedArgs[0], ['run_code']);
+  assert.match(calls[0].messages[0].content + calls[0].messages[1].content, /Minimal|workspace/i);
+});
