@@ -23,7 +23,11 @@ function runtimeFixture() {
     unloadModel: async (model, runtime) => ({ loaded: false, model, runtime }),
     deleteModel: async (model, runtime) => ({ deleted: true, model, runtime }),
     chat: async ({ model, messages, request_id }) => ({
-      content: 'local:' + String(messages?.[0]?.content || ''),
+      content: 'local:' + String(
+        (Array.isArray(messages)
+          ? messages.find((message) => message?.role === 'user')
+          : null)?.content || ''
+      ),
       model,
       runtime: 'test',
       request_id,
@@ -121,6 +125,19 @@ test('offline UI serves localhost HTML and protects local API with a session tok
   assert.match(html, /\['vision', 'Vision', 'vision'\]/);
   assert.match(html, /\['tools', 'Tools', 'tools'\]/);
   assert.match(html, /\['reasoning', 'Reasoning', 'reasoning'\]/);
+  assert.match(html, /id="workspaceButton"/);
+  assert.match(html, /id="workspaceMenu"/);
+  assert.match(html, /id="modeButton"/);
+  assert.match(html, /data-workspace-mode="standard"/);
+  assert.match(html, /data-workspace-mode="ptc"/);
+  assert.match(html, /data-workspace-mode="minimal"/);
+  assert.match(html, /data-workspace-mode="custom"/);
+  assert.match(html, /id="permissionSelect"/);
+  assert.match(html, /Workspace write/);
+  assert.match(html, /id="workspacePanel"/);
+  assert.match(html, /id="workspaceSide"/);
+  assert.match(html, /PTC exposes one run_code tool/);
+  assert.match(html, /\/api\/workspaces/);
 
   const anonymous = await fetch(server.url + '/api/status');
   assert.equal(anonymous.status, 401);
@@ -170,6 +187,86 @@ test('offline API rejects foreign origin and accepts same-origin local chat', as
   const result = await response.json();
   assert.equal(result.content, 'local:hello offline');
   assert.equal(result.request_id, 'req-1');
+});
+
+
+test('Local workspace API persists project mode, permission, model and selected tools', async (t) => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bc-workspace-api-'));
+  const project = path.join(dataDir, 'project-a');
+  fs.mkdirSync(project);
+  const server = await startOfflineServer({
+    localAi: runtimeFixture(),
+    detectHardware: async () => ({ cpu: 'Test CPU', ramGb: 16 }),
+    dataDir,
+    port: 0,
+    open: false,
+  });
+  t.after(async () => {
+    await server.close();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  const headers = {
+    origin: server.url,
+    'content-type': 'application/json',
+    'x-botconnector-local-token': server.token,
+  };
+
+  const initial = await (await fetch(server.url + '/api/workspaces', { headers })).json();
+  assert.equal(initial.active.mode, 'standard');
+  assert.equal(initial.active.permission, 'workspace-write');
+
+  const addResponse = await fetch(server.url + '/api/workspaces/add', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ path: project, name: 'Project A' }),
+  });
+  assert.equal(addResponse.status, 201);
+  const added = await addResponse.json();
+  assert.equal(added.active.name, 'Project A');
+  assert.equal(added.active.path, fs.realpathSync(project));
+
+  const updateResponse = await fetch(server.url + '/api/workspaces/update', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      id: added.active.id,
+      patch: {
+        mode: 'ptc',
+        permission: 'read-only',
+        modelPath: 'device:test:model-1',
+        tools: ['web_search'],
+        customPrompt: 'Use this project only.',
+      },
+    }),
+  });
+  assert.equal(updateResponse.status, 200);
+  const updated = await updateResponse.json();
+  assert.equal(updated.active.mode, 'ptc');
+  assert.equal(updated.active.permission, 'read-only');
+  assert.equal(updated.active.modelPath, 'device:test:model-1');
+  assert.deepEqual(updated.active.tools, ['web_search']);
+
+  const second = await startOfflineServer({
+    localAi: runtimeFixture(),
+    detectHardware: async () => ({ cpu: 'Test CPU', ramGb: 16 }),
+    dataDir,
+    port: 0,
+    open: false,
+  });
+  t.after(() => second.close());
+  const secondHeaders = {
+    'content-type': 'application/json',
+    'x-botconnector-local-token': second.token,
+  };
+  const reloaded = await (await fetch(second.url + '/api/workspaces', { headers: secondHeaders })).json();
+  assert.equal(reloaded.active.id, added.active.id);
+  assert.equal(reloaded.active.mode, 'ptc');
+  assert.equal(reloaded.active.permission, 'read-only');
+  assert.deepEqual(reloaded.active.tools, ['web_search']);
 });
 
 
@@ -518,6 +615,17 @@ test('offline browser exposes selected tools and streams tool activity', async (
   assert.equal(mcpResponse.status, 200);
   const mcpPayload = await mcpResponse.json();
   assert.equal(mcpPayload.servers[0].status, 'READY');
+
+  const workspacePayload = await (await fetch(server.url + '/api/workspaces', { headers })).json();
+  const workspaceUpdate = await fetch(server.url + '/api/workspaces/update', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      id: workspacePayload.active.id,
+      patch: { mode: 'standard', permission: 'workspace-write', tools: ['web_search'] },
+    }),
+  });
+  assert.equal(workspaceUpdate.status, 200);
 
   const response = await fetch(server.url + '/api/chat', {
     method: 'POST',
