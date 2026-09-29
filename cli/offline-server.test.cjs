@@ -70,6 +70,14 @@ test('offline UI serves localhost HTML and protects local API with a session tok
   assert.match(html, /id="unloadActive"/);
   assert.match(html, /Model unload could not be verified/);
   assert.match(html, /Active model unload could not be verified/);
+  assert.match(html, /id="fitTabRecommended"/);
+  assert.match(html, /id="fitTabInstalled"/);
+  assert.match(html, /id="fitTabAll"/);
+  assert.match(html, /id="fitPreference"/);
+  assert.match(html, /id="fitSearch"/);
+  assert.match(html, /id="fitSort"/);
+  assert.match(html, /data-fit-usecase="vision"/);
+  assert.match(html, /All compatible/);
   assert.match(html, /modelCapabilityBadges/);
   assert.match(html, /\['chat', 'Text', 'text'\]/);
   assert.match(html, /\['vision', 'Vision', 'vision'\]/);
@@ -183,6 +191,8 @@ test('Local UI catalog search and recommendations use detected hardware', async 
   assert.equal(search.status, 200);
   const searchPayload = await search.json();
   assert.equal(searchPayload.models.length, 5);
+  const searchCall = calls.find((call) => call.kind === 'search');
+  assert.equal(searchCall.args.hardware.ramGb, 16);
 
   const recs = await fetch(server.url + '/api/catalog/recommendations', {
     method: 'POST',
