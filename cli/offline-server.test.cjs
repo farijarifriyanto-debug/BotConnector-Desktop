@@ -137,6 +137,11 @@ test('offline UI serves localhost HTML and protects local API with a session tok
   assert.match(html, /Workspace write/);
   assert.match(html, /id="workspacePanel"/);
   assert.match(html, /id="workspaceSide"/);
+  assert.match(html, /id="workspaceAdd"/);
+  assert.match(html, />Choose folder</);
+  assert.match(html, /\/api\/workspaces\/pick/);
+  assert.doesNotMatch(html, /id="workspacePath"/);
+  assert.doesNotMatch(html, /id="workspaceName"/);
   assert.match(html, /PTC exposes one run_code tool/);
   assert.match(html, /\/api\/workspaces/);
 
@@ -188,6 +193,73 @@ test('offline API rejects foreign origin and accepts same-origin local chat', as
   const result = await response.json();
   assert.equal(result.content, 'local:hello offline');
   assert.equal(result.request_id, 'req-1');
+});
+
+
+test('Local workspace picker adds the folder returned by the native picker', async (t) => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bc-workspace-picker-data-'));
+  const project = path.join(dataDir, 'picked-project');
+  fs.mkdirSync(project);
+  let calls = 0;
+  const server = await startOfflineServer({
+    localAi: runtimeFixture(),
+    detectHardware: async () => ({ cpu: 'Test CPU', ramGb: 16 }),
+    dataDir,
+    directoryPicker: async () => {
+      calls += 1;
+      return project;
+    },
+    port: 0,
+    open: false,
+  });
+  t.after(async () => {
+    await server.close();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  const response = await fetch(server.url + '/api/workspaces/pick', {
+    method: 'POST',
+    headers: {
+      origin: server.url,
+      'content-type': 'application/json',
+      'x-botconnector-local-token': server.token,
+    },
+    body: '{}',
+  });
+  assert.equal(response.status, 201);
+  const payload = await response.json();
+  assert.equal(calls, 1);
+  assert.equal(payload.cancelled, false);
+  assert.equal(payload.active.name, 'picked-project');
+  assert.equal(payload.active.path, fs.realpathSync(project));
+});
+
+test('Local workspace picker leaves state unchanged when the user cancels', async (t) => {
+  const server = await startOfflineServer({
+    localAi: runtimeFixture(),
+    detectHardware: async () => ({ cpu: 'Test CPU', ramGb: 16 }),
+    directoryPicker: async () => null,
+    port: 0,
+    open: false,
+  });
+  t.after(() => server.close());
+
+  const response = await fetch(server.url + '/api/workspaces/pick', {
+    method: 'POST',
+    headers: {
+      origin: server.url,
+      'content-type': 'application/json',
+      'x-botconnector-local-token': server.token,
+    },
+    body: '{}',
+  });
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.equal(payload.cancelled, true);
+  assert.ok(payload.active?.id);
 });
 
 
