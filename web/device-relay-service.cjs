@@ -170,6 +170,45 @@ function createDeviceRelayServer(options = {}) {
           return json(res, 200, { devices: relay.list(userId) });
         }
 
+        const streamMatch = url.pathname.match(/^\/internal\/devices\/([^/]+)\/stream$/);
+        if (streamMatch && req.method === 'POST') {
+          const body = await readJson(req);
+          if (!validUuid(body.user_id)) {
+            return errorJson(res, 400, 'INVALID_USER_ID', 'BotConnector user id tidak valid.');
+          }
+          const method = String(body.method || '');
+          if (method !== 'chat.completions' || !ALLOWED_METHODS.has(method)) {
+            return errorJson(res, 403, 'DEVICE_METHOD_NOT_ALLOWED', 'Streaming is only available for local chat completions.');
+          }
+
+          res.writeHead(200, {
+            'content-type': 'text/event-stream; charset=utf-8',
+            'cache-control': 'no-store',
+            'x-content-type-options': 'nosniff',
+            connection: 'keep-alive',
+          });
+          const emit = (payload) => {
+            if (!res.destroyed && !res.writableEnded) {
+              res.write('data: ' + JSON.stringify(payload) + '\n\n');
+            }
+          };
+
+          try {
+            const result = await relay.request(
+              body.user_id,
+              decodeURIComponent(streamMatch[1]),
+              method,
+              { ...(body.params || {}), stream: true },
+              { onEvent: (event) => emit({ event }) },
+            );
+            emit({ done: true, result });
+          } catch (error) {
+            emit({ error: { message: error?.message || 'Device relay stream failed.' } });
+          }
+          res.end();
+          return;
+        }
+
         const requestMatch = url.pathname.match(/^\/internal\/devices\/([^/]+)\/request$/);
         if (requestMatch && req.method === 'POST') {
           const body = await readJson(req);

@@ -479,7 +479,11 @@ class DeviceBridge {
     if (message?.type !== 'device.request' || typeof message.id !== 'string') return;
     let result;
     try {
-      result = await this.execute(message.method, message.params || {});
+      const streamEvent =
+        message.method === 'chat.completions' && message.params?.stream === true
+          ? (event) => this.event(message.id, event)
+          : null;
+      result = await this.execute(message.method, message.params || {}, streamEvent);
       this.reply(message.id, { ok: true, result });
     } catch (error) {
       this.reply(message.id, { ok: false, error: { message: error.message || String(error) } });
@@ -507,7 +511,7 @@ class DeviceBridge {
     });
   }
 
-  async execute(method, params) {
+  async execute(method, params, onStreamEvent = null) {
     if (method === 'hardware.get') return this.detectHardware();
     // Read-only public catalog lookup ranked for this device's hardware; no local AI permission needed.
     if (method === 'catalog.recommendations') return defaultCatalog.recommendModels(this.catalog, await this.detectHardware(), params);
@@ -542,10 +546,29 @@ class DeviceBridge {
     if (method === 'model.unload') return this.localAi.unloadModel(params.model, params.runtime);
     if (method === 'chat.completions') {
       if (params?.tool_mode === 'auto') return this.agentChat(params);
-      return this.localAi.chat(await this.withDeviceContext(params));
+      const chatParams = await this.withDeviceContext(params);
+      const result = await this.localAi.chat({
+        ...chatParams,
+        ...(typeof onStreamEvent === 'function'
+          ? {
+              onDelta: (delta) => {
+                if (delta?.reasoning) onStreamEvent({ thinking: true });
+                if (delta?.content) onStreamEvent({ content: String(delta.content) });
+              },
+            }
+          : {}),
+      });
+      if (!result || typeof result !== 'object') return result;
+      const { reasoning: _hiddenReasoning, ...visibleResult } = result;
+      return visibleResult;
     }
     if (method === 'chat.cancel') return this.localAi.cancelChat(params.id);
     throw new Error('Remote capability is not allowed.');
+  }
+
+  event(id, event) {
+    if (!this.socket || this.socket.readyState !== 1) return;
+    this.socket.send(JSON.stringify({ type: 'device.event', id, event }));
   }
 
   reply(id, payload) {

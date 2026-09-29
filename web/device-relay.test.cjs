@@ -47,6 +47,52 @@ test('remote request requires ownership, online socket, and advertised capabilit
   relay.close();
 });
 
+test('remote request forwards incremental device events before final response', async () => {
+  const relay = new DeviceRelay({ appOrigin: 'http://127.0.0.1:8080', requestTimeoutMs: 1000 });
+  const pair = relay.createPairCode('user-a');
+  const paired = relay.exchange({ code: pair.code, device_name: 'Laptop A' });
+  const stored = relay.devices.get(paired.device_id);
+  stored.capabilities = ['chat.completions'];
+  stored.socket = {
+    readyState: 1,
+    send(raw) {
+      const request = JSON.parse(raw);
+      setImmediate(() => {
+        relay.forwardEvent(paired.device_id, {
+          type: 'device.event',
+          id: request.id,
+          event: { thinking: true },
+        });
+        relay.forwardEvent(paired.device_id, {
+          type: 'device.event',
+          id: request.id,
+          event: { content: 'Halo' },
+        });
+        relay.resolveResponse(paired.device_id, {
+          type: 'device.response',
+          id: request.id,
+          ok: true,
+          result: { content: 'Halo' },
+        });
+      });
+    },
+    close() {},
+  };
+
+  const events = [];
+  const result = await relay.request(
+    'user-a',
+    paired.device_id,
+    'chat.completions',
+    { messages: [] },
+    { onEvent: (event) => events.push(event) },
+  );
+
+  assert.deepEqual(events, [{ thinking: true }, { content: 'Halo' }]);
+  assert.deepEqual(result, { content: 'Halo' });
+  relay.close();
+});
+
 test('websocket URL preserves secure transport', () => {
   assert.equal(websocketUrl('https://app.botconnector.id'), 'wss://app.botconnector.id/api/devices/socket');
   assert.equal(websocketUrl('http://127.0.0.1:8080'), 'ws://127.0.0.1:8080/api/devices/socket');
