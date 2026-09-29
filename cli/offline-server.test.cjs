@@ -81,6 +81,11 @@ test('offline UI serves localhost HTML and protects local API with a session tok
   assert.match(html, /modelCapabilityBadges/);
   assert.match(html, /Why recommended/);
   assert.match(html, /Est\. Q4 weights/);
+  assert.match(html, /Benchmark all/);
+  assert.match(html, /fitBenchmarkStop/);
+  assert.match(html, /benchmarkScore/);
+  assert.match(html, /Prompt <strong>/);
+  assert.match(html, /Generate /);
   assert.match(html, /Benchmarking/);
   assert.match(html, /\/api\/models\/benchmark/);
   assert.match(html, /\['chat', 'Text', 'text'\]/);

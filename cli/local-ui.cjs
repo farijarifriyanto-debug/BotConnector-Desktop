@@ -279,6 +279,12 @@ svg{display:block}
 .fitWhy{margin-top:4px;border:0;background:transparent;color:var(--muted);padding:0;font-size:10.5px;text-decoration:underline;text-underline-offset:2px;cursor:pointer}
 .fitWhy:hover{color:var(--text)}
 .fitReason{margin-top:6px;padding:8px 9px;border:1px solid var(--line-soft);border-radius:8px;background:var(--surface-2);color:var(--muted);font-size:10.5px;line-height:1.5}
+.fitBenchmarkMetrics{margin-top:5px;color:var(--muted);font-size:10px;line-height:1.45}
+.fitBenchmarkMetrics strong{color:var(--text);font-weight:650}
+.fitActionBar{display:flex;gap:8px;align-items:center;margin:0 0 8px}
+.fitActionBar .fitViewLead{flex:1;min-width:0;margin:0}
+.fitBenchmarkStatus{min-height:16px;margin:0 0 8px}
+@media(max-width:620px){.fitActionBar{align-items:flex-start;flex-direction:column}.fitActionBar .row{width:100%}.fitActionBar .btn{flex:1}}
 .modelLoadState{min-height:30px;display:inline-flex;align-items:center;padding:0 9px;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:10.5px;font-weight:650;white-space:nowrap}
 .modelLoadState.loaded{border-color:color-mix(in srgb,var(--ok) 40%,var(--line));background:color-mix(in srgb,var(--ok) 8%,transparent);color:var(--ok)}
 .modelLoadState.unloaded{color:var(--muted)}
@@ -760,6 +766,9 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     recommended: [],
     compatible: [],
     benchmarks: {},
+    benchmarkRunning: false,
+    benchmarkStop: false,
+    benchmarkProgress: null,
     loading: false,
   };
   let fitSearchTimer = 0;
@@ -1495,12 +1504,39 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     return 80;
   }
 
+  function currentGpuName() {
+    const h = hardwareState || {};
+    return [...(h.nvidia || []), ...(h.amd || []), ...(h.intel || [])][0]?.name || '';
+  }
+
+  function benchmarkMatchesHardware(bench) {
+    if (!bench) return false;
+    const cpu = String(hardwareState?.cpu || '').trim().toLowerCase();
+    const gpu = String(currentGpuName() || '').trim().toLowerCase();
+    const benchCpu = String(bench?.hardware?.cpu || '').trim().toLowerCase();
+    const benchGpu = String(bench?.hardware?.gpu || '').trim().toLowerCase();
+    if (cpu && benchCpu && cpu !== benchCpu) return false;
+    if (gpu && benchGpu && gpu !== benchGpu) return false;
+    return true;
+  }
+
+  function benchmarkScore(model) {
+    const local = model?._local || installedMatch(model);
+    const bench = modelBenchmark(local);
+    if (!bench || !benchmarkMatchesHardware(bench)) return 0;
+    const tps = Math.max(0, Number(bench.tokensPerSecond || 0));
+    if (!tps) return 20;
+    if (fitState.preference === 'fast') return Math.min(320, 20 + tps * 6);
+    if (fitState.preference === 'quality') return Math.min(90, 10 + tps * 1.5);
+    return Math.min(190, 15 + tps * 3);
+  }
+
   function fitScore(model) {
     const useCases = fitSpecificUseCases();
     const matched = useCases.filter((useCase) => fitUseCaseMatches(model, useCase)).length;
     const missing = useCases.length - matched;
     return (700 - fitLevelRank(model?.compatibility?.level) * 150) +
-      matched * 180 - missing * 260 + preferenceScore(model) +
+      matched * 180 - missing * 260 + preferenceScore(model) + benchmarkScore(model) +
       Math.min(90, Math.log10(Math.max(1, Number(model?.downloads || 0))) * 18);
   }
 
@@ -1527,10 +1563,23 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     const bits = [];
     if (c.estimatedQ4Gb) bits.push('Est. Q4 weights ' + Number(c.estimatedQ4Gb).toFixed(1) + ' GB');
     if (c.paramsB) bits.push(Number(c.paramsB).toFixed(1).replace(/\.0$/, '') + 'B parameters');
+    return bits.join(' · ');
+  }
+
+  function fitBenchmarkSummary(model) {
     const local = model?._local || installedMatch(model);
     const bench = modelBenchmark(local);
-    if (bench?.tokensPerSecond) bits.push('Measured ' + Number(bench.tokensPerSecond).toFixed(1) + ' tok/s');
-    else if (bench) bits.push('Measured ' + (Number(bench.wallMs || 0) / 1000).toFixed(1) + ' s');
+    if (!bench) return '';
+    const bits = [];
+    const current = benchmarkMatchesHardware(bench);
+    if (bench.promptTokensPerSecond) bits.push('Prompt <strong>' + Number(bench.promptTokensPerSecond).toFixed(1) + ' tok/s</strong>');
+    if (bench.tokensPerSecond) {
+      bits.push((bench.source === 'runtime' ? 'Generate ' : 'Overall ~') + '<strong>' + Number(bench.tokensPerSecond).toFixed(1) + ' tok/s</strong>');
+    }
+    if (bench.loadMs) bits.push('Load ' + (Number(bench.loadMs) / 1000).toFixed(2) + ' s');
+    if (bench.wallMs) bits.push('End-to-end ' + (Number(bench.wallMs) / 1000).toFixed(2) + ' s');
+    if (bench.contextTokens) bits.push('Context ' + Math.round(Number(bench.contextTokens) / 1024) + 'K');
+    if (!current) bits.push('Previous hardware');
     return bits.join(' · ');
   }
 
@@ -1546,20 +1595,30 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     if (useCases.length) reasons.push('Matches selected capability: ' + useCases.join(', ') + '.');
     const p = fitParams(model);
     if (p) reasons.push('The ' + fitState.preference + ' preference ranks this ' + p + 'B model against the other compatible choices.');
+    const local = model?._local || installedMatch(model);
+    const bench = modelBenchmark(local);
+    if (bench?.tokensPerSecond && benchmarkMatchesHardware(bench)) {
+      reasons.push('Measured on this device at ' + Number(bench.tokensPerSecond).toFixed(1) + ' tok/s; this measured speed contributes to the ranking.');
+    }
     return reasons.join(' ');
   }
 
+  async function benchmarkOne(local) {
+    const result = await api('/api/models/benchmark', {
+      method: 'POST',
+      body: JSON.stringify({ model: local.id, runtime: local.runtime }),
+    });
+    fitState.benchmarks[benchmarkKey(local.id, local.runtime)] = result;
+    return result;
+  }
+
   async function benchmarkLocalModel(local, button) {
-    if (!local) return;
+    if (!local || fitState.benchmarkRunning) return;
     button.disabled = true;
     const previous = button.textContent;
     button.textContent = 'Benchmarking…';
     try {
-      const result = await api('/api/models/benchmark', {
-        method: 'POST',
-        body: JSON.stringify({ model: local.id, runtime: local.runtime }),
-      });
-      fitState.benchmarks[benchmarkKey(local.id, local.runtime)] = result;
+      await benchmarkOne(local);
       await refresh();
       renderDeviceFitModels();
     } catch (error) {
@@ -1567,6 +1626,49 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       button.disabled = false;
       button.textContent = previous;
     }
+  }
+
+  async function benchmarkAllInstalled() {
+    if (fitState.benchmarkRunning) return;
+    const rows = installedFitModels()
+      .filter((model) => catalogCapabilities(model).chat !== false)
+      .map((model) => model._local)
+      .filter(Boolean);
+    if (!rows.length) return;
+
+    fitState.benchmarkRunning = true;
+    fitState.benchmarkStop = false;
+    fitState.benchmarkProgress = { current: 0, total: rows.length, failed: 0, model: '' };
+    renderDeviceFitModels();
+
+    for (let i = 0; i < rows.length; i++) {
+      if (fitState.benchmarkStop) break;
+      const local = rows[i];
+      fitState.benchmarkProgress = {
+        ...fitState.benchmarkProgress,
+        current: i + 1,
+        model: friendlyModelName(local),
+      };
+      renderDeviceFitModels();
+      try {
+        await benchmarkOne(local);
+      } catch {
+        fitState.benchmarkProgress.failed += 1;
+      }
+      renderDeviceFitModels();
+    }
+
+    const stopped = fitState.benchmarkStop;
+    fitState.benchmarkRunning = false;
+    fitState.benchmarkStop = false;
+    const progress = fitState.benchmarkProgress || { current: 0, total: rows.length, failed: 0 };
+    fitState.benchmarkProgress = {
+      ...progress,
+      done: true,
+      stopped,
+    };
+    await refresh().catch(() => {});
+    renderDeviceFitModels();
   }
 
   function installedMatch(candidate) {
@@ -1640,7 +1742,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       const level = local ? (loaded ? 'loaded' : 'installed') : (m.compatibility?.level || 'unknown');
       const row = document.createElement('div');
       row.className = 'model';
-      row.innerHTML = '<div class="modelInfo"><span class="name"></span><div class="capabilities"></div><div class="fitMeta"></div><button class="fitWhy" type="button">Why recommended</button><div class="fitReason" hidden></div></div><span class="fit ' + esc(level) + '">' + esc(level) + '</span><div class="modelActions"><button class="btn small primary"></button><button class="btn small benchmark" type="button" hidden>Benchmark</button></div>';
+      row.innerHTML = '<div class="modelInfo"><span class="name"></span><div class="capabilities"></div><div class="fitMeta"></div><div class="fitBenchmarkMetrics"></div><button class="fitWhy" type="button">Why recommended</button><div class="fitReason" hidden></div></div><span class="fit ' + esc(level) + '">' + esc(level) + '</span><div class="modelActions"><button class="btn small primary"></button><button class="btn small benchmark" type="button" hidden>Benchmark</button></div>';
       const size = m.compatibility?.paramsB ? ' · ' + m.compatibility.paramsB + 'B' : '';
       row.querySelector('.name').textContent = (m.id || m.name || 'Local model') + size;
       row.querySelector('.name').title = m.id || m.name || '';
@@ -1651,6 +1753,9 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       const meta = row.querySelector('.fitMeta');
       meta.textContent = fitResourceSummary(m);
       meta.hidden = !meta.textContent;
+      const perf = row.querySelector('.fitBenchmarkMetrics');
+      perf.innerHTML = fitBenchmarkSummary(m);
+      perf.hidden = !perf.textContent;
       const why = row.querySelector('.fitWhy');
       const reason = row.querySelector('.fitReason');
       reason.textContent = fitReasonText(m);
@@ -1659,8 +1764,10 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       const button = row.querySelector('.primary');
       const benchmark = row.querySelector('.benchmark');
       if (local) {
-        benchmark.hidden = false;
+        benchmark.hidden = catalogCapabilities(m).chat === false;
+        benchmark.disabled = fitState.benchmarkRunning;
         benchmark.onclick = () => benchmarkLocalModel(local, benchmark);
+        button.disabled = fitState.benchmarkRunning;
         button.textContent = loaded ? 'Unload' : 'Load';
         button.onclick = async () => {
           button.disabled = true;
@@ -1697,11 +1804,26 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     }
     $('fitSort').value = fitState.sort;
     const lead = fitState.view === 'recommended'
-      ? 'Ranked for this hardware, selected capabilities, and preference.'
+      ? 'Ranked for this hardware, selected capabilities, preference, and measured performance when available.'
       : fitState.view === 'installed'
         ? 'Models already available on this device.'
         : 'Browse compatible models discovered from the Local catalog.';
     $('fitViewLead').textContent = lead;
+    const allButton = $('fitBenchmarkAll');
+    const stopButton = $('fitBenchmarkStop');
+    allButton.hidden = fitState.view !== 'installed' || !installed.length;
+    allButton.disabled = fitState.benchmarkRunning;
+    stopButton.hidden = !fitState.benchmarkRunning;
+    const progress = fitState.benchmarkProgress;
+    $('fitBenchmarkStatus').textContent = !progress
+      ? ''
+      : fitState.benchmarkRunning
+        ? 'Benchmarking ' + progress.current + ' / ' + progress.total + (progress.model ? ' · ' + progress.model : '') + (progress.failed ? ' · ' + progress.failed + ' failed' : '')
+        : progress.stopped
+          ? 'Benchmark stopped after ' + progress.current + ' / ' + progress.total + (progress.failed ? ' · ' + progress.failed + ' failed' : '')
+          : progress.done
+            ? 'Benchmark complete · ' + progress.total + ' models' + (progress.failed ? ' · ' + progress.failed + ' failed' : '')
+            : '';
     const source = fitState.view === 'recommended' ? recommended : fitState.view === 'installed' ? installed : compatible;
     renderFitCatalog(fitState.view === 'installed' ? source : sortFitModels(source));
   }
@@ -1880,6 +2002,12 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     tab.onclick = () => { fitState.view = tab.dataset.fitView; renderDeviceFitModels(); };
   }
   $('fitPreference').onchange = (event) => { fitState.preference = event.target.value; renderDeviceFitModels(); };
+  $('fitBenchmarkAll').onclick = benchmarkAllInstalled;
+  $('fitBenchmarkStop').onclick = () => {
+    if (!fitState.benchmarkRunning) return;
+    fitState.benchmarkStop = true;
+    $('fitBenchmarkStatus').textContent = 'Stopping after the current model…';
+  };
   $('fitSort').onchange = (event) => { fitState.sort = event.target.value; renderDeviceFitModels(); };
   $('fitSearch').oninput = (event) => {
     fitState.query = event.target.value;
@@ -2058,7 +2186,14 @@ function localUiHtml({ token, host, port }) {
     <button class="fitTab" id="fitTabInstalled" data-fit-view="installed">Installed</button>
     <button class="fitTab" id="fitTabAll" data-fit-view="all">All compatible</button>
   </div>
-  <div class="muted fitViewLead" id="fitViewLead">Ranked for this hardware, selected capabilities, and preference.</div>
+  <div class="fitActionBar">
+    <div class="muted fitViewLead" id="fitViewLead">Ranked for this hardware, selected capabilities, and preference.</div>
+    <div class="row">
+      <button class="btn small" id="fitBenchmarkAll" hidden>Benchmark all</button>
+      <button class="btn small" id="fitBenchmarkStop" hidden>Stop</button>
+    </div>
+  </div>
+  <div class="muted fitBenchmarkStatus" id="fitBenchmarkStatus"></div>
   <div class="fitBrowse">
     <input id="fitSearch" placeholder="Search model, capability, or family">
     <select id="fitSort" aria-label="Sort models">

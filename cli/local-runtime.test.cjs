@@ -593,12 +593,24 @@ test('benchmark stores measured local throughput and reuses runtime token timing
     runtime.chat = async () => ({
       content: 'benchmark result',
       usage: { prompt_tokens: 12, completion_tokens: 48 },
-      performance: { tokens_per_second: 24.5 },
+      performance: {
+        tokens_per_second: 24.5,
+        prompt_tokens_per_second: 180.2,
+        load_ms: 750,
+        prompt_ms: 120,
+        generation_ms: 1959,
+      },
     });
     const result = await runtime.benchmarkModel('model-1', 'ollama');
     assert.equal(result.tokensPerSecond, 24.5);
     assert.equal(result.source, 'runtime');
+    assert.equal(result.benchmarkVersion, 2);
+    assert.equal(result.contextTokens, 4096);
     assert.equal(result.completionTokens, 48);
+    assert.equal(result.promptTokensPerSecond, 180.2);
+    assert.equal(result.loadMs, 750);
+    assert.equal(result.promptMs, 120);
+    assert.equal(result.generationMs, 1959);
     assert.equal(result.hardware.gpu, 'Test GPU');
 
     const saved = runtime.benchmarkResults().benchmarks;

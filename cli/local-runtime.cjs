@@ -1416,6 +1416,9 @@ class LocalAiRuntime {
           performance: payload?.timings ? {
             tokens_per_second: Number(payload.timings.predicted_per_second || 0) || null,
             prompt_tokens_per_second: Number(payload.timings.prompt_per_second || 0) || null,
+            load_ms: Number(payload.timings.load_ms || 0) || null,
+            prompt_ms: Number(payload.timings.prompt_ms || 0) || null,
+            generation_ms: Number(payload.timings.predicted_ms || 0) || null,
           } : null,
         };
       }
@@ -1475,6 +1478,9 @@ class LocalAiRuntime {
             ? +(Number(payload.prompt_eval_count) / (Number(payload.prompt_eval_duration) / 1e9)).toFixed(2)
             : null,
           load_ms: Number(payload?.load_duration || 0) ? +(Number(payload.load_duration) / 1e6).toFixed(1) : null,
+          prompt_ms: Number(payload?.prompt_eval_duration || 0) ? +(Number(payload.prompt_eval_duration) / 1e6).toFixed(1) : null,
+          generation_ms: Number(payload?.eval_duration || 0) ? +(Number(payload.eval_duration) / 1e6).toFixed(1) : null,
+          total_ms: Number(payload?.total_duration || 0) ? +(Number(payload.total_duration) / 1e6).toFixed(1) : null,
         },
       };
       this.scheduleIdleUnload('ollama', modelName);
@@ -1511,6 +1517,9 @@ class LocalAiRuntime {
         performance: payload?.timings ? {
           tokens_per_second: Number(payload.timings.predicted_per_second || payload.timings.tokens_per_second || 0) || null,
           prompt_tokens_per_second: Number(payload.timings.prompt_per_second || 0) || null,
+          load_ms: Number(payload.timings.load_ms || 0) || null,
+          prompt_ms: Number(payload.timings.prompt_ms || 0) || null,
+          generation_ms: Number(payload.timings.predicted_ms || payload.timings.generation_ms || 0) || null,
         } : null,
       };
     }
@@ -1538,6 +1547,10 @@ class LocalAiRuntime {
     const runtime = String(runtimeHint || (await this.detect())?.kind || '');
     if (!runtime) throw new Error('No supported local AI runtime is available.');
 
+    const benchmarkVersion = 2;
+    const contextTokens = 4096;
+    const benchmarkSeed = 'Local AI should answer quickly while preserving useful context, predictable memory use, and stable tool behavior on the same device.';
+    const benchmarkContext = Array.from({ length: 28 }, () => benchmarkSeed).join(' ');
     const started = Date.now();
     const result = await this.chat({
       model: modelName,
@@ -1545,14 +1558,15 @@ class LocalAiRuntime {
       request_id: 'benchmark-' + crypto.randomUUID(),
       messages: [{
         role: 'user',
-        content: 'Write one concise paragraph of about 60 words describing why local AI latency matters. Do not use a list.',
+        content: benchmarkContext + '\n\nWrite one concise paragraph of about 60 words explaining why local AI latency matters. Do not use a list.',
       }],
-      options: { temperature: 0, max_tokens: 96, num_ctx: 4096, keep_alive: '10m' },
+      options: { temperature: 0, max_tokens: 96, num_ctx: contextTokens, keep_alive: '0' },
     });
     const wallMs = Math.max(1, Date.now() - started);
     const completionTokens = Number(result?.usage?.completion_tokens || result?.usage?.completionTokens || 0);
     const promptTokens = Number(result?.usage?.prompt_tokens || result?.usage?.promptTokens || 0);
     const nativeTps = Number(result?.performance?.tokens_per_second || 0);
+    const promptTps = Number(result?.performance?.prompt_tokens_per_second || 0);
     const tokensPerSecond = nativeTps > 0
       ? +nativeTps.toFixed(2)
       : completionTokens > 0
@@ -1561,13 +1575,20 @@ class LocalAiRuntime {
 
     const hardware = await Promise.resolve(this.detectHardware()).catch(() => ({}));
     const row = {
+      benchmarkVersion,
       model: modelName,
       runtime,
       measuredAt: new Date().toISOString(),
       wallMs,
+      contextTokens,
       promptTokens,
       completionTokens,
       tokensPerSecond,
+      promptTokensPerSecond: promptTps > 0 ? +promptTps.toFixed(2) : null,
+      loadMs: Number(result?.performance?.load_ms || 0) || null,
+      promptMs: Number(result?.performance?.prompt_ms || 0) || null,
+      generationMs: Number(result?.performance?.generation_ms || 0) || null,
+      runtimeTotalMs: Number(result?.performance?.total_ms || 0) || null,
       source: nativeTps > 0 ? 'runtime' : completionTokens > 0 ? 'wall-clock' : 'wall-clock-only',
       hardware: {
         cpu: hardware?.cpu || null,
