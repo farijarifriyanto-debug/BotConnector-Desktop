@@ -203,6 +203,7 @@ test('Local workspace picker adds the folder returned by the native picker', asy
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bc-workspace-picker-data-'));
   const project = path.join(dataDir, 'picked-project');
   fs.mkdirSync(project);
+  fs.writeFileSync(path.join(project, 'picker-marker.txt'), 'selected');
   let calls = 0;
   const server = await startOfflineServer({
     localAi: runtimeFixture(),
@@ -234,7 +235,8 @@ test('Local workspace picker adds the folder returned by the native picker', asy
   assert.equal(calls, 1);
   assert.equal(payload.cancelled, false);
   assert.equal(payload.active.name, 'picked-project');
-  assert.equal(payload.active.path, fs.realpathSync(project));
+  assert.equal(path.basename(payload.active.path), 'picked-project');
+  assert.equal(fs.readFileSync(path.join(payload.active.path, 'picker-marker.txt'), 'utf8'), 'selected');
 });
 
 test('Local workspace picker leaves state unchanged when the user cancels', async (t) => {
