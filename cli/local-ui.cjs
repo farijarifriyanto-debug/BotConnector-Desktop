@@ -628,6 +628,165 @@ svg{display:block}
   color:var(--muted);
 }
 .fit.great{color:var(--ok)}.fit.ok{color:var(--text)}.fit.warn{color:var(--warn)}
+
+/* Device Fit — production workspace */
+.deviceFitPanel{
+  width:min(680px,calc(100vw - 24px));
+  padding:20px;
+  background:color-mix(in srgb,var(--surface) 97%,var(--bg));
+}
+.deviceFitPanel .panelHead{
+  top:-20px;
+  margin:-20px -20px 18px;
+  padding:18px 20px 14px;
+}
+.fitHeadMeta{display:flex;align-items:center;gap:8px;margin-top:5px;color:var(--muted);font-size:10.5px}
+.fitHeadMetaDot{width:5px;height:5px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 12%,transparent)}
+.fitSection{margin:0 0 16px}
+.fitSectionHead{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:9px}
+.fitSectionTitle{font-size:11px;font-weight:720;letter-spacing:.02em;color:var(--text)}
+.fitSectionHint{font-size:10.5px;color:var(--muted)}
+.fitHardwareShell{
+  border:1px solid var(--line);
+  border-radius:14px;
+  background:linear-gradient(180deg,color-mix(in srgb,var(--surface-2) 72%,var(--bg)),var(--bg));
+  padding:10px;
+}
+.fitGrid{grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:0}
+.fitMetric{
+  position:relative;
+  min-height:88px;
+  border:1px solid var(--line-soft);
+  border-radius:11px;
+  background:color-mix(in srgb,var(--surface) 86%,transparent);
+  padding:11px 12px;
+}
+.fitMetric span{font-size:9px;letter-spacing:.08em;margin-bottom:7px}
+.fitMetric strong{font-size:12px;line-height:1.35;font-weight:680}
+.fitMetricSub{margin-top:7px;color:var(--muted);font-size:9.5px;line-height:1.3}
+.fitMetricSub strong{display:inline;font-size:9.5px;color:var(--text)}
+.fitHardwareMeta{
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  margin-top:9px;padding:9px 2px 0;border-top:1px solid var(--line-soft);
+}
+.fitHardwareMetaItem{display:inline-flex;align-items:center;gap:6px;min-width:0;color:var(--muted);font-size:10px}
+.fitHardwareMetaItem strong{color:var(--text);font-size:10.5px;font-weight:620;overflow-wrap:anywhere}
+.fitHardwareMetaSep{width:1px;height:13px;background:var(--line)}
+.fitFilters{grid-template-columns:minmax(0,1.35fr) minmax(250px,.9fr);gap:10px;margin:0}
+.fitFilterCard{
+  border:1px solid var(--line);
+  border-radius:13px;
+  background:var(--bg);
+  padding:12px;
+}
+.fitFilterLabel{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:9.5px;letter-spacing:.04em;text-transform:uppercase;margin-bottom:9px}
+.fitFilterHelp{font-size:9.5px;font-weight:500;letter-spacing:0;text-transform:none;color:var(--muted-2)}
+.fitUseCases{gap:6px}
+.fitUseCaseBtn{
+  min-height:32px;padding:0 10px;border-radius:999px;
+  background:transparent;border-color:var(--line);font-size:10.5px;
+  transition:background .14s ease,border-color .14s ease,color .14s ease,transform .14s ease;
+}
+.fitUseCaseBtn:hover{background:var(--surface-2);color:var(--text);transform:translateY(-1px)}
+.fitUseCaseBtn.active{
+  color:var(--text);
+  background:var(--surface-3);
+  border-color:color-mix(in srgb,var(--text) 24%,var(--line));
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--text) 4%,transparent);
+}
+.fitUseCaseBtn.active::before{content:"✓";margin-right:5px;color:var(--ok);font-size:9px}
+.fitPreferenceSegments{
+  display:grid;grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:3px;padding:3px;
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:var(--surface-2);
+}
+.fitPreferenceBtn{
+  min-height:32px;border:0;border-radius:7px;background:transparent;
+  color:var(--muted);font-size:10.5px;font-weight:670;
+  transition:background .14s ease,color .14s ease,box-shadow .14s ease;
+}
+.fitPreferenceBtn:hover{color:var(--text)}
+.fitPreferenceBtn.active{
+  color:var(--text);
+  background:var(--surface);
+  box-shadow:0 1px 4px color-mix(in srgb,#000 18%,transparent),inset 0 0 0 1px var(--line-soft);
+}
+.fitPreferenceDescription{margin-top:9px;min-height:30px;color:var(--muted);font-size:10.5px;line-height:1.4}
+.fitTabs{
+  width:100%;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:4px;margin:0 0 10px;padding:4px;border-radius:12px;
+}
+.fitTab{display:flex;align-items:center;justify-content:center;gap:7px;min-height:34px;padding:0 10px;border-radius:8px}
+.fitTab.active{background:var(--surface-3);box-shadow:inset 0 0 0 1px var(--line-soft)}
+.fitTabCount{
+  min-width:19px;height:18px;display:inline-grid;place-items:center;
+  padding:0 5px;border-radius:999px;background:var(--surface-2);
+  color:var(--muted);font-size:9px;font-weight:700;
+}
+.fitTab.active .fitTabCount{background:var(--surface);color:var(--text)}
+.fitActionBar{margin:0 0 8px;padding:0 2px}
+.fitViewLead{line-height:1.45}
+.fitBenchmarkStatus{min-height:0;margin:0 0 8px}
+.fitBrowse{grid-template-columns:minmax(0,1fr) 168px;gap:8px;margin:0 0 10px}
+.fitSearchField,.fitSortField{position:relative}
+.fitSearchField svg{position:absolute;left:11px;top:50%;width:14px;height:14px;transform:translateY(-50%);stroke:var(--muted);pointer-events:none}
+.fitBrowse input,.fitBrowse select{width:100%;min-height:38px;border-radius:10px;background:var(--bg);transition:border-color .14s ease,box-shadow .14s ease}
+.fitBrowse input{padding-left:34px}
+.fitBrowse input:focus,.fitBrowse select:focus{outline:none;border-color:color-mix(in srgb,var(--text) 28%,var(--line));box-shadow:0 0 0 3px color-mix(in srgb,var(--text) 5%,transparent)}
+.fitBrowse select{appearance:none;-webkit-appearance:none;padding:0 34px 0 11px}
+.fitSortChevron{position:absolute;right:11px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:11px;pointer-events:none}
+.deviceFitPanel>.fitSection>.card{margin:0;padding:0 12px;border-radius:14px;background:var(--bg);overflow:hidden}
+.deviceFitPanel .model{
+  display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:14px;row-gap:8px;
+  align-items:start;padding:14px 2px;border-top:1px solid var(--line-soft);
+}
+.deviceFitPanel .model:first-of-type{border-top:0}
+.deviceFitPanel .modelInfo{gap:6px}
+.deviceFitPanel .modelInfo .name{font-size:12.5px;font-weight:690;line-height:1.35;white-space:normal;overflow:visible;text-overflow:clip}
+.deviceFitPanel .capabilities{gap:5px}
+.deviceFitPanel .capability{min-height:20px;padding:0 7px;background:transparent}
+.deviceFitPanel .fitMeta{margin-top:1px;font-size:10.5px}
+.deviceFitPanel .fitBenchmarkMetrics{
+  margin-top:0;padding:7px 8px;border-radius:8px;
+  background:var(--surface-2);border:1px solid var(--line-soft);
+}
+.deviceFitPanel .model>.fit{
+  grid-column:2;grid-row:1;
+  justify-self:end;
+  min-height:22px;display:inline-flex;align-items:center;
+  padding:0 8px;font-weight:700;background:var(--surface-2);
+}
+.deviceFitPanel .modelActions{
+  grid-column:2;grid-row:2 / span 4;
+  display:flex;flex-direction:column;gap:6px;min-width:88px;
+}
+.deviceFitPanel .modelActions .btn{width:100%;justify-content:center}
+.fitWhy{
+  width:max-content;display:inline-flex;align-items:center;gap:5px;
+  margin-top:1px;border:0;background:transparent;color:var(--muted);
+  padding:2px 0;font-size:10.5px;font-weight:620;text-decoration:none;cursor:pointer;
+}
+.fitWhy::after{content:"⌄";font-size:11px;transition:transform .14s ease}
+.fitWhy.expanded::after{transform:rotate(180deg)}
+.fitWhy:hover{color:var(--text)}
+.fitReason{margin-top:2px;padding:9px 10px;border-radius:9px;line-height:1.5}
+.fit.great{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 30%,var(--line));background:color-mix(in srgb,var(--ok) 7%,var(--surface-2))}
+.fit.ok{color:var(--text)}
+.fit.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 30%,var(--line));background:color-mix(in srgb,var(--warn) 6%,var(--surface-2))}
+.fit.installed,.fit.loaded{border-color:color-mix(in srgb,var(--ok) 30%,var(--line));background:color-mix(in srgb,var(--ok) 7%,var(--surface-2))}
+@media(max-width:720px){
+  .deviceFitPanel{right:0;top:0;bottom:0;width:100vw;max-width:none;border-radius:0;padding:16px}
+  .deviceFitPanel .panelHead{top:-16px;margin:-16px -16px 16px;padding:15px 16px 12px}
+  .fitGrid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .fitFilters{grid-template-columns:1fr}
+  .fitBrowse{grid-template-columns:1fr}
+  .deviceFitPanel .model{grid-template-columns:minmax(0,1fr)}
+  .deviceFitPanel .model>.fit{grid-column:1;grid-row:auto;justify-self:start}
+  .deviceFitPanel .modelActions{grid-column:1;grid-row:auto;flex-direction:row;min-width:0}
+  .fitTabs{grid-template-columns:1fr}
+}
 .small{min-height:30px;padding:0 8px;font-size:11px}
 .toolList{display:grid;gap:8px;margin-top:10px}
 .toolRow{
@@ -1733,6 +1892,32 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     return rows.sort((a, b) => fitScore(b) - fitScore(a));
   }
 
+  function fitStatusLabel(level) {
+    return ({
+      great: 'Great fit',
+      ok: 'Good fit',
+      warn: 'May be slow',
+      loaded: 'Loaded',
+      installed: 'Installed',
+      unknown: 'Unknown',
+    })[String(level || 'unknown')] || String(level || 'unknown');
+  }
+
+  function fitPreferenceCopy(value) {
+    if (value === 'fast') return 'Prioritizes lower latency and lighter models for this device.';
+    if (value === 'quality') return 'Prioritizes stronger models when this device has enough headroom.';
+    return 'Best balance of speed, memory use, and answer quality.';
+  }
+
+  function renderFitPreference() {
+    for (const button of document.querySelectorAll('[data-fit-preference]')) {
+      const active = button.dataset.fitPreference === fitState.preference;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    }
+    $('fitPreferenceDescription').textContent = fitPreferenceCopy(fitState.preference);
+  }
+
   function renderFitCatalog(list) {
     const box = $('fitModels');
     box.innerHTML = list.length ? '' : '<div class="muted">No models match these filters.</div>';
@@ -1741,8 +1926,8 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       const loaded = local ? modelIsLoaded(local) : false;
       const level = local ? (loaded ? 'loaded' : 'installed') : (m.compatibility?.level || 'unknown');
       const row = document.createElement('div');
-      row.className = 'model';
-      row.innerHTML = '<div class="modelInfo"><span class="name"></span><div class="capabilities"></div><div class="fitMeta"></div><div class="fitBenchmarkMetrics"></div><button class="fitWhy" type="button">Why recommended</button><div class="fitReason" hidden></div></div><span class="fit ' + esc(level) + '">' + esc(level) + '</span><div class="modelActions"><button class="btn small primary"></button><button class="btn small benchmark" type="button" hidden>Benchmark</button></div>';
+      row.className = 'model fitModelCard';
+      row.innerHTML = '<div class="modelInfo"><span class="name"></span><div class="capabilities"></div><div class="fitMeta"></div><div class="fitBenchmarkMetrics"></div><button class="fitWhy" type="button">Why this model?</button><div class="fitReason" hidden></div></div><span class="fit ' + esc(level) + '">' + esc(fitStatusLabel(level)) + '</span><div class="modelActions"><button class="btn small primary"></button><button class="btn small benchmark" type="button" hidden>Benchmark</button></div>';
       const size = m.compatibility?.paramsB ? ' · ' + m.compatibility.paramsB + 'B' : '';
       row.querySelector('.name').textContent = (m.id || m.name || 'Local model') + size;
       row.querySelector('.name').title = m.id || m.name || '';
@@ -1760,7 +1945,11 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       const reason = row.querySelector('.fitReason');
       reason.textContent = fitReasonText(m);
       why.hidden = fitState.view !== 'recommended' || !reason.textContent;
-      why.onclick = () => { reason.hidden = !reason.hidden; why.textContent = reason.hidden ? 'Why recommended' : 'Hide details'; };
+      why.onclick = () => {
+        reason.hidden = !reason.hidden;
+        why.classList.toggle('expanded', !reason.hidden);
+        why.textContent = reason.hidden ? 'Why this model?' : 'Hide details';
+      };
       const button = row.querySelector('.primary');
       const benchmark = row.querySelector('.benchmark');
       if (local) {
@@ -1796,12 +1985,15 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     const recommended = recommendedFiltered();
     const compatible = compatibleFiltered();
     const installed = installedFitModels();
-    $('fitTabRecommended').textContent = 'Recommended (' + recommended.length + ')';
-    $('fitTabInstalled').textContent = 'Installed (' + installed.length + ')';
-    $('fitTabAll').textContent = 'All compatible (' + compatible.length + ')';
+    $('fitTabRecommendedCount').textContent = String(recommended.length);
+    $('fitTabInstalledCount').textContent = String(installed.length);
+    $('fitTabAllCount').textContent = String(compatible.length);
     for (const tab of document.querySelectorAll('[data-fit-view]')) {
-      tab.classList.toggle('active', tab.dataset.fitView === fitState.view);
+      const active = tab.dataset.fitView === fitState.view;
+      tab.classList.toggle('active', active);
+      tab.setAttribute('aria-selected', active ? 'true' : 'false');
     }
+    renderFitPreference();
     $('fitSort').value = fitState.sort;
     const lead = fitState.view === 'recommended'
       ? 'Ranked for this hardware, selected capabilities, preference, and measured performance when available.'
@@ -1857,6 +2049,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
         runtimeState = status.runtime || null;
         hardwareState = status.hardware || {};
         renderFitHardware();
+        $('fitScanStatus').textContent = 'Detected locally · updated just now';
       }
       const [recommended, , benchmarkPayload] = await Promise.all([
         api('/api/catalog/recommendations', { method: 'POST', body: JSON.stringify({ limit: 24 }) }),
@@ -2001,7 +2194,12 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   for (const tab of document.querySelectorAll('[data-fit-view]')) {
     tab.onclick = () => { fitState.view = tab.dataset.fitView; renderDeviceFitModels(); };
   }
-  $('fitPreference').onchange = (event) => { fitState.preference = event.target.value; renderDeviceFitModels(); };
+  for (const button of document.querySelectorAll('[data-fit-preference]')) {
+    button.onclick = () => {
+      fitState.preference = button.dataset.fitPreference;
+      renderDeviceFitModels();
+    };
+  }
   $('fitBenchmarkAll').onclick = benchmarkAllInstalled;
   $('fitBenchmarkStop').onclick = () => {
     if (!fitState.benchmarkRunning) return;
@@ -2150,60 +2348,98 @@ function localUiHtml({ token, host, port }) {
   <div class="card"><h3>Local endpoint</h3><div class="muted">__LOCAL_URL__ · OpenAI-compatible API at /v1</div></div>
 </aside>
 <aside class="panel deviceFitPanel" id="deviceFitPanel">
-  <div class="panelHead"><div class="row"><div class="grow"><h2>Device fit</h2><div class="panelLead">Hardware detected on this computer and local models that fit it.</div></div><button class="btn" id="fitScan">Scan again</button><button class="btn" data-close>Close</button></div></div>
-  <div class="fitGrid">
-    <div class="fitMetric"><span>CPU</span><strong id="fitCpu">Checking…</strong></div>
-    <div class="fitMetric"><span>RAM</span><strong id="fitRam">Checking…</strong></div>
-    <div class="fitMetric"><span>GPU</span><strong id="fitGpu">Checking…</strong></div>
-    <div class="fitMetric"><span>VRAM</span><strong id="fitVram">Checking…</strong></div>
-    <div class="fitMetric"><span>NPU</span><strong id="fitNpu">Checking…</strong></div>
-    <div class="fitMetric"><span>System</span><strong id="fitSystem">Checking…</strong></div>
-    <div class="fitMetric"><span>Backend</span><strong id="fitBackend">Checking…</strong></div>
+  <div class="panelHead">
+    <div class="row">
+      <div class="grow">
+        <h2>Device fit</h2>
+        <div class="panelLead">Choose local models using this device's real hardware and measured performance.</div>
+        <div class="fitHeadMeta"><span class="fitHeadMetaDot"></span><span id="fitScanStatus">Detected locally</span></div>
+      </div>
+      <button class="btn" id="fitScan">Scan again</button>
+      <button class="btn" data-close>Close</button>
+    </div>
   </div>
-  <div class="fitFilters">
-    <div class="fitFilterCard">
-      <div class="fitFilterLabel">Use cases · select one or more</div>
-      <div class="fitUseCases">
-        <button class="fitUseCaseBtn active" data-fit-usecase="general">General</button>
-        <button class="fitUseCaseBtn" data-fit-usecase="indonesian">Bahasa Indonesia</button>
-        <button class="fitUseCaseBtn" data-fit-usecase="coding">Coding</button>
-        <button class="fitUseCaseBtn" data-fit-usecase="reasoning">Reasoning</button>
-        <button class="fitUseCaseBtn" data-fit-usecase="vision">Vision</button>
-        <button class="fitUseCaseBtn" data-fit-usecase="tools">Tools</button>
+
+  <section class="fitSection">
+    <div class="fitSectionHead">
+      <div class="fitSectionTitle">This device</div>
+      <div class="fitSectionHint">Live hardware profile</div>
+    </div>
+    <div class="fitHardwareShell">
+      <div class="fitGrid">
+        <div class="fitMetric"><span>Processor</span><strong id="fitCpu">Checking…</strong></div>
+        <div class="fitMetric"><span>Memory</span><strong id="fitRam">Checking…</strong></div>
+        <div class="fitMetric"><span>Graphics</span><strong id="fitGpu">Checking…</strong><div class="fitMetricSub">VRAM · <strong id="fitVram">Checking…</strong></div></div>
+        <div class="fitMetric"><span>Accelerator</span><strong id="fitNpu">Checking…</strong></div>
+      </div>
+      <div class="fitHardwareMeta">
+        <div class="fitHardwareMetaItem"><span>System</span><strong id="fitSystem">Checking…</strong></div>
+        <span class="fitHardwareMetaSep"></span>
+        <div class="fitHardwareMetaItem"><span>Runtimes</span><strong id="fitBackend">Checking…</strong></div>
       </div>
     </div>
-    <label class="fitFilterCard">
-      <div class="fitFilterLabel">Preference</div>
-      <select id="fitPreference">
-        <option value="fast">Fast</option>
-        <option value="balanced" selected>Balanced</option>
-        <option value="quality">Quality</option>
-      </select>
-    </label>
-  </div>
-  <div class="fitTabs">
-    <button class="fitTab active" id="fitTabRecommended" data-fit-view="recommended">Recommended</button>
-    <button class="fitTab" id="fitTabInstalled" data-fit-view="installed">Installed</button>
-    <button class="fitTab" id="fitTabAll" data-fit-view="all">All compatible</button>
-  </div>
-  <div class="fitActionBar">
-    <div class="muted fitViewLead" id="fitViewLead">Ranked for this hardware, selected capabilities, and preference.</div>
-    <div class="row">
-      <button class="btn small" id="fitBenchmarkAll" hidden>Benchmark all</button>
-      <button class="btn small" id="fitBenchmarkStop" hidden>Stop</button>
+  </section>
+
+  <section class="fitSection">
+    <div class="fitSectionHead">
+      <div class="fitSectionTitle">Recommendation profile</div>
+      <div class="fitSectionHint">Tune ranking without changing the model itself</div>
     </div>
-  </div>
-  <div class="muted fitBenchmarkStatus" id="fitBenchmarkStatus"></div>
-  <div class="fitBrowse">
-    <input id="fitSearch" placeholder="Search model, capability, or family">
-    <select id="fitSort" aria-label="Sort models">
-      <option value="best">Best fit</option>
-      <option value="smallest">Smallest first</option>
-      <option value="popular">Most popular</option>
-      <option value="name">Name</option>
-    </select>
-  </div>
-  <div class="card"><div id="fitModels"></div></div>
+    <div class="fitFilters">
+      <div class="fitFilterCard">
+        <div class="fitFilterLabel"><span>Use cases</span><span class="fitFilterHelp">Select one or more</span></div>
+        <div class="fitUseCases">
+          <button class="fitUseCaseBtn active" data-fit-usecase="general">General</button>
+          <button class="fitUseCaseBtn" data-fit-usecase="indonesian">Bahasa Indonesia</button>
+          <button class="fitUseCaseBtn" data-fit-usecase="coding">Coding</button>
+          <button class="fitUseCaseBtn" data-fit-usecase="reasoning">Reasoning</button>
+          <button class="fitUseCaseBtn" data-fit-usecase="vision">Vision</button>
+          <button class="fitUseCaseBtn" data-fit-usecase="tools">Tools</button>
+        </div>
+      </div>
+      <div class="fitFilterCard">
+        <div class="fitFilterLabel"><span>Optimize for</span><span class="fitFilterHelp">Ranking preference</span></div>
+        <div class="fitPreferenceSegments" role="group" aria-label="Model ranking preference">
+          <button class="fitPreferenceBtn" type="button" data-fit-preference="fast">Fast</button>
+          <button class="fitPreferenceBtn active" type="button" data-fit-preference="balanced" aria-pressed="true">Balanced</button>
+          <button class="fitPreferenceBtn" type="button" data-fit-preference="quality">Quality</button>
+        </div>
+        <div class="fitPreferenceDescription" id="fitPreferenceDescription">Best balance of speed, memory use, and answer quality.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="fitSection">
+    <div class="fitTabs" role="tablist" aria-label="Device fit model views">
+      <button class="fitTab active" id="fitTabRecommended" data-fit-view="recommended" role="tab"><span>Recommended</span><span class="fitTabCount" id="fitTabRecommendedCount">0</span></button>
+      <button class="fitTab" id="fitTabInstalled" data-fit-view="installed" role="tab"><span>Installed</span><span class="fitTabCount" id="fitTabInstalledCount">0</span></button>
+      <button class="fitTab" id="fitTabAll" data-fit-view="all" role="tab"><span>All compatible</span><span class="fitTabCount" id="fitTabAllCount">0</span></button>
+    </div>
+    <div class="fitActionBar">
+      <div class="muted fitViewLead" id="fitViewLead">Ranked for this hardware, selected capabilities, and preference.</div>
+      <div class="row">
+        <button class="btn small" id="fitBenchmarkAll" hidden>Benchmark all</button>
+        <button class="btn small" id="fitBenchmarkStop" hidden>Stop</button>
+      </div>
+    </div>
+    <div class="muted fitBenchmarkStatus" id="fitBenchmarkStatus"></div>
+    <div class="fitBrowse">
+      <div class="fitSearchField">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="fitSearch" placeholder="Search model, capability, or family">
+      </div>
+      <div class="fitSortField">
+        <select id="fitSort" aria-label="Sort models">
+          <option value="best">Best fit</option>
+          <option value="smallest">Smallest first</option>
+          <option value="popular">Most popular</option>
+          <option value="name">Name</option>
+        </select>
+        <span class="fitSortChevron">⌄</span>
+      </div>
+    </div>
+    <div class="card"><div id="fitModels"></div></div>
+  </section>
 </aside>
 <aside class="panel" id="toolsPanel">
   <div class="panelHead"><div class="row"><div class="grow"><h2>Tools</h2><div class="panelLead">Choose capabilities the local model may use.</div></div><button class="btn" data-close>Close</button></div></div>
