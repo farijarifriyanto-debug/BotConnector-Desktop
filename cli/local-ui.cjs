@@ -1310,26 +1310,23 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   }
 
   async function addWorkspace() {
-    const workspacePath = $('workspacePath').value.trim();
-    const name = $('workspaceName').value.trim();
-    if (!workspacePath) {
-      $('workspaceMessage').textContent = 'Enter an existing local folder path.';
-      return;
-    }
     $('workspaceAdd').disabled = true;
-    $('workspaceMessage').textContent = 'Adding workspace…';
+    $('workspaceMessage').textContent = 'Opening folder picker…';
     try {
-      const payload = await api('/api/workspaces/add', {
+      const payload = await api('/api/workspaces/pick', {
         method: 'POST',
-        body: JSON.stringify({ path: workspacePath, name }),
+        body: JSON.stringify({}),
       });
+      if (payload.cancelled) {
+        $('workspaceMessage').textContent = 'Folder selection cancelled.';
+        return;
+      }
       workspaceState = {
         active: payload.active || null,
         workspaces: Array.isArray(payload.workspaces) ? payload.workspaces : [],
       };
-      $('workspaceName').value = '';
-      $('workspacePath').value = '';
-      $('workspaceMessage').textContent = 'Workspace added.';
+      $('workspaceMessage').textContent =
+        workspaceState.active?.path ? 'Workspace added: ' + workspaceState.active.path : 'Workspace added.';
       settings.tools = [...(workspaceState.active?.tools || [])];
       settings.model = workspaceState.active?.modelPath || settings.model;
       state.active = state.chats.find((chat) => chat.workspaceId === workspaceState.active?.id)?.id || null;
@@ -3561,11 +3558,9 @@ function localUiHtml({ token, host, port }) {
   </div>
   <div class="card">
     <h3>Add workspace</h3>
-    <div class="muted">Enter an existing folder on this computer. BotConnector stores only its canonical path and workspace settings.</div>
-    <input id="workspaceName" placeholder="Display name (optional)" style="margin-top:9px">
-    <input id="workspacePath" placeholder="C:\Projects\BotConnector or /home/user/project" style="margin-top:7px">
-    <button class="btn" id="workspaceAdd" style="margin-top:8px">Add workspace</button>
-    <div class="muted" id="workspaceMessage" style="margin-top:7px"></div>
+    <div class="muted">Choose a project folder from your computer. BotConnector registers the selected folder automatically; no path typing is required.</div>
+    <button class="btn" id="workspaceAdd" style="margin-top:10px">Choose folder</button>
+    <div class="muted" id="workspaceMessage" style="margin-top:7px">Your system folder picker will open.</div>
   </div>
   <div class="card">
     <h3>Registered workspaces</h3>
