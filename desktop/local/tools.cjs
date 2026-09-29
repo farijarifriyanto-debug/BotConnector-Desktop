@@ -11,6 +11,11 @@ const RUN_CODE_TIMEOUT_MS = 8_000;
 const MAX_TOOL_OUTPUT_CHARS = 32 * 1024;
 const PTC_TIMEOUT_MS = 30_000;
 
+function normalizeVmResult(value) {
+  if (value === undefined) return null;
+  return JSON.parse(JSON.stringify(value));
+}
+
 const BUILTIN_TOOLS = [
   {
     id: 'get_current_time', name: 'get_current_time',
@@ -572,7 +577,7 @@ class ToolRegistry {
       PTC_TIMEOUT_MS,
       'PTC program timed out.',
     );
-    return result === undefined ? null : clone(result);
+    return normalizeVmResult(result);
   }
 
   async close() {
