@@ -10,6 +10,13 @@ const { runToolAgent } = require('../desktop/local/device-bridge.cjs');
 const { recommendModels } = defaultCatalog;
 const { localUiHtml } = require('./local-ui.cjs');
 const { createDocumentStore } = require('./local-documents.cjs');
+const {
+  WorkspaceStore,
+  normalizeMode,
+  normalizePermission,
+  workspaceSystemContext,
+} = require('./local-workspaces.cjs');
+const { createScopedTools } = require('./local-agent-context.cjs');
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 18765;
@@ -333,6 +340,7 @@ async function startOfflineServer({
 
   const token = crypto.randomBytes(32).toString('base64url');
   const documentStore = createDocumentStore();
+  const workspaceStore = new WorkspaceStore(dataDir);
   const chatsFile = path.join(dataDir, 'local-chats.json');
   const server = http.createServer(async (req, res) => {
     try {
@@ -416,6 +424,10 @@ async function startOfflineServer({
         sendJson(res, 200, { models: await localAi.listModels() });
         return;
       }
+      if (req.method === 'GET' && url.pathname === '/api/workspaces') {
+        sendJson(res, 200, { workspaces: workspaceStore.list() });
+        return;
+      }
       if (req.method === 'GET' && url.pathname === '/api/tools') {
         const rows = tools?.list ? tools.list() : [];
         sendJson(res, 200, {
@@ -486,6 +498,14 @@ async function startOfflineServer({
 
       const body = req.method === 'POST' ? await readJson(req) : {};
 
+      if (req.method === 'POST' && url.pathname === '/api/workspaces/add') {
+        sendJson(res, 201, { workspace: await workspaceStore.add({ root: body.root, name: body.name }) });
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/workspaces/remove') {
+        sendJson(res, 200, { removed: await workspaceStore.remove(body.id) });
+        return;
+      }
       if (req.method === 'POST' && url.pathname === '/api/chats') {
         const isObject = (v) => v && typeof v === 'object' && !Array.isArray(v);
         if (!isObject(body.state) || !Array.isArray(body.state.chats) || (body.settings != null && !isObject(body.settings))) {
@@ -566,9 +586,16 @@ async function startOfflineServer({
       }
       if (req.method === 'POST' && url.pathname === '/api/chat') {
         const context = documentStore.buildContext(body.document_ids, 12000);
+        const workspace = workspaceStore.get(body.workspace_id);
+        const agentMode = normalizeMode(body.agent_mode);
+        const permissionPreset = normalizePermission(body.permission_preset);
         const messages = Array.isArray(body.messages)
           ? body.messages.map((message) => ({ ...message }))
           : [];
+        const workspaceContext = await workspaceSystemContext(workspace, agentMode, permissionPreset);
+        if (workspaceContext) {
+          messages.unshift({ role: 'system', content: workspaceContext });
+        }
         if (context) {
           let attached = false;
           for (let i = messages.length - 1; i >= 0; i--) {
@@ -581,7 +608,18 @@ async function startOfflineServer({
           }
           if (!attached) messages.push({ role: 'user', content: '[Local attached document context]\n' + context });
         }
-        const useTools = body.tool_mode === 'auto' && tools && Array.isArray(body.tools) && body.tools.length > 0;
+        const selectedTools = Array.isArray(body.tools) ? body.tools.map(String).filter(Boolean) : [];
+        const approvedTools = Array.isArray(body.approved_tools) ? body.approved_tools.map(String).filter(Boolean) : [];
+        const scopedTools = tools ? createScopedTools(tools, {
+          workspace,
+          mode: agentMode,
+          permission: permissionPreset,
+          selected: selectedTools,
+          approved: approvedTools,
+        }) : null;
+        const scopedToolIds = scopedTools?.selectedToolIds?.() || [];
+        const useTools = body.tool_mode === 'auto' && scopedTools && scopedToolIds.length > 0;
+        const agentBody = { ...body, tools: scopedToolIds, approved_tools: approvedTools };
         if (body.stream === true) {
           // Server-sent events so the UI can render both model output and tool activity.
           res.writeHead(200, {
@@ -595,8 +633,8 @@ async function startOfflineServer({
             if (useTools) {
               const result = await runToolAgent({
                 localAi,
-                tools,
-                params: { ...body, stream: false, messages },
+                tools: scopedTools,
+                params: { ...agentBody, stream: false, messages },
                 onEvent: (toolEvent) => event({ tool_event: toolEvent }),
               });
               if (result?.reasoning) event({ reasoning: String(result.reasoning) });
@@ -613,7 +651,7 @@ async function startOfflineServer({
           return;
         }
         if (useTools) {
-          sendJson(res, 200, await runToolAgent({ localAi, tools, params: { ...body, messages } }));
+          sendJson(res, 200, await runToolAgent({ localAi, tools: scopedTools, params: { ...agentBody, messages } }));
           return;
         }
         sendJson(res, 200, await localAi.chat({ ...body, messages }));
