@@ -2,12 +2,14 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const { spawn } = require('node:child_process');
+const vm = require('node:vm');
 
 const MAX_TOOL_CALLS_PER_TURN = 4;
 const TOOL_TIMEOUT_MS = 10_000;
 const WEB_SEARCH_TIMEOUT_MS = 15_000;
 const RUN_CODE_TIMEOUT_MS = 8_000;
 const MAX_TOOL_OUTPUT_CHARS = 32 * 1024;
+const PTC_TIMEOUT_MS = 30_000;
 
 const BUILTIN_TOOLS = [
   {
@@ -167,7 +169,7 @@ async function webSearch(args = {}) {
   };
 }
 
-async function runCode(args = {}) {
+async function runCode(args = {}, { cwd = '' } = {}) {
   const language = String(args.language || '').trim().toLowerCase();
   const code = String(args.code || '');
   if (!code.trim()) throw new Error('Code is required.');
@@ -189,7 +191,7 @@ async function runCode(args = {}) {
   try {
     const result = await new Promise((resolve, reject) => {
       const child = spawn(command, commandArgs, {
-        cwd: tempDir,
+        cwd: cwd ? path.resolve(cwd) : tempDir,
         env: {
           PATH: process.env.PATH || '',
           Path: process.env.Path || '',
@@ -276,6 +278,48 @@ function openRpcProcess(server) {
   return { child, request };
 }
 
+
+function ptcSdkSignature(tool) {
+  const props = tool?.inputSchema?.properties || {};
+  const required = new Set(tool?.inputSchema?.required || []);
+  const fields = Object.entries(props).map(([name, spec]) => {
+    const type = spec?.type === 'integer' || spec?.type === 'number'
+      ? 'number'
+      : spec?.type === 'boolean'
+        ? 'boolean'
+        : spec?.type === 'array'
+          ? 'unknown[]'
+          : spec?.type === 'object'
+            ? 'Record<string, unknown>'
+            : 'string';
+    return `${name}${required.has(name) ? '' : '?'}: ${type}`;
+  });
+  return `tools.${tool.name}({ ${fields.join(', ')} })`;
+}
+
+function ptcSystemPrompt(toolRows, workspacePath = '') {
+  const catalog = toolRows.map((tool) =>
+    `- ${ptcSdkSignature(tool)} // ${tool.description || tool.name}`
+  ).join('\n');
+  return [
+    'PTC mode is active.',
+    'You receive one model-facing tool named run_code. Write a JavaScript async orchestration program in its code field.',
+    'The program has a global object named tools. Call only the generated SDK methods below.',
+    'Return the final useful value from the program. Use Promise.all when independent calls can run concurrently.',
+    workspacePath ? `Workspace root: ${workspacePath}` : '',
+    'Generated SDK:',
+    catalog || '- No callable SDK tools are available in this permission profile.',
+  ].filter(Boolean).join('\n');
+}
+
+function minimalSystemPrompt(workspacePath = '') {
+  return [
+    'Minimal mode is active.',
+    'Keep tool use and context small. Use run_code only when execution is necessary; otherwise answer directly.',
+    workspacePath ? `Workspace root: ${workspacePath}` : '',
+  ].filter(Boolean).join('\n');
+}
+
 class ToolRegistry {
   constructor({ modelsDir, emit = () => {} } = {}) {
     this.modelsDir = path.resolve(modelsDir || process.cwd());
@@ -286,19 +330,59 @@ class ToolRegistry {
 
   list() { return [...this.tools.values()].map(clone); }
   findTool(name) { return this.tools.get(String(name)) || [...this.tools.values()].find(tool => tool.name === String(name)); }
-  schemas(selected = null) {
+  selectedTools(selected = null, { permission = 'workspace-write' } = {}) {
     const wanted = Array.isArray(selected) && selected.length
       ? new Set(selected.map(String))
       : null;
     return this.list()
       .filter(tool =>
         tool.status === 'READY' &&
-        (wanted ? (wanted.has(tool.id) || wanted.has(tool.name)) : tool.enabled)
-      )
+        (wanted ? (wanted.has(tool.id) || wanted.has(tool.name)) : tool.enabled) &&
+        !(permission === 'read-only' && tool.permissionClass !== 'READ')
+      );
+  }
+
+  schemas(selected = null, options = {}) {
+    return this.selectedTools(selected, options)
       .map(tool => ({
         type: 'function',
         function: { name: tool.name, description: tool.description, parameters: tool.inputSchema },
       }));
+  }
+
+  ptcSchema(selected = null, options = {}) {
+    const rows = this.selectedTools(selected, options);
+    return [{
+      type: 'function',
+      function: {
+        name: 'run_code',
+        description:
+          'Execute a JavaScript orchestration program using the generated BotConnector tools SDK. ' +
+          'The code receives a global tools object and should return its final value.',
+        parameters: {
+          type: 'object',
+          properties: {
+            code: {
+              type: 'string',
+              description: 'JavaScript body for an async function. Example: return await tools.web_search({query:"OpenAI"});',
+            },
+          },
+          required: ['code'],
+          additionalProperties: false,
+        },
+      },
+    }];
+  }
+
+  ptcPrompt(selected = null, options = {}) {
+    return ptcSystemPrompt(
+      this.selectedTools(selected, options),
+      String(options.workspacePath || ''),
+    );
+  }
+
+  minimalPrompt(options = {}) {
+    return minimalSystemPrompt(String(options.workspacePath || ''));
   }
   setEnabled(id, enabled) {
     const tool = this.tools.get(String(id));
@@ -308,11 +392,16 @@ class ToolRegistry {
     return clone(tool);
   }
 
-  async execute(name, args = {}, { approved = false, selected = false } = {}) {
+  async execute(name, args = {}, { approved = false, selected = false, permission = 'workspace-write', workspacePath = '' } = {}) {
     const tool = this.findTool(name);
     if (!tool) throw new Error(`Tool tidak dikenal: ${name}`);
     if (!tool.enabled && !selected) throw new Error(`Tool '${name}' belum diaktifkan.`);
-    if (tool.permissionClass !== 'READ' && !approved) throw new Error(`Tool '${name}' membutuhkan persetujuan eksplisit.`);
+    if (permission === 'read-only' && tool.permissionClass !== 'READ') {
+      throw new Error(`Tool '${name}' diblokir oleh permission Read only.`);
+    }
+    if (tool.permissionClass !== 'READ' && !approved && permission !== 'full-access') {
+      throw new Error(`Tool '${name}' membutuhkan persetujuan eksplisit.`);
+    }
     const validation = validateArgs(tool.inputSchema, args);
     if (validation) throw new Error(validation);
     const run = async () => {
@@ -324,7 +413,7 @@ class ToolRegistry {
       }
       if (name === 'echo_text') return { text: args.text };
       if (name === 'web_search') return webSearch(args);
-      if (name === 'run_code') return runCode(args);
+      if (name === 'run_code') return runCode(args, { cwd: workspacePath });
       throw new Error(`Tool '${name}' belum memiliki executor.`);
     };
     const result = await withTimeout(run(), TOOL_TIMEOUT_MS);
@@ -399,11 +488,63 @@ class ToolRegistry {
     const tool = this.findTool(name);
     if (!tool) throw new Error(`Tool tidak dikenal: ${name}`);
     if (!tool.enabled && !options.selected) throw new Error(`Tool '${name}' belum diaktifkan.`);
-    if (tool.permissionClass !== 'READ' && !options.approved) {
+    if (options.permission === 'read-only' && tool.permissionClass !== 'READ') {
+      throw new Error(`Tool '${name}' diblokir oleh permission Read only.`);
+    }
+    if (
+      tool.permissionClass !== 'READ' &&
+      !options.approved &&
+      options.permission !== 'full-access'
+    ) {
       throw new Error(`Tool '${name}' membutuhkan persetujuan eksplisit.`);
     }
     if (tool.serverId) return this.executeMcp(tool, args);
     return this.execute(name, args, options);
+  }
+
+  async runPtc(
+    code,
+    {
+      selected = null,
+      approved = [],
+      permission = 'workspace-write',
+      workspacePath = '',
+    } = {},
+  ) {
+    const source = String(code || '');
+    if (!source.trim()) throw new Error('PTC code is required.');
+    if (source.length > 30_000) throw new Error('PTC code is too large.');
+
+    const approvedSet = approved instanceof Set ? approved : new Set((approved || []).map(String));
+    const rows = this.selectedTools(selected, { permission });
+    const sdk = Object.create(null);
+    for (const tool of rows) {
+      sdk[tool.name] = async (args = {}) =>
+        this.invoke(tool.name, args, {
+          selected: true,
+          approved:
+            permission === 'full-access' ||
+            approvedSet.has(tool.id) ||
+            approvedSet.has(tool.name),
+          permission,
+          workspacePath,
+        });
+    }
+    Object.freeze(sdk);
+
+    const context = vm.createContext(
+      { tools: sdk },
+      {
+        name: 'BotConnector PTC',
+        codeGeneration: { strings: false, wasm: false },
+      },
+    );
+    const script = new vm.Script(
+      '(async () => { "use strict";\n' + source + '\n})()',
+      { filename: 'botconnector-ptc.js' },
+    );
+    const promise = script.runInContext(context, { timeout: 1000 });
+    return withTimeout(Promise.resolve(promise), PTC_TIMEOUT_MS, 'PTC program timed out.');
   }
 
   async close() {
@@ -412,4 +553,13 @@ class ToolRegistry {
   }
 }
 
-module.exports = { ToolRegistry, BUILTIN_TOOLS, MAX_TOOL_CALLS_PER_TURN, validateArgs, webSearch, runCode };
+module.exports = {
+  ToolRegistry,
+  BUILTIN_TOOLS,
+  MAX_TOOL_CALLS_PER_TURN,
+  validateArgs,
+  webSearch,
+  runCode,
+  ptcSystemPrompt,
+  minimalSystemPrompt,
+};
