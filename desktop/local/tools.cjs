@@ -517,34 +517,62 @@ class ToolRegistry {
 
     const approvedSet = approved instanceof Set ? approved : new Set((approved || []).map(String));
     const rows = this.selectedTools(selected, { permission });
-    const sdk = Object.create(null);
-    for (const tool of rows) {
-      sdk[tool.name] = async (args = {}) =>
-        this.invoke(tool.name, args, {
-          selected: true,
-          approved:
-            permission === 'full-access' ||
-            approvedSet.has(tool.id) ||
-            approvedSet.has(tool.name),
-          permission,
-          workspacePath,
-        });
-    }
-    Object.freeze(sdk);
+    const allowed = new Map(rows.map((tool) => [tool.name, tool]));
+
+    // Only expose a null-prototype bridge into the VM. Tool results cross the
+    // boundary as JSON and are parsed inside the VM, so model code never
+    // receives host-realm objects/functions from the registry.
+    const bridge = async (name, argsJson = '{}') => {
+      const tool = allowed.get(String(name));
+      if (!tool) throw new Error(`PTC tool is not allowed: ${String(name)}`);
+      let args;
+      try {
+        args = JSON.parse(String(argsJson || '{}'));
+      } catch {
+        throw new Error('PTC tool arguments must be JSON serializable.');
+      }
+      const result = await this.invoke(tool.name, args, {
+        selected: true,
+        approved:
+          permission === 'full-access' ||
+          approvedSet.has(tool.id) ||
+          approvedSet.has(tool.name),
+        permission,
+        workspacePath,
+      });
+      return JSON.stringify(result === undefined ? null : result);
+    };
+    Object.setPrototypeOf(bridge, null);
+    Object.freeze(bridge);
+
+    const sdkEntries = rows.map((tool) =>
+      JSON.stringify(tool.name) +
+      ': async (args = {}) => JSON.parse(await __bcCall(' +
+      JSON.stringify(tool.name) +
+      ', JSON.stringify(args)))'
+    ).join(',');
 
     const context = vm.createContext(
-      { tools: sdk },
+      { __bcCall: bridge },
       {
         name: 'BotConnector PTC',
         codeGeneration: { strings: false, wasm: false },
+        microtaskMode: 'afterEvaluate',
       },
     );
     const script = new vm.Script(
-      '(async () => { "use strict";\n' + source + '\n})()',
+      '(async () => { "use strict"; const tools = Object.freeze({' + sdkEntries + '});\n' +
+      source +
+      '\n})()',
       { filename: 'botconnector-ptc.js' },
     );
     const promise = script.runInContext(context, { timeout: 1000 });
-    return withTimeout(Promise.resolve(promise), PTC_TIMEOUT_MS, 'PTC program timed out.');
+    const result = await withTimeout(
+      Promise.resolve(promise),
+      PTC_TIMEOUT_MS,
+      'PTC program timed out.',
+    );
+    return result === undefined ? null : clone(result);
   }
 
   async close() {
