@@ -1185,7 +1185,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       standard: 'Native tools · regular local agent',
       ptc: 'One run_code + generated SDK · multi-step orchestration',
       minimal: 'Small context · run_code only',
-      custom: 'Only this workspace’s selected tools and instructions',
+      custom: 'Creator preset · selected tools + project instructions',
     }[mode] || 'Native tools · regular local agent';
   }
 
@@ -1212,7 +1212,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     $('modeButtonText').textContent =
       active.mode === 'ptc' ? 'PTC mode' :
       active.mode === 'minimal' ? 'Minimal mode' :
-      active.mode === 'custom' ? 'Custom mode' : 'Standard mode';
+      active.mode === 'custom' ? 'Creator mode' : 'Standard mode';
     $('modeButton').title = workspaceModeCopy(active.mode);
     $('permissionSelect').value = active.permission || 'workspace-write';
     $('workspaceHint').textContent =
@@ -3068,7 +3068,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
         : mode === 'minimal'
           ? 'Minimal mode keeps the model-facing tool set to Run Code only.'
           : mode === 'custom'
-            ? 'Custom mode exposes exactly the capabilities selected for this workspace.'
+            ? 'Creator mode exposes exactly the capabilities selected for this workspace.'
             : 'Standard mode exposes selected capabilities as native tools.';
     const count = settings.tools.length;
     $('openTools').querySelector('.toolBtnLabel').textContent =
@@ -3227,7 +3227,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   $('workspaceAdd').onclick = addWorkspace;
   $('workspaceSaveCustom').onclick = async () => {
     await persistWorkspacePatch({ customPrompt: $('workspaceCustomPrompt').value });
-    $('workspaceMessage').textContent = 'Custom mode instructions saved.';
+    $('workspaceMessage').textContent = 'Creator mode instructions saved.';
   };
   document.addEventListener('click', (event) => {
     if (!event.target.closest('.contextSelect')) closeContextMenus();
@@ -3572,8 +3572,8 @@ function localUiHtml({ token, host, port }) {
     <div id="workspaceManagerList"></div>
   </div>
   <div class="card">
-    <h3>Custom mode instructions</h3>
-    <div class="muted">Used only when this workspace is in Custom mode.</div>
+    <h3>Creator mode instructions</h3>
+    <div class="muted">Used only when this workspace is in Creator mode.</div>
     <textarea id="workspaceCustomPrompt" rows="5" placeholder="Project-specific instructions, conventions, or agent rules." style="margin-top:8px"></textarea>
     <button class="btn" id="workspaceSaveCustom" style="margin-top:8px">Save instructions</button>
   </div>
