@@ -737,6 +737,76 @@ svg{display:block}
 .fitBrowse input:focus,.fitBrowse select:focus{outline:none;border-color:color-mix(in srgb,var(--text) 28%,var(--line));box-shadow:0 0 0 3px color-mix(in srgb,var(--text) 5%,transparent)}
 .fitBrowse select{appearance:none;-webkit-appearance:none;padding:0 34px 0 11px}
 .fitSortChevron{position:absolute;right:11px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:11px;pointer-events:none}
+.fitCatalogSticky{
+  position:sticky;top:76px;z-index:4;
+  margin:0 -4px 10px;padding:7px 4px 8px;
+  background:linear-gradient(180deg,color-mix(in srgb,var(--surface) 98%,transparent) 78%,color-mix(in srgb,var(--surface) 92%,transparent));
+  backdrop-filter:blur(14px);
+}
+.fitBrowse{grid-template-columns:minmax(0,1fr) auto 168px}
+.fitFilterField{position:relative}
+.fitFilterButton{min-height:38px;display:inline-flex;align-items:center;gap:7px;padding:0 11px;white-space:nowrap}
+.fitFilterCount{min-width:18px;height:18px;display:inline-grid;place-items:center;border-radius:999px;background:var(--surface-3);font-size:9px;color:var(--text)}
+.fitFilterMenu{
+  position:absolute;right:0;top:calc(100% + 7px);z-index:8;
+  width:min(330px,calc(100vw - 48px));padding:12px;
+  border:1px solid var(--line);border-radius:12px;background:var(--surface);
+  box-shadow:var(--shadow);
+}
+.fitFilterMenuGrid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.fitFilterMenu label{display:grid;gap:5px;color:var(--muted);font-size:10px}
+.fitFilterMenu select{width:100%;min-height:34px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:0 8px;color:var(--text)}
+.fitFilterChecks{display:flex;flex-wrap:wrap;gap:7px 14px;margin-top:11px;padding-top:10px;border-top:1px solid var(--line-soft)}
+.fitFilterChecks label{display:flex;align-items:center;gap:7px;color:var(--text);font-size:10.5px}
+.fitFilterChecks input{width:auto;accent-color:var(--text)}
+.fitFilterFooter{display:flex;justify-content:space-between;align-items:center;margin-top:11px}
+.fitIdentityMeta,.fitTrustMeta,.fitDownloadMeta{color:var(--muted);font-size:10.5px;line-height:1.4}
+.fitIdentityMeta{font-weight:580}
+.fitTrustMeta{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.fitTrustBadge,.fitConfidence{
+  display:inline-flex;align-items:center;min-height:19px;padding:0 6px;border:1px solid var(--line);
+  border-radius:999px;background:var(--surface-2);font-size:9px;font-weight:670;color:var(--muted)
+}
+.fitTrustBadge.official{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 28%,var(--line))}
+.fitConfidence.measured{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 28%,var(--line))}
+.fitDownloadMeta{margin-top:1px}
+.fitRecommendationHint{
+  display:grid;gap:2px;margin:1px 0 2px;padding:8px 9px;border:1px solid color-mix(in srgb,var(--ok) 24%,var(--line));
+  border-radius:9px;background:color-mix(in srgb,var(--ok) 5%,var(--surface-2))
+}
+.fitRecommendationHint strong{font-size:10px;color:var(--text)}
+.fitRecommendationHint span{font-size:9.8px;color:var(--muted);line-height:1.4}
+.fitTopRecommendation{background:linear-gradient(90deg,color-mix(in srgb,var(--ok) 3%,transparent),transparent 45%)}
+.fitDownloadProgress{display:grid;gap:6px;margin-top:2px;padding:8px 9px;border:1px solid var(--line-soft);border-radius:9px;background:var(--surface-2)}
+.fitDownloadProgressTop{display:flex;justify-content:space-between;gap:8px;color:var(--muted);font-size:9.8px}
+.fitProgressTrack{height:5px;border-radius:999px;background:var(--surface-3);overflow:hidden}
+.fitProgressBar{height:100%;width:0;background:var(--text);border-radius:999px;transition:width .2s ease}
+.fitCompareChoice{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:10px;margin-top:2px}
+.fitCompareChoice input{width:auto;accent-color:var(--text)}
+.fitCompareTray{
+  position:sticky;bottom:-1px;z-index:6;display:flex;align-items:center;gap:10px;
+  margin:10px -4px -4px;padding:10px 12px;border:1px solid var(--line);
+  border-radius:12px;background:color-mix(in srgb,var(--surface) 97%,transparent);box-shadow:0 -8px 24px color-mix(in srgb,#000 16%,transparent);backdrop-filter:blur(14px)
+}
+.fitCompareTray .grow{min-width:0}
+.fitCompareNames{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--muted);font-size:10px}
+.fitComparePanel{
+  position:sticky;bottom:58px;z-index:5;margin:10px -4px 0;padding:12px;
+  border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:var(--shadow);
+  max-height:50vh;overflow:auto
+}
+.fitCompareTable{width:100%;border-collapse:collapse;font-size:10px}
+.fitCompareTable th,.fitCompareTable td{padding:8px;border-bottom:1px solid var(--line-soft);vertical-align:top;text-align:left}
+.fitCompareTable th{color:var(--muted);font-weight:650;position:sticky;top:0;background:var(--surface)}
+.fitCompareTable td:first-child{color:var(--muted);width:110px}
+.fitStateBox{display:grid;place-items:center;text-align:center;gap:8px;min-height:190px;padding:28px;color:var(--muted)}
+.fitStateBox strong{font-size:12px;color:var(--text)}
+.fitSkeletonList{display:grid;gap:0}
+.fitSkeleton{padding:15px 2px;border-top:1px solid var(--line-soft)}
+.fitSkeleton:first-child{border-top:0}
+.fitSkeletonLine{height:10px;border-radius:6px;background:linear-gradient(90deg,var(--surface-2),var(--surface-3),var(--surface-2));background-size:220% 100%;animation:fitShimmer 1.2s linear infinite}
+.fitSkeletonLine.short{width:42%;margin-top:8px}.fitSkeletonLine.mid{width:68%;margin-top:8px}
+@keyframes fitShimmer{to{background-position:-220% 0}}
 .deviceFitPanel>.fitSection>.card{margin:0;padding:0 12px;border-radius:14px;background:var(--bg);overflow:hidden}
 .deviceFitPanel .model{
   display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:14px;row-gap:8px;
@@ -782,6 +852,9 @@ svg{display:block}
   .fitGrid{grid-template-columns:repeat(2,minmax(0,1fr))}
   .fitFilters{grid-template-columns:1fr}
   .fitBrowse{grid-template-columns:1fr}
+  .fitCatalogSticky{top:72px}
+  .fitFilterMenu{position:fixed;left:12px;right:12px;top:auto;bottom:12px;width:auto}
+  .fitFilterMenuGrid{grid-template-columns:1fr}
   .deviceFitPanel .model{grid-template-columns:minmax(0,1fr)}
   .deviceFitPanel .model>.fit{grid-column:1;grid-row:auto;justify-self:start}
   .deviceFitPanel .modelActions{grid-column:1;grid-row:auto;flex-direction:row;min-width:0}
@@ -929,6 +1002,21 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     benchmarkStop: false,
     benchmarkProgress: null,
     loading: false,
+    error: '',
+    details: {},
+    detailLoading: {},
+    downloads: {},
+    compare: [],
+    compareOpen: false,
+    filtersOpen: false,
+    filters: {
+      maxSizeGb: '',
+      minContext: '',
+      quant: '',
+      publisher: '',
+      installedOnly: false,
+      benchmarkedOnly: false,
+    },
   };
   let fitSearchTimer = 0;
   let webAppStatus = { paired: false, connection: 'DISCONNECTED', origin: 'https://app.botconnector.id' };
@@ -2368,8 +2456,8 @@ function localUiHtml({ token, host, port }) {
     <div class="fitHardwareShell">
       <div class="fitGrid">
         <div class="fitMetric"><span>Processor</span><strong id="fitCpu">Checking…</strong></div>
-        <div class="fitMetric"><span>Memory</span><strong id="fitRam">Checking…</strong></div>
-        <div class="fitMetric"><span>Graphics</span><strong id="fitGpu">Checking…</strong><div class="fitMetricSub">VRAM · <strong id="fitVram">Checking…</strong></div></div>
+        <div class="fitMetric"><span>Memory</span><strong id="fitRam">Checking…</strong><div class="fitMetricSub" id="fitRamAvailable">Checking available memory…</div></div>
+        <div class="fitMetric"><span>Graphics</span><strong id="fitGpu">Checking…</strong><div class="fitMetricSub">GPU memory · <strong id="fitVram">Checking…</strong></div></div>
         <div class="fitMetric"><span>Accelerator</span><strong id="fitNpu">Checking…</strong></div>
       </div>
       <div class="fitHardwareMeta">
@@ -2410,35 +2498,86 @@ function localUiHtml({ token, host, port }) {
   </section>
 
   <section class="fitSection">
-    <div class="fitTabs" role="tablist" aria-label="Device fit model views">
-      <button class="fitTab active" id="fitTabRecommended" data-fit-view="recommended" role="tab"><span>Recommended</span><span class="fitTabCount" id="fitTabRecommendedCount">0</span></button>
-      <button class="fitTab" id="fitTabInstalled" data-fit-view="installed" role="tab"><span>Installed</span><span class="fitTabCount" id="fitTabInstalledCount">0</span></button>
-      <button class="fitTab" id="fitTabAll" data-fit-view="all" role="tab"><span>All compatible</span><span class="fitTabCount" id="fitTabAllCount">0</span></button>
-    </div>
-    <div class="fitActionBar">
-      <div class="muted fitViewLead" id="fitViewLead">Ranked for this hardware, selected capabilities, and preference.</div>
-      <div class="row">
-        <button class="btn small" id="fitBenchmarkAll" hidden>Benchmark all</button>
-        <button class="btn small" id="fitBenchmarkStop" hidden>Stop</button>
+    <div class="fitCatalogSticky">
+      <div class="fitTabs" role="tablist" aria-label="Device fit model views">
+        <button class="fitTab active" id="fitTabRecommended" data-fit-view="recommended" role="tab"><span>Recommended</span><span class="fitTabCount" id="fitTabRecommendedCount">0</span></button>
+        <button class="fitTab" id="fitTabInstalled" data-fit-view="installed" role="tab"><span>Installed</span><span class="fitTabCount" id="fitTabInstalledCount">0</span></button>
+        <button class="fitTab" id="fitTabAll" data-fit-view="all" role="tab"><span>All compatible</span><span class="fitTabCount" id="fitTabAllCount">0</span></button>
       </div>
-    </div>
-    <div class="muted fitBenchmarkStatus" id="fitBenchmarkStatus"></div>
-    <div class="fitBrowse">
-      <div class="fitSearchField">
-        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-        <input id="fitSearch" placeholder="Search model, capability, or family">
+      <div class="fitActionBar">
+        <div class="muted fitViewLead" id="fitViewLead">Ranked for this hardware, selected capabilities, and preference.</div>
+        <div class="row">
+          <button class="btn small" id="fitBenchmarkAll" hidden>Benchmark all</button>
+          <button class="btn small" id="fitBenchmarkStop" hidden>Stop</button>
+        </div>
       </div>
-      <div class="fitSortField">
-        <select id="fitSort" aria-label="Sort models">
-          <option value="best">Best fit</option>
-          <option value="smallest">Smallest first</option>
-          <option value="popular">Most popular</option>
-          <option value="name">Name</option>
-        </select>
-        <span class="fitSortChevron">⌄</span>
+      <div class="muted fitBenchmarkStatus" id="fitBenchmarkStatus"></div>
+      <div class="fitBrowse">
+        <div class="fitSearchField">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input id="fitSearch" placeholder="Search model, capability, or family">
+        </div>
+        <div class="fitFilterField">
+          <button class="btn fitFilterButton" type="button" id="fitFiltersBtn">Filters <span class="fitFilterCount" id="fitFilterCount" hidden>0</span></button>
+          <div class="fitFilterMenu" id="fitFilterMenu" hidden>
+            <div class="fitFilterMenuGrid">
+              <label>Model size
+                <select id="fitFilterSize">
+                  <option value="">Any size</option>
+                  <option value="4">Up to 4 GB</option>
+                  <option value="8">Up to 8 GB</option>
+                  <option value="16">Up to 16 GB</option>
+                </select>
+              </label>
+              <label>Context
+                <select id="fitFilterContext">
+                  <option value="">Any context</option>
+                  <option value="8192">8K+</option>
+                  <option value="32768">32K+</option>
+                  <option value="131072">128K+</option>
+                </select>
+              </label>
+              <label>Quantization
+                <select id="fitFilterQuant">
+                  <option value="">Any quantization</option>
+                  <option value="Q4_K_M">Q4_K_M</option>
+                  <option value="Q5_K_M">Q5_K_M</option>
+                  <option value="Q8_0">Q8_0</option>
+                </select>
+              </label>
+              <label>Publisher
+                <select id="fitFilterPublisher">
+                  <option value="">Any publisher</option>
+                  <option value="official">Official publisher</option>
+                  <option value="community">Community</option>
+                </select>
+              </label>
+            </div>
+            <div class="fitFilterChecks">
+              <label><input type="checkbox" id="fitFilterInstalled"> Installed only</label>
+              <label><input type="checkbox" id="fitFilterBenchmarked"> Benchmarked only</label>
+            </div>
+            <div class="fitFilterFooter"><span class="muted">Filters apply locally.</span><button class="btn small" id="fitFiltersClear" type="button">Clear filters</button></div>
+          </div>
+        </div>
+        <div class="fitSortField">
+          <select id="fitSort" aria-label="Sort models">
+            <option value="best">Best fit</option>
+            <option value="smallest">Smallest first</option>
+            <option value="popular">Most popular</option>
+            <option value="name">Name</option>
+          </select>
+          <span class="fitSortChevron">⌄</span>
+        </div>
       </div>
     </div>
     <div class="card"><div id="fitModels"></div></div>
+    <div class="fitComparePanel" id="fitComparePanel" hidden></div>
+    <div class="fitCompareTray" id="fitCompareTray" hidden>
+      <div class="grow"><strong id="fitCompareTitle">Compare models</strong><div class="fitCompareNames" id="fitCompareNames"></div></div>
+      <button class="btn small" id="fitCompareClear" type="button">Clear</button>
+      <button class="btn small primary" id="fitCompareOpen" type="button">Compare</button>
+    </div>
   </section>
 </aside>
 <aside class="panel" id="toolsPanel">
