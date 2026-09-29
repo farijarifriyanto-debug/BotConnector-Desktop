@@ -512,6 +512,32 @@ svg{display:block}
 }
 .send:hover{background:color-mix(in srgb,var(--accent) 84%,var(--muted));color:var(--accent-text)}
 .hint{font-size:10.5px;color:var(--muted-2);text-align:center;margin-top:7px}
+.agentContext{display:flex;align-items:center;gap:6px;position:relative;padding:0 4px 5px}
+.contextPicker{position:relative;min-width:0}
+.contextTrigger{min-height:31px;max-width:280px;display:inline-flex;align-items:center;gap:7px;border:0;background:transparent;color:var(--muted);border-radius:9px;padding:0 8px;font-size:11px;font-weight:650;cursor:pointer}
+.contextTrigger:hover,.contextTrigger.open{background:var(--surface-2);color:var(--text)}
+.contextTrigger .contextIcon{width:15px;height:15px;display:grid;place-items:center;color:var(--muted)}
+.contextTrigger .contextLabel{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.contextChevron{font-size:10px;color:var(--muted-2)}
+.contextMenu{position:absolute;left:0;bottom:calc(100% + 7px);z-index:15;width:min(360px,calc(100vw - 36px));padding:6px;border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:var(--shadow)}
+.contextMenu.modeMenu{width:min(390px,calc(100vw - 36px))}
+.contextMenu[hidden]{display:none}
+.contextMenuTitle{padding:7px 8px 5px;color:var(--muted-2);font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em}
+.contextOption{width:100%;border:0;background:transparent;color:var(--text);border-radius:9px;padding:9px 10px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;text-align:left;cursor:pointer}
+.contextOption:hover,.contextOption.active{background:var(--surface-2)}
+.contextOption strong{font-size:11.5px;font-weight:680}
+.contextOption span{display:block;margin-top:2px;color:var(--muted);font-size:10px;line-height:1.35}
+.contextOption .check{align-self:center;color:var(--text);font-size:12px}
+.contextDivider{height:1px;background:var(--line-soft);margin:5px 4px}
+.contextAction{width:100%;border:0;background:transparent;color:var(--muted);padding:8px 10px;border-radius:9px;text-align:left;font-size:11px}
+.contextAction:hover{background:var(--surface-2);color:var(--text)}
+.permissionSelect{min-height:30px;border:0;background:transparent;color:var(--muted);padding:0 7px;border-radius:8px;font-size:10.5px;font-weight:620;outline:none}
+.permissionSelect:hover{background:var(--surface-2);color:var(--text)}
+.sessionModeHint{margin-left:auto;color:var(--muted-2);font-size:9.5px;white-space:nowrap}
+.workspacePath{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}
+.workspaceRow{display:flex;gap:8px;align-items:center;padding:9px 0;border-top:1px solid var(--line-soft)}
+.workspaceRow:first-child{border-top:0}.workspaceRow .grow{min-width:0}.workspaceRow strong{display:block;font-size:11.5px}.workspaceRow .muted{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:700px){.agentContext{flex-wrap:wrap}.contextTrigger{max-width:190px}.sessionModeHint{display:none}}
 .attachments{display:flex;flex-wrap:wrap;gap:6px;padding:0 5px}
 .chip{
   border:1px solid var(--line);
@@ -984,8 +1010,14 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   const save = (key, value) => localStorage.setItem(key, JSON.stringify(value));
 
   let state = load('botconnector-local-chats-v1', { active: null, chats: [] });
-  let settings = load('botconnector-local-settings-v1', { system: '', temperature: 0.7, theme: 'dark', model: '', tools: [] });
+  let settings = load('botconnector-local-settings-v1', {
+    system: '', temperature: 0.7, theme: 'dark', model: '', tools: [],
+    workspaceId: '', agentMode: 'standard', permissionPreset: 'workspace-write'
+  });
   if (!Array.isArray(settings.tools)) settings.tools = [];
+  if (!['standard','ptc','minimal','creator'].includes(settings.agentMode)) settings.agentMode = 'standard';
+  if (!['read-only','workspace-write','full-access'].includes(settings.permissionPreset)) settings.permissionPreset = 'workspace-write';
+  let workspaces = [];
   let models = [];
   let runtimeState = null;
   let hardwareState = {};
@@ -1043,7 +1075,12 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   function ensureChat() {
     let c = activeChat();
     if (c) return c;
-    c = { id: crypto.randomUUID(), title: 'New chat', createdAt: Date.now(), messages: [] };
+    c = {
+      id: crypto.randomUUID(), title: 'New chat', createdAt: Date.now(), messages: [],
+      workspaceId: settings.workspaceId || '',
+      agentMode: settings.agentMode || 'standard',
+      permissionPreset: settings.permissionPreset || 'workspace-write'
+    };
     state.chats.unshift(c);
     state.active = c.id;
     persist();
@@ -1054,6 +1091,44 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     const p = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(p?.error?.message || p?.message || 'HTTP ' + r.status);
     return p;
+  }
+  const activeSessionContext = () => {
+    const chat = activeChat();
+    return {
+      workspaceId: chat?.workspaceId ?? settings.workspaceId ?? '',
+      agentMode: chat?.agentMode ?? settings.agentMode ?? 'standard',
+      permissionPreset: chat?.permissionPreset ?? settings.permissionPreset ?? 'workspace-write',
+    };
+  };
+  const activeWorkspace = () => {
+    const id = activeSessionContext().workspaceId;
+    return workspaces.find((item) => item.id === id) || null;
+  };
+  const MODE_COPY = {
+    standard: ['Standard mode', 'Native workspace + selected tools for normal work.'],
+    ptc: ['PTC mode', 'One multi-step tool program surface for orchestration.'],
+    minimal: ['Minimal mode', 'Small read-focused tool surface for local models.'],
+    creator: ['Creator mode', 'Expanded tool surface for building and debugging workflows.'],
+  };
+  function updateSessionContext(key, value) {
+    const chat = ensureChat();
+    if (chat.messages.length) {
+      const next = {
+        id: crypto.randomUUID(), title: 'New chat', createdAt: Date.now(), messages: [],
+        workspaceId: chat.workspaceId ?? settings.workspaceId ?? '',
+        agentMode: chat.agentMode ?? settings.agentMode ?? 'standard',
+        permissionPreset: chat.permissionPreset ?? settings.permissionPreset ?? 'workspace-write',
+        [key]: value,
+      };
+      state.chats.unshift(next);
+      state.active = next.id;
+    } else {
+      chat[key] = value;
+    }
+    settings[key] = value;
+    persistSettings();
+    persist();
+    renderAll();
   }
   const selectedModel = () => models.find((m) => m.path === $('modelSelect').value) || null;
   function friendlyModelName(model) {
@@ -1154,6 +1229,81 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   }
 
   // ---- rendering ----
+  function closeContextMenus() {
+    $('workspaceMenu').hidden = true;
+    $('modeMenu').hidden = true;
+    $('workspaceTrigger').classList.remove('open');
+    $('modeTrigger').classList.remove('open');
+  }
+
+  function renderAgentContext() {
+    const ctx = activeSessionContext();
+    const workspace = activeWorkspace();
+    $('workspaceLabel').textContent = workspace ? workspace.name : 'Choose workspace';
+    $('workspaceTrigger').title = workspace?.root || 'Select a folder workspace';
+    const modeCopy = MODE_COPY[ctx.agentMode] || MODE_COPY.standard;
+    $('modeLabel').textContent = modeCopy[0];
+    $('modeTrigger').title = modeCopy[1];
+    $('permissionPreset').value = ctx.permissionPreset;
+    $('sessionModeHint').textContent = workspace ? workspace.name + ' · ' + ctx.permissionPreset.replace('-', ' ') : modeCopy[1];
+
+    const menu = $('workspaceMenu');
+    menu.innerHTML = '<div class="contextMenuTitle">Workspaces</div>' +
+      (workspaces.length ? workspaces.map((item) =>
+        '<button class="contextOption' + (item.id === ctx.workspaceId ? ' active' : '') + '" data-workspace-id="' + esc(item.id) + '">' +
+          '<span><strong>' + esc(item.name) + '</strong><span>' + esc(item.root) + '</span></span>' +
+          '<span class="check">' + (item.id === ctx.workspaceId ? '✓' : '') + '</span></button>'
+      ).join('') : '<div class="muted" style="padding:8px 10px">No workspace yet.</div>') +
+      '<div class="contextDivider"></div><button class="contextAction" id="addWorkspaceAction">＋ Add workspace…</button><button class="contextAction" id="manageWorkspaceAction">Manage workspaces</button>';
+
+    for (const button of menu.querySelectorAll('[data-workspace-id]')) {
+      button.onclick = () => { updateSessionContext('workspaceId', button.dataset.workspaceId || ''); closeContextMenus(); };
+    }
+    $('addWorkspaceAction').onclick = () => { closeContextMenus(); open('workspacePanel'); };
+    $('manageWorkspaceAction').onclick = () => { closeContextMenus(); renderWorkspaceManager(); open('workspacePanel'); };
+    for (const button of document.querySelectorAll('[data-agent-mode]')) {
+      const active = button.dataset.agentMode === ctx.agentMode;
+      button.classList.toggle('active', active);
+      const check = button.querySelector('.check');
+      if (check) check.textContent = active ? '✓' : '';
+    }
+  }
+
+  function renderWorkspaceManager() {
+    const box = $('workspaceRows');
+    if (!workspaces.length) {
+      box.innerHTML = '<div class="muted">No workspaces configured yet.</div>';
+      return;
+    }
+    box.innerHTML = workspaces.map((item) =>
+      '<div class="workspaceRow"><div class="grow"><strong>' + esc(item.name) + '</strong><div class="muted workspacePath">' + esc(item.root) + '</div></div><button class="btn small" data-remove-workspace="' + esc(item.id) + '">Remove</button></div>'
+    ).join('');
+    for (const button of box.querySelectorAll('[data-remove-workspace]')) {
+      button.onclick = async () => {
+        const id = button.dataset.removeWorkspace;
+        const item = workspaces.find((row) => row.id === id);
+        if (!item || !confirm('Remove workspace "' + item.name + '"? Files will not be deleted.')) return;
+        await api('/api/workspaces/remove', { method: 'POST', body: JSON.stringify({ id }) });
+        if (settings.workspaceId === id) settings.workspaceId = '';
+        for (const chat of state.chats) if (chat.workspaceId === id) chat.workspaceId = '';
+        persistSettings(); persist();
+        await loadWorkspaces();
+        renderWorkspaceManager();
+      };
+    }
+  }
+
+  async function loadWorkspaces() {
+    try {
+      const payload = await api('/api/workspaces');
+      workspaces = Array.isArray(payload.workspaces) ? payload.workspaces : [];
+      if (settings.workspaceId && !workspaces.some((item) => item.id === settings.workspaceId)) settings.workspaceId = '';
+    } catch {
+      workspaces = [];
+    }
+    renderAgentContext();
+  }
+
   function renderHistory() {
     const box = $('history');
     box.innerHTML = '';
@@ -1165,7 +1315,17 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       row.innerHTML = '<button class="title"></button><button class="mini rename" title="Rename chat" aria-label="Rename chat">' + iconSvg('edit') + '</button><button class="mini" title="Delete chat" aria-label="Delete chat">' + iconSvg('trash') + '</button>';
       const [title, rename, del] = row.querySelectorAll('button');
       title.textContent = c.title || 'New chat';
-      title.onclick = () => { state.active = c.id; attachments = []; persist(); renderAll(); close(); };
+      title.onclick = () => {
+        state.active = c.id;
+        attachments = [];
+        settings.workspaceId = c.workspaceId ?? settings.workspaceId ?? '';
+        settings.agentMode = c.agentMode ?? settings.agentMode ?? 'standard';
+        settings.permissionPreset = c.permissionPreset ?? settings.permissionPreset ?? 'workspace-write';
+        persistSettings();
+        persist();
+        renderAll();
+        close();
+      };
       rename.onclick = () => {
         const name = prompt('Chat name', c.title);
         if (name && name.trim()) { c.title = name.trim().slice(0, 80); persist(); renderHistory(); }
@@ -1286,7 +1446,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     button.disabled = !streaming && !$('prompt').value.trim();
   }
 
-  function renderAll() { renderHistory(); renderChat(); renderAttachments(); renderComposer(); }
+  function renderAll() { renderHistory(); renderChat(); renderAttachments(); renderComposer(); renderAgentContext(); }
 
   // ---- chat ----
   async function run(chat) {
@@ -1299,6 +1459,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     const requestId = crypto.randomUUID();
     streaming = { requestId, controller: new AbortController(), chatId: chat.id, message };
     const documentIds = attachments.map((a) => a.id);
+    const sessionContext = activeSessionContext();
     const selectedTools = [...new Set(settings.tools.map(String).filter(Boolean))].slice(0, 24);
     const approvedForTurn = [...approvedOnce].filter((id) => selectedTools.includes(id));
     approvedOnce = new Set();
@@ -1314,7 +1475,10 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
         signal: streaming.controller.signal,
         body: JSON.stringify({
           model: model.id, runtime: model.runtime, stream: true, request_id: requestId, document_ids: documentIds,
-          tool_mode: selectedTools.length ? 'auto' : 'none', tools: selectedTools, approved_tools: approvedForTurn,
+          workspace_id: sessionContext.workspaceId,
+          agent_mode: sessionContext.agentMode,
+          permission_preset: sessionContext.permissionPreset,
+          tool_mode: 'auto', tools: selectedTools, approved_tools: approvedForTurn,
           options: { temperature: Number(settings.temperature) }, messages: [...system, ...history],
         }),
       });
@@ -2864,6 +3028,44 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     if (document.visibilityState === 'visible' && !streaming) refresh().catch(() => {});
   });
   for (const b of document.querySelectorAll('[data-close]')) b.onclick = close;
+  $('workspaceTrigger').onclick = (event) => {
+    event.stopPropagation();
+    const show = $('workspaceMenu').hidden;
+    closeContextMenus();
+    $('workspaceMenu').hidden = !show;
+    $('workspaceTrigger').classList.toggle('open', show);
+  };
+  $('modeTrigger').onclick = (event) => {
+    event.stopPropagation();
+    const show = $('modeMenu').hidden;
+    closeContextMenus();
+    $('modeMenu').hidden = !show;
+    $('modeTrigger').classList.toggle('open', show);
+  };
+  for (const button of document.querySelectorAll('[data-agent-mode]')) {
+    button.onclick = () => { updateSessionContext('agentMode', button.dataset.agentMode || 'standard'); closeContextMenus(); };
+  }
+  $('permissionPreset').onchange = (event) => updateSessionContext('permissionPreset', event.target.value);
+  $('saveWorkspace').onclick = async () => {
+    const root = $('workspaceRoot').value.trim();
+    const name = $('workspaceName').value.trim();
+    if (!root) return status('workspaceMessage', 'Enter an absolute folder path.', 'danger');
+    $('saveWorkspace').disabled = true;
+    status('workspaceMessage', 'Adding workspace…');
+    try {
+      const payload = await api('/api/workspaces/add', { method: 'POST', body: JSON.stringify({ root, name }) });
+      $('workspaceRoot').value = ''; $('workspaceName').value = '';
+      await loadWorkspaces();
+      if (payload.workspace?.id) updateSessionContext('workspaceId', payload.workspace.id);
+      renderWorkspaceManager();
+      status('workspaceMessage', 'Workspace added.', 'oktext');
+    } catch (error) {
+      status('workspaceMessage', String(error.message || error), 'danger');
+    } finally {
+      $('saveWorkspace').disabled = false;
+    }
+  };
+  document.addEventListener('click', (event) => { if (!event.target.closest('.contextPicker')) closeContextMenus(); });
   $('themeBtn').onclick = () => { settings.theme = settings.theme === 'light' ? 'dark' : 'light'; persistSettings(); applySettings(); };
   $('system').oninput = (e) => { settings.system = e.target.value; persistSettings(); };
   $('temperature').oninput = (e) => { settings.temperature = Number(e.target.value); $('tempValue').textContent = settings.temperature.toFixed(1); persistSettings(); };
@@ -2898,6 +3100,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   renderAll();
   refresh();
   loadTools();
+  loadWorkspaces();
   loadWebAppStatus();
   setInterval(loadWebAppStatus, 4000);
   loadFromDisk();
