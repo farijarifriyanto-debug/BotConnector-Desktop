@@ -448,6 +448,95 @@ svg{display:block}
 .error{color:var(--danger)}
 .cursor::after{content:"";display:inline-block;width:2px;height:1em;margin-left:3px;vertical-align:-2px;background:var(--text);animation:blink 1s steps(2) infinite}
 @keyframes blink{50%{opacity:0}}
+.contextStrip{
+  display:flex;
+  align-items:center;
+  gap:7px;
+  max-width:820px;
+  margin:0 auto 8px;
+  padding:0 2px;
+}
+.contextSelect{position:relative;min-width:0}
+.contextButton{
+  max-width:310px;
+  min-height:32px;
+  border:1px solid var(--line);
+  background:color-mix(in srgb,var(--surface) 92%,transparent);
+  color:var(--muted);
+  border-radius:10px;
+  padding:0 10px;
+  display:flex;
+  align-items:center;
+  gap:7px;
+  font-size:11px;
+  font-weight:650;
+  white-space:nowrap;
+  overflow:hidden;
+}
+.contextButton:hover,.contextButton.active{background:var(--surface-2);color:var(--text)}
+.contextButton .contextText{overflow:hidden;text-overflow:ellipsis}
+.contextButton .chev{color:var(--muted-2);font-size:10px}
+.contextMenu{
+  position:absolute;
+  left:0;
+  bottom:calc(100% + 7px);
+  width:min(360px,calc(100vw - 28px));
+  max-height:420px;
+  overflow:auto;
+  border:1px solid var(--line);
+  border-radius:12px;
+  background:var(--surface);
+  box-shadow:var(--shadow);
+  padding:6px;
+  display:none;
+  z-index:15;
+}
+.contextMenu.open{display:block}
+.contextMenuTitle{padding:7px 8px 5px;color:var(--muted-2);font-size:9.5px;font-weight:750;letter-spacing:.07em;text-transform:uppercase}
+.contextOption{
+  width:100%;
+  border:0;
+  background:transparent;
+  color:var(--text);
+  border-radius:9px;
+  padding:9px 10px;
+  text-align:left;
+  display:grid;
+  gap:2px;
+}
+.contextOption:hover,.contextOption.active{background:var(--surface-2)}
+.contextOptionTop{display:flex;align-items:center;gap:8px;font-size:11.5px;font-weight:650}
+.contextOptionTop .check{margin-left:auto;color:var(--ok)}
+.contextOptionDesc{color:var(--muted);font-size:10.5px;line-height:1.35}
+.contextDivider{height:1px;background:var(--line-soft);margin:5px 2px}
+.permissionSelect{
+  width:auto;
+  max-width:170px;
+  min-height:34px;
+  border:1px solid var(--line);
+  background:transparent;
+  border-radius:9px;
+  padding:0 28px 0 9px;
+  color:var(--muted);
+  font-size:10.5px;
+  font-weight:650;
+}
+.permissionSelect:hover{background:var(--surface-2);color:var(--text)}
+.workspaceSide{padding:0 8px 8px;display:grid;gap:2px;max-height:180px;overflow:auto}
+.workspaceSideItem{
+  border:0;background:transparent;color:var(--muted);border-radius:8px;
+  min-height:34px;padding:7px 9px;text-align:left;display:flex;align-items:center;gap:8px;font-size:11px
+}
+.workspaceSideItem:hover,.workspaceSideItem.active{background:var(--surface-2);color:var(--text)}
+.workspaceSideItem .folder{font-size:13px}.workspaceSideItem .workspaceSideName{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sideSectionRow{display:flex;align-items:center;justify-content:space-between}
+.sideSectionAction{border:0;background:transparent;color:var(--muted-2);width:24px;height:24px;border-radius:7px;padding:0;font-size:16px}
+.sideSectionAction:hover{background:var(--surface-2);color:var(--text)}
+.workspaceManagerItem{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:9px 0;border-top:1px solid var(--line-soft)}
+.workspaceManagerItem:first-child{border-top:0}
+.workspaceManagerName{font-size:11.5px;font-weight:650}
+.workspaceManagerPath{margin-top:2px;color:var(--muted);font-size:10px;overflow-wrap:anywhere}
+.modeSummary{font-size:10px;color:var(--muted-2);margin-left:auto;white-space:nowrap}
 .composerWrap{
   position:absolute;
   left:0;right:0;bottom:0;
@@ -925,6 +1014,9 @@ svg{display:block}
 .mobileMenu{display:none}
 @media(max-width:760px){
   body{overflow:hidden}
+  .contextStrip{padding:0 2px;gap:5px}
+  .contextButton{max-width:48vw}
+  .permissionSelect{max-width:128px}
   .app{grid-template-columns:1fr}
   .sidebar{
     position:fixed;
@@ -986,6 +1078,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   let state = load('botconnector-local-chats-v1', { active: null, chats: [] });
   let settings = load('botconnector-local-settings-v1', { system: '', temperature: 0.7, theme: 'dark', model: '', tools: [] });
   if (!Array.isArray(settings.tools)) settings.tools = [];
+  let workspaceState = { active: null, workspaces: [] };
   let models = [];
   let runtimeState = null;
   let hardwareState = {};
@@ -1039,11 +1132,23 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     }, 400);
   };
   const persist = () => { save('botconnector-local-chats-v1', state); saveToDisk(); };
-  const activeChat = () => state.chats.find((c) => c.id === state.active) || null;
+  const activeWorkspace = () => workspaceState.active || workspaceState.workspaces[0] || null;
+  const activeChat = () => {
+    const workspaceId = activeWorkspace()?.id || '';
+    return state.chats.find(
+      (chat) => chat.id === state.active && (!workspaceId || chat.workspaceId === workspaceId),
+    ) || null;
+  };
   function ensureChat() {
     let c = activeChat();
     if (c) return c;
-    c = { id: crypto.randomUUID(), title: 'New chat', createdAt: Date.now(), messages: [] };
+    c = {
+      id: crypto.randomUUID(),
+      title: 'New chat',
+      createdAt: Date.now(),
+      workspaceId: activeWorkspace()?.id || '',
+      messages: [],
+    };
     state.chats.unshift(c);
     state.active = c.id;
     persist();
@@ -1055,6 +1160,234 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     if (!r.ok) throw new Error(p?.error?.message || p?.message || 'HTTP ' + r.status);
     return p;
   }
+  async function persistWorkspacePatch(patch) {
+    const active = activeWorkspace();
+    if (!active) return null;
+    const payload = await api('/api/workspaces/update', {
+      method: 'POST',
+      body: JSON.stringify({ id: active.id, patch }),
+    });
+    workspaceState.active = payload.active || payload.workspace || active;
+    workspaceState.workspaces = Array.isArray(payload.workspaces)
+      ? payload.workspaces
+      : workspaceState.workspaces.map((row) =>
+          row.id === workspaceState.active.id ? workspaceState.active : row
+        );
+    if ('tools' in patch) settings.tools = [...(workspaceState.active.tools || [])];
+    if ('modelPath' in patch) settings.model = workspaceState.active.modelPath || '';
+    renderWorkspaceUI();
+    persistSettings();
+    return workspaceState.active;
+  }
+
+  function workspaceModeCopy(mode) {
+    return {
+      standard: 'Native tools · regular local agent',
+      ptc: 'One run_code + generated SDK · multi-step orchestration',
+      minimal: 'Small context · run_code only',
+      custom: 'Only this workspace’s selected tools and instructions',
+    }[mode] || 'Native tools · regular local agent';
+  }
+
+  function permissionLabel(value) {
+    return {
+      'read-only': 'Read only',
+      'workspace-write': 'Workspace write',
+      'full-access': 'Full access',
+    }[value] || 'Workspace write';
+  }
+
+  function closeContextMenus() {
+    $('workspaceMenu')?.classList.remove('open');
+    $('modeMenu')?.classList.remove('open');
+    $('workspaceButton')?.classList.remove('active');
+    $('modeButton')?.classList.remove('active');
+  }
+
+  function renderWorkspaceUI() {
+    const active = activeWorkspace();
+    if (!active) return;
+    $('workspaceButtonText').textContent = active.name;
+    $('workspaceButton').title = active.path;
+    $('modeButtonText').textContent =
+      active.mode === 'ptc' ? 'PTC mode' :
+      active.mode === 'minimal' ? 'Minimal mode' :
+      active.mode === 'custom' ? 'Custom mode' : 'Standard mode';
+    $('modeButton').title = workspaceModeCopy(active.mode);
+    $('permissionSelect').value = active.permission || 'workspace-write';
+    $('workspaceHint').textContent =
+      active.name + ' · ' + workspaceModeCopy(active.mode) + ' · ' + permissionLabel(active.permission);
+
+    const workspaceMenu = $('workspaceMenu');
+    workspaceMenu.innerHTML = '<div class="contextMenuTitle">Workspaces</div>';
+    for (const item of workspaceState.workspaces) {
+      const button = document.createElement('button');
+      button.className = 'contextOption' + (item.id === active.id ? ' active' : '');
+      button.innerHTML =
+        '<div class="contextOptionTop"><span>▱</span><span class="contextText"></span><span class="check"></span></div>' +
+        '<div class="contextOptionDesc"></div>';
+      button.querySelector('.contextText').textContent = item.name;
+      button.querySelector('.contextOptionDesc').textContent = item.path;
+      button.querySelector('.check').textContent = item.id === active.id ? '✓' : '';
+      button.onclick = () => selectWorkspace(item.id);
+      workspaceMenu.appendChild(button);
+    }
+    const divider = document.createElement('div');
+    divider.className = 'contextDivider';
+    workspaceMenu.appendChild(divider);
+    const manage = document.createElement('button');
+    manage.className = 'contextOption';
+    manage.innerHTML = '<div class="contextOptionTop"><span>＋</span><span>Manage workspaces…</span></div>';
+    manage.onclick = () => { closeContextMenus(); renderWorkspaceManager(); open('workspacePanel'); };
+    workspaceMenu.appendChild(manage);
+
+    for (const button of document.querySelectorAll('[data-workspace-mode]')) {
+      const mode = button.dataset.workspaceMode;
+      button.classList.toggle('active', mode === active.mode);
+      const check = button.querySelector('.check');
+      if (check) check.textContent = mode === active.mode ? '✓' : '';
+    }
+
+    const side = $('workspaceSide');
+    side.innerHTML = '';
+    for (const item of workspaceState.workspaces) {
+      const button = document.createElement('button');
+      button.className = 'workspaceSideItem' + (item.id === active.id ? ' active' : '');
+      button.innerHTML = '<span class="folder">▱</span><span class="workspaceSideName"></span>';
+      button.querySelector('.workspaceSideName').textContent = item.name;
+      button.title = item.path;
+      button.onclick = () => selectWorkspace(item.id);
+      side.appendChild(button);
+    }
+
+    $('workspaceCustomPrompt').value = active.customPrompt || '';
+    $('workspaceActiveName').textContent = active.name;
+    $('workspaceActivePath').textContent = active.path;
+    $('workspaceModeSummary').textContent = workspaceModeCopy(active.mode);
+  }
+
+  async function loadWorkspaces() {
+    const payload = await api('/api/workspaces');
+    workspaceState = {
+      active: payload.active || null,
+      workspaces: Array.isArray(payload.workspaces) ? payload.workspaces : [],
+    };
+    const active = activeWorkspace();
+    if (active) {
+      settings.tools = Array.isArray(active.tools) ? [...active.tools] : [];
+      if (active.modelPath) settings.model = active.modelPath;
+      for (const chat of state.chats) {
+        if (!chat.workspaceId) chat.workspaceId = active.id;
+      }
+      const current = state.chats.find((chat) => chat.id === state.active);
+      if (!current || current.workspaceId !== active.id) {
+        state.active = state.chats.find((chat) => chat.workspaceId === active.id)?.id || null;
+      }
+    }
+    renderWorkspaceUI();
+  }
+
+  async function selectWorkspace(id) {
+    if (streaming) return;
+    const payload = await api('/api/workspaces/select', {
+      method: 'POST',
+      body: JSON.stringify({ id }),
+    });
+    workspaceState = {
+      active: payload.active || null,
+      workspaces: Array.isArray(payload.workspaces) ? payload.workspaces : workspaceState.workspaces,
+    };
+    const active = activeWorkspace();
+    settings.tools = Array.isArray(active?.tools) ? [...active.tools] : [];
+    settings.model = active?.modelPath || settings.model;
+    state.active = state.chats.find((chat) => chat.workspaceId === active?.id)?.id || null;
+    ensureChat();
+    persist();
+    closeContextMenus();
+    renderWorkspaceUI();
+    renderAll();
+    await Promise.all([refresh().catch(() => {}), loadTools().catch(() => {})]);
+  }
+
+  async function addWorkspace() {
+    const workspacePath = $('workspacePath').value.trim();
+    const name = $('workspaceName').value.trim();
+    if (!workspacePath) {
+      $('workspaceMessage').textContent = 'Enter an existing local folder path.';
+      return;
+    }
+    $('workspaceAdd').disabled = true;
+    $('workspaceMessage').textContent = 'Adding workspace…';
+    try {
+      const payload = await api('/api/workspaces/add', {
+        method: 'POST',
+        body: JSON.stringify({ path: workspacePath, name }),
+      });
+      workspaceState = {
+        active: payload.active || null,
+        workspaces: Array.isArray(payload.workspaces) ? payload.workspaces : [],
+      };
+      $('workspaceName').value = '';
+      $('workspacePath').value = '';
+      $('workspaceMessage').textContent = 'Workspace added.';
+      settings.tools = [...(workspaceState.active?.tools || [])];
+      settings.model = workspaceState.active?.modelPath || settings.model;
+      state.active = state.chats.find((chat) => chat.workspaceId === workspaceState.active?.id)?.id || null;
+      ensureChat();
+      persist();
+      renderWorkspaceUI();
+      renderWorkspaceManager();
+      renderAll();
+      await refresh().catch(() => {});
+    } catch (error) {
+      $('workspaceMessage').textContent = String(error.message || error);
+    } finally {
+      $('workspaceAdd').disabled = false;
+    }
+  }
+
+  async function removeWorkspace(id) {
+    if (!confirm('Remove this workspace from BotConnector? The folder and chat files are not deleted.')) return;
+    const payload = await api('/api/workspaces/remove', {
+      method: 'POST',
+      body: JSON.stringify({ id }),
+    });
+    workspaceState = {
+      active: payload.active || null,
+      workspaces: Array.isArray(payload.workspaces) ? payload.workspaces : [],
+    };
+    settings.tools = [...(workspaceState.active?.tools || [])];
+    settings.model = workspaceState.active?.modelPath || settings.model;
+    state.active = state.chats.find((chat) => chat.workspaceId === workspaceState.active?.id)?.id || null;
+    ensureChat();
+    persist();
+    renderWorkspaceUI();
+    renderWorkspaceManager();
+    renderAll();
+    await refresh().catch(() => {});
+  }
+
+  function renderWorkspaceManager() {
+    const box = $('workspaceManagerList');
+    if (!box) return;
+    box.innerHTML = '';
+    const active = activeWorkspace();
+    for (const item of workspaceState.workspaces) {
+      const row = document.createElement('div');
+      row.className = 'workspaceManagerItem';
+      row.innerHTML =
+        '<div><div class="workspaceManagerName"></div><div class="workspaceManagerPath"></div></div>' +
+        '<div class="row"><button class="btn small selectWorkspace">Use</button><button class="btn small removeWorkspace">Remove</button></div>';
+      row.querySelector('.workspaceManagerName').textContent =
+        item.name + (item.id === active?.id ? ' · Active' : '');
+      row.querySelector('.workspaceManagerPath').textContent = item.path;
+      row.querySelector('.selectWorkspace').disabled = item.id === active?.id;
+      row.querySelector('.selectWorkspace').onclick = () => selectWorkspace(item.id).then(renderWorkspaceManager);
+      row.querySelector('.removeWorkspace').onclick = () => removeWorkspace(item.id);
+      box.appendChild(row);
+    }
+  }
+
   const selectedModel = () => models.find((m) => m.path === $('modelSelect').value) || null;
   function friendlyModelName(model) {
     const raw = String(model?.name || model?.id || 'Local model');
@@ -1158,7 +1491,9 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     const box = $('history');
     box.innerHTML = '';
     const f = filter.toLowerCase();
+    const workspaceId = activeWorkspace()?.id || '';
     for (const c of state.chats) {
+      if (workspaceId && c.workspaceId !== workspaceId) continue;
       if (f && !String(c.title).toLowerCase().includes(f) && !c.messages.some((m) => String(m.content).toLowerCase().includes(f))) continue;
       const row = document.createElement('div');
       row.className = 'item' + (c.id === state.active ? ' active' : '');
@@ -1460,7 +1795,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       const gpu = [...(h.nvidia || []), ...(h.amd || []), ...(h.intel || [])][0];
       $('hardware').textContent = [h.cpu, h.ramGb ? h.ramGb + ' GB RAM' : '', gpu ? gpu.name : 'no GPU'].filter(Boolean).join(' · ') || 'Unknown';
       const sel = $('modelSelect');
-      const want = sel.value || settings.model;
+      const want = activeWorkspace()?.modelPath || sel.value || settings.model;
       sel.innerHTML = models.length ? '' : '<option value="">No local model — open Models</option>';
       // Embedding and rerank models are listed under Models, but they cannot chat.
       for (const x of models.filter((m) => !/embed|rerank/i.test((m.name || '') + ' ' + (m.id || '')))) {
@@ -2721,12 +3056,25 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
           approvedOnce.delete(tool.id);
         }
         persistSettings();
+        persistWorkspacePatch({ tools: settings.tools }).catch(() => {});
         renderTools();
       };
       box.appendChild(row);
     }
+    const mode = activeWorkspace()?.mode || 'standard';
+    $('toolsModeNote').textContent =
+      mode === 'ptc'
+        ? 'PTC exposes one run_code tool to the model and generates an SDK from these selected capabilities.'
+        : mode === 'minimal'
+          ? 'Minimal mode keeps the model-facing tool set to Run Code only.'
+          : mode === 'custom'
+            ? 'Custom mode exposes exactly the capabilities selected for this workspace.'
+            : 'Standard mode exposes selected capabilities as native tools.';
     const count = settings.tools.length;
-    $('openTools').querySelector('.toolBtnLabel').textContent = count ? 'Tools (' + count + ')' : 'Tools';
+    $('openTools').querySelector('.toolBtnLabel').textContent =
+      mode === 'ptc' ? 'PTC tools (' + count + ')' :
+      mode === 'minimal' ? 'Minimal tools' :
+      count ? 'Tools (' + count + ')' : 'Tools';
     $('openTools').classList.toggle('active', count > 0);
 
     const mcp = $('mcpServers');
@@ -2787,6 +3135,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     $('modelSelect').title = current ? modelDetail(current) : 'Select a local chat model';
     renderModelActions();
     persistSettings();
+    persistWorkspacePatch({ modelPath: settings.model }).catch(() => {});
   };
   $('loadSelected').onclick = () => selectedModelAction('load');
   $('unloadSelected').onclick = () => selectedModelAction('unload');
@@ -2849,6 +3198,40 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     fitSearchTimer = setTimeout(() => loadFitCompatible(fitState.query).then(renderDeviceFitModels).catch(() => renderDeviceFitModels()), 350);
     renderDeviceFitModels();
   };
+  $('workspaceButton').onclick = (event) => {
+    event.stopPropagation();
+    const next = !$('workspaceMenu').classList.contains('open');
+    closeContextMenus();
+    $('workspaceMenu').classList.toggle('open', next);
+    $('workspaceButton').classList.toggle('active', next);
+  };
+  $('modeButton').onclick = (event) => {
+    event.stopPropagation();
+    const next = !$('modeMenu').classList.contains('open');
+    closeContextMenus();
+    $('modeMenu').classList.toggle('open', next);
+    $('modeButton').classList.toggle('active', next);
+  };
+  for (const button of document.querySelectorAll('[data-workspace-mode]')) {
+    button.onclick = async () => {
+      await persistWorkspacePatch({ mode: button.dataset.workspaceMode });
+      closeContextMenus();
+      renderWorkspaceUI();
+      renderTools();
+    };
+  }
+  $('permissionSelect').onchange = async (event) => {
+    await persistWorkspacePatch({ permission: event.target.value });
+  };
+  $('openWorkspaceManager').onclick = () => { renderWorkspaceManager(); open('workspacePanel'); };
+  $('workspaceAdd').onclick = addWorkspace;
+  $('workspaceSaveCustom').onclick = async () => {
+    await persistWorkspacePatch({ customPrompt: $('workspaceCustomPrompt').value });
+    $('workspaceMessage').textContent = 'Custom mode instructions saved.';
+  };
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest('.contextSelect')) closeContextMenus();
+  });
   $('openTools').onclick = () => { open('toolsPanel'); loadTools(); };
   $('openSettings').onclick = () => open('settingsPanel');
   $('openWebApp').onclick = () => { open('webAppPanel'); loadWebAppStatus(); };
@@ -2883,6 +3266,16 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       const merged = mergeChatStates(saved.state, state, pageOpenedAt, streaming && streaming.chatId);
       state = merged.state;
       if (saved.settings) settings = { ...settings, ...saved.settings };
+      const workspace = activeWorkspace();
+      if (workspace) {
+        for (const chat of state.chats) if (!chat.workspaceId) chat.workspaceId = workspace.id;
+        settings.tools = Array.isArray(workspace.tools) ? [...workspace.tools] : [];
+        if (workspace.modelPath) settings.model = workspace.modelPath;
+        const selected = state.chats.find((chat) => chat.id === state.active);
+        if (!selected || selected.workspaceId !== workspace.id) {
+          state.active = state.chats.find((chat) => chat.workspaceId === workspace.id)?.id || null;
+        }
+      }
       save('botconnector-local-chats-v1', state);
       applySettings();
       ensureChat();
@@ -2893,14 +3286,21 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     }
   }
 
-  applySettings();
-  ensureChat();
-  renderAll();
-  refresh();
-  loadTools();
-  loadWebAppStatus();
-  setInterval(loadWebAppStatus, 4000);
-  loadFromDisk();
+  async function bootstrap() {
+    applySettings();
+    try { await loadWorkspaces(); } catch (error) { console.warn('Workspace load failed', error); }
+    ensureChat();
+    renderAll();
+    renderWorkspaceUI();
+    await Promise.all([
+      refresh().catch(() => {}),
+      loadTools().catch(() => {}),
+      loadWebAppStatus().catch(() => {}),
+    ]);
+    setInterval(loadWebAppStatus, 4000);
+    loadFromDisk();
+  }
+  bootstrap();
 }
 
 function localUiHtml({ token, host, port }) {
@@ -2927,6 +3327,8 @@ function localUiHtml({ token, host, port }) {
         <input class="search" id="search" placeholder="Search chats">
       </div>
     </div>
+    <div class="sideSectionLabel sideSectionRow"><span>Workspaces</span><button class="sideSectionAction" id="openWorkspaceManager" title="Manage workspaces">＋</button></div>
+    <div class="workspaceSide" id="workspaceSide"></div>
     <div class="sideSectionLabel">Chats</div>
     <div class="history" id="history"></div>
     <div class="sideBottom">
@@ -2956,17 +3358,39 @@ function localUiHtml({ token, host, port }) {
     </div>
     <div class="chat" id="chat"></div>
     <div class="composerWrap">
+      <div class="contextStrip">
+        <div class="contextSelect">
+          <button class="contextButton" id="workspaceButton" type="button" aria-haspopup="menu" aria-expanded="false"><span>▱</span><span class="contextText" id="workspaceButtonText">Workspace</span><span class="chev">⌄</span></button>
+          <div class="contextMenu" id="workspaceMenu" role="menu"></div>
+        </div>
+        <div class="contextSelect">
+          <button class="contextButton" id="modeButton" type="button" aria-haspopup="menu" aria-expanded="false"><span>⌘</span><span class="contextText" id="modeButtonText">Standard mode</span><span class="chev">⌄</span></button>
+          <div class="contextMenu" id="modeMenu" role="menu">
+            <div class="contextMenuTitle">Agent mode</div>
+            <button class="contextOption" data-workspace-mode="standard" type="button"><div class="contextOptionTop"><span>Standard mode</span><span class="check"></span></div><div class="contextOptionDesc">Native tools, normal local agent behavior, and full chat context.</div></button>
+            <button class="contextOption" data-workspace-mode="ptc" type="button"><div class="contextOptionTop"><span>PTC mode</span><span class="check"></span></div><div class="contextOptionDesc">One run_code tool with a generated SDK for multi-step tool orchestration.</div></button>
+            <button class="contextOption" data-workspace-mode="minimal" type="button"><div class="contextOptionTop"><span>Minimal mode</span><span class="check"></span></div><div class="contextOptionDesc">Small model-facing context and Run Code only when execution is needed.</div></button>
+            <button class="contextOption" data-workspace-mode="custom" type="button"><div class="contextOptionTop"><span>Custom mode</span><span class="check"></span></div><div class="contextOptionDesc">Only this workspace’s selected tools plus its custom instructions.</div></button>
+          </div>
+        </div>
+        <span class="modeSummary" id="workspaceModeSummary"></span>
+      </div>
       <div class="composer" id="composer">
         <div class="attachments" id="attachments"></div>
         <textarea id="prompt" rows="1" placeholder="Message your local model"></textarea>
         <div class="bar">
           <input id="fileInput" type="file" hidden multiple accept=".txt,.md,.markdown,.csv,.json,.jsonl,.yaml,.yml,.xml,.html,.htm,.docx,.js,.ts,.tsx,.jsx,.py,.rs,.go,.java,.c,.cpp,.h,.hpp,.css,.sql,.sh,.ps1,.toml,.ini,.conf,.log">
           <button class="btn" id="attachBtn"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.4 11.6-8.5 8.5a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg><span>Attach</span></button>
+          <select class="permissionSelect" id="permissionSelect" aria-label="Workspace permission">
+            <option value="read-only">Read only</option>
+            <option value="workspace-write">Workspace write</option>
+            <option value="full-access">Full access</option>
+          </select>
           <button class="btn toolBtn" id="openTools"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14.7 6.3 3-3a4.2 4.2 0 0 1-5.5 5.5l-6.7 6.7a2 2 0 1 1-2.8-2.8l6.7-6.7a4.2 4.2 0 0 1 5.5-5.5l-3 3 2.8 2.8Z"/></svg><span class="toolBtnLabel">Tools</span></button>
           <button class="btn send" id="sendBtn" aria-label="Send message"></button>
         </div>
       </div>
-      <div class="hint">Local model inference runs on this device. Optional connected tools run only when selected.</div>
+      <div class="hint" id="workspaceHint">Local model inference runs on this device.</div>
     </div>
   </main>
 </div>
@@ -3128,9 +3552,35 @@ function localUiHtml({ token, host, port }) {
     </div>
   </section>
 </aside>
+<aside class="panel" id="workspacePanel">
+  <div class="panelHead"><div class="row"><div class="grow"><h2>Workspaces</h2><div class="panelLead">Persistent local project roots. Removing a workspace never deletes its folder.</div></div><button class="btn" data-close>Close</button></div></div>
+  <div class="card">
+    <h3>Active workspace</h3>
+    <div id="workspaceActiveName" style="font-weight:700"></div>
+    <div class="muted" id="workspaceActivePath" style="margin-top:4px;overflow-wrap:anywhere"></div>
+  </div>
+  <div class="card">
+    <h3>Add workspace</h3>
+    <div class="muted">Enter an existing folder on this computer. BotConnector stores only its canonical path and workspace settings.</div>
+    <input id="workspaceName" placeholder="Display name (optional)" style="margin-top:9px">
+    <input id="workspacePath" placeholder="C:\Projects\BotConnector or /home/user/project" style="margin-top:7px">
+    <button class="btn" id="workspaceAdd" style="margin-top:8px">Add workspace</button>
+    <div class="muted" id="workspaceMessage" style="margin-top:7px"></div>
+  </div>
+  <div class="card">
+    <h3>Registered workspaces</h3>
+    <div id="workspaceManagerList"></div>
+  </div>
+  <div class="card">
+    <h3>Custom mode instructions</h3>
+    <div class="muted">Used only when this workspace is in Custom mode.</div>
+    <textarea id="workspaceCustomPrompt" rows="5" placeholder="Project-specific instructions, conventions, or agent rules." style="margin-top:8px"></textarea>
+    <button class="btn" id="workspaceSaveCustom" style="margin-top:8px">Save instructions</button>
+  </div>
+</aside>
 <aside class="panel" id="toolsPanel">
   <div class="panelHead"><div class="row"><div class="grow"><h2>Tools</h2><div class="panelLead">Choose capabilities the local model may use.</div></div><button class="btn" data-close>Close</button></div></div>
-  <div class="card"><h3>Available tools</h3><div class="muted">READ tools can run when selected. WRITE and EXECUTE tools also require one-time approval for the next message.</div><div class="toolList" id="toolsList"></div></div>
+  <div class="card"><h3>Available tools</h3><div class="muted" id="toolsModeNote">Standard mode exposes selected capabilities as native tools.</div><div class="muted" style="margin-top:5px">READ tools can run when selected. WRITE and EXECUTE tools require one-time approval unless this workspace uses Full access.</div><div class="toolList" id="toolsList"></div></div>
   <div class="card"><h3>MCP servers</h3><div class="muted">Local MCP servers are loaded from ~/.botconnector-device/mcp.json.</div><div id="mcpServers"></div></div>
 </aside>
 <aside class="panel" id="webAppPanel">
