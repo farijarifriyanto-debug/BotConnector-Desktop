@@ -590,6 +590,7 @@ test('benchmark stores measured local throughput and reuses runtime token timing
       dataDir: root,
       detectHardware: async () => ({ cpu: 'Test CPU', ramGb: 16, nvidia: [{ name: 'Test GPU' }], amd: [], intel: [] }),
     });
+    let unloaded = null;
     runtime.chat = async () => ({
       content: 'benchmark result',
       usage: { prompt_tokens: 12, completion_tokens: 48 },
@@ -601,6 +602,10 @@ test('benchmark stores measured local throughput and reuses runtime token timing
         generation_ms: 1959,
       },
     });
+    runtime.unloadModel = async (model, runtimeName) => {
+      unloaded = { model, runtime: runtimeName };
+      return { loaded: false, model, runtime: runtimeName };
+    };
     const result = await runtime.benchmarkModel('model-1', 'ollama');
     assert.equal(result.tokensPerSecond, 24.5);
     assert.equal(result.source, 'runtime');
@@ -612,11 +617,27 @@ test('benchmark stores measured local throughput and reuses runtime token timing
     assert.equal(result.promptMs, 120);
     assert.equal(result.generationMs, 1959);
     assert.equal(result.hardware.gpu, 'Test GPU');
+    assert.deepEqual(unloaded, { model: 'model-1', runtime: 'ollama' });
 
     const saved = runtime.benchmarkResults().benchmarks;
     assert.equal(saved.length, 1);
     assert.equal(saved[0].model, 'model-1');
     assert.equal(saved[0].runtime, 'ollama');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+
+test('benchmark unloads the model even when inference fails', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bc-benchmark-fail-'));
+  try {
+    const runtime = new LocalAiRuntime({ enabled: true, dataDir: root });
+    let unloaded = false;
+    runtime.chat = async () => { throw new Error('benchmark inference failed'); };
+    runtime.unloadModel = async () => { unloaded = true; return { loaded: false }; };
+    await assert.rejects(runtime.benchmarkModel('model-fail', 'ollama'), /benchmark inference failed/);
+    assert.equal(unloaded, true);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
