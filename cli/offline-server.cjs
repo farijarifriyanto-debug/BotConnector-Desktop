@@ -14,6 +14,7 @@ const { WorkspaceStore } = require('../desktop/local/workspaces.cjs');
 const { recommendModels } = defaultCatalog;
 const { localUiHtml } = require('./local-ui.cjs');
 const { createDocumentStore } = require('./local-documents.cjs');
+const { pickNativeDirectory } = require('./native-folder-picker.cjs');
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 18765;
@@ -332,6 +333,7 @@ async function startOfflineServer({
   tools = null,
   webApp = null,
   workspaces = null,
+  directoryPicker = pickNativeDirectory,
 } = {}) {
   if (!localAi) throw new Error('Local AI runtime is required.');
   if (!detectHardware) throw new Error('Hardware detector is required.');
@@ -499,6 +501,24 @@ async function startOfflineServer({
 
       const body = req.method === 'POST' ? await readJson(req) : {};
 
+      if (req.method === 'POST' && url.pathname === '/api/workspaces/pick') {
+        const selectedPath = await directoryPicker();
+        if (!selectedPath) {
+          sendJson(res, 200, {
+            cancelled: true,
+            active: workspaceStore.active(),
+            workspaces: workspaceStore.list(),
+          });
+          return;
+        }
+        const item = workspaceStore.add({ path: selectedPath });
+        sendJson(res, 201, {
+          cancelled: false,
+          active: item,
+          workspaces: workspaceStore.list(),
+        });
+        return;
+      }
       if (req.method === 'POST' && url.pathname === '/api/workspaces/add') {
         const item = workspaceStore.add({ path: body.path, name: body.name });
         sendJson(res, 201, {
