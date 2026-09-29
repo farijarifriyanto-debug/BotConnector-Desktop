@@ -1552,60 +1552,65 @@ class LocalAiRuntime {
     const benchmarkSeed = 'Local AI should answer quickly while preserving useful context, predictable memory use, and stable tool behavior on the same device.';
     const benchmarkContext = Array.from({ length: 28 }, () => benchmarkSeed).join(' ');
     const started = Date.now();
-    const result = await this.chat({
-      model: modelName,
-      runtime,
-      request_id: 'benchmark-' + crypto.randomUUID(),
-      messages: [{
-        role: 'user',
-        content: benchmarkContext + '\n\nWrite one concise paragraph of about 60 words explaining why local AI latency matters. Do not use a list.',
-      }],
-      options: { temperature: 0, max_tokens: 96, num_ctx: contextTokens, keep_alive: '0' },
-    });
-    const wallMs = Math.max(1, Date.now() - started);
-    const completionTokens = Number(result?.usage?.completion_tokens || result?.usage?.completionTokens || 0);
-    const promptTokens = Number(result?.usage?.prompt_tokens || result?.usage?.promptTokens || 0);
-    const nativeTps = Number(result?.performance?.tokens_per_second || 0);
-    const promptTps = Number(result?.performance?.prompt_tokens_per_second || 0);
-    const tokensPerSecond = nativeTps > 0
-      ? +nativeTps.toFixed(2)
-      : completionTokens > 0
-        ? +(completionTokens / (wallMs / 1000)).toFixed(2)
-        : null;
+    try {
+      const result = await this.chat({
+        model: modelName,
+        runtime,
+        request_id: 'benchmark-' + crypto.randomUUID(),
+        messages: [{
+          role: 'user',
+          content: benchmarkContext + '\n\nWrite one concise paragraph of about 60 words explaining why local AI latency matters. Do not use a list.',
+        }],
+        options: { temperature: 0, max_tokens: 96, num_ctx: contextTokens, keep_alive: '0' },
+      });
+      const wallMs = Math.max(1, Date.now() - started);
+      const completionTokens = Number(result?.usage?.completion_tokens || result?.usage?.completionTokens || 0);
+      const promptTokens = Number(result?.usage?.prompt_tokens || result?.usage?.promptTokens || 0);
+      const nativeTps = Number(result?.performance?.tokens_per_second || 0);
+      const promptTps = Number(result?.performance?.prompt_tokens_per_second || 0);
+      const tokensPerSecond = nativeTps > 0
+        ? +nativeTps.toFixed(2)
+        : completionTokens > 0
+          ? +(completionTokens / (wallMs / 1000)).toFixed(2)
+          : null;
 
-    const hardware = await Promise.resolve(this.detectHardware()).catch(() => ({}));
-    const row = {
-      benchmarkVersion,
-      model: modelName,
-      runtime,
-      measuredAt: new Date().toISOString(),
-      wallMs,
-      contextTokens,
-      promptTokens,
-      completionTokens,
-      tokensPerSecond,
-      promptTokensPerSecond: promptTps > 0 ? +promptTps.toFixed(2) : null,
-      loadMs: Number(result?.performance?.load_ms || 0) || null,
-      promptMs: Number(result?.performance?.prompt_ms || 0) || null,
-      generationMs: Number(result?.performance?.generation_ms || 0) || null,
-      runtimeTotalMs: Number(result?.performance?.total_ms || 0) || null,
-      source: nativeTps > 0 ? 'runtime' : completionTokens > 0 ? 'wall-clock' : 'wall-clock-only',
-      hardware: {
-        cpu: hardware?.cpu || null,
-        ramGb: Number(hardware?.ramGb || 0) || null,
-        gpu: [...(hardware?.nvidia || []), ...(hardware?.amd || []), ...(hardware?.intel || [])][0]?.name || null,
-      },
-    };
+      const hardware = await Promise.resolve(this.detectHardware()).catch(() => ({}));
+      const row = {
+        benchmarkVersion,
+        model: modelName,
+        runtime,
+        measuredAt: new Date().toISOString(),
+        wallMs,
+        contextTokens,
+        promptTokens,
+        completionTokens,
+        tokensPerSecond,
+        promptTokensPerSecond: promptTps > 0 ? +promptTps.toFixed(2) : null,
+        loadMs: Number(result?.performance?.load_ms || 0) || null,
+        promptMs: Number(result?.performance?.prompt_ms || 0) || null,
+        generationMs: Number(result?.performance?.generation_ms || 0) || null,
+        runtimeTotalMs: Number(result?.performance?.total_ms || 0) || null,
+        source: nativeTps > 0 ? 'runtime' : completionTokens > 0 ? 'wall-clock' : 'wall-clock-only',
+        hardware: {
+          cpu: hardware?.cpu || null,
+          ramGb: Number(hardware?.ramGb || 0) || null,
+          gpu: [...(hardware?.nvidia || []), ...(hardware?.amd || []), ...(hardware?.intel || [])][0]?.name || null,
+        },
+      };
 
-    const current = this.benchmarkResults().benchmarks.filter(
-      (item) => !(String(item?.model) === modelName && String(item?.runtime) === runtime),
-    );
-    current.unshift(row);
-    fs.mkdirSync(this.dataDir, { recursive: true });
-    const tmp = this.benchmarksFile + '.' + process.pid + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify({ version: 1, benchmarks: current.slice(0, 100) }, null, 2) + '\n', { mode: 0o600 });
-    fs.renameSync(tmp, this.benchmarksFile);
-    return row;
+      const current = this.benchmarkResults().benchmarks.filter(
+        (item) => !(String(item?.model) === modelName && String(item?.runtime) === runtime),
+      );
+      current.unshift(row);
+      fs.mkdirSync(this.dataDir, { recursive: true });
+      const tmp = this.benchmarksFile + '.' + process.pid + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify({ version: 1, benchmarks: current.slice(0, 100) }, null, 2) + '\n', { mode: 0o600 });
+      fs.renameSync(tmp, this.benchmarksFile);
+      return row;
+    } finally {
+      // Benchmarks are transient work. Do not leave the tested model resident in RAM/VRAM.
+      await this.unloadModel(modelName, runtime).catch(() => {});
+    }
   }
 
   cancelChat(id) {
