@@ -3,55 +3,727 @@
 const { renderMarkdown } = require('./local-markdown.cjs');
 
 const STYLE = `
-:root{color-scheme:dark;--bg:#0e0f11;--panel:#15171a;--panel2:#1d2024;--line:#2b2f34;--text:#f5f7fa;--muted:#9aa1aa;--accent:#f1f3f5;--accentText:#111;--danger:#ff8888;--ok:#8be6af;--warn:#f3c969;--code:#0a0b0d;--user:#23262b}
-[data-theme=light]{color-scheme:light;--bg:#ffffff;--panel:#f6f7f8;--panel2:#eceef0;--line:#dcdfe3;--text:#15171a;--muted:#667079;--accent:#15171a;--accentText:#fff;--code:#f3f4f6;--user:#eef0f2}
-*{box-sizing:border-box}html,body{height:100%}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif}
-button,input,select,textarea{font:inherit;color:inherit}button{cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}
-.app{height:100%;display:grid;grid-template-columns:272px minmax(0,1fr)}
-.sidebar{background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
-.brand{padding:16px 16px 10px;font-size:17px;font-weight:750}
-.newchat{margin:0 12px 10px;border:1px solid var(--line);background:var(--panel2);border-radius:10px;padding:9px 12px;text-align:left}
-.search{margin:0 12px 8px;border:1px solid var(--line);background:var(--bg);border-radius:9px;padding:7px 10px;outline:0}
-.history{overflow:auto;padding:0 8px;flex:1}
-.item{display:flex;align-items:center;border-radius:9px}.item:hover,.item.active{background:var(--panel2)}
-.item .title{flex:1;min-width:0;border:0;background:transparent;padding:8px 9px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.item .mini{visibility:hidden;border:0;background:transparent;color:var(--muted);padding:4px 6px}.item:hover .mini,.item.active .mini{visibility:visible}
-.sideBottom{border-top:1px solid var(--line);padding:8px;display:grid;gap:2px}.sideBottom button{border:0;background:transparent;text-align:left;padding:8px;border-radius:8px}.sideBottom button:hover{background:var(--panel2)}
-.main{min-width:0;display:flex;flex-direction:column}
-.topbar{height:56px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;padding:0 16px}
-.topbar select{max-width:460px;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:7px 10px}
-.pill{border:1px solid var(--line);border-radius:999px;padding:4px 9px;color:var(--muted);font-size:12px;white-space:nowrap}.pill.right{margin-left:auto}
-.chat{flex:1;overflow:auto;padding:28px max(18px,calc((100% - 860px)/2))}
-.empty{margin:14vh auto 0;max-width:620px;text-align:center;color:var(--muted)}.empty h1{color:var(--text);font-size:28px;margin:0 0 8px}
-.msg{margin:0 0 22px}.msg.user{display:flex;flex-direction:column;align-items:flex-end}
-.msg.user .body{background:var(--user);border-radius:16px;padding:9px 14px;max-width:80%;white-space:pre-wrap;overflow-wrap:anywhere}
-.msg.assistant .who{font-weight:650;margin-bottom:4px}
-.md{overflow-wrap:anywhere}.md p{margin:0 0 10px}.md h1,.md h2,.md h3,.md h4{margin:14px 0 8px;line-height:1.3}.md ul,.md ol{margin:0 0 10px;padding-left:24px}
-.md code{background:var(--panel2);border-radius:5px;padding:1px 5px;font:13px ui-monospace,SFMono-Regular,Consolas,monospace}
-.md .code{border:1px solid var(--line);border-radius:10px;margin:0 0 12px;overflow:hidden}.md .codeHead{display:flex;justify-content:space-between;align-items:center;background:var(--panel2);padding:4px 10px;font-size:12px;color:var(--muted)}
-.md .codeHead button{border:0;background:transparent;color:var(--muted)}.md pre{margin:0;padding:12px;overflow:auto;background:var(--code)}.md pre code{background:transparent;padding:0}
-.md table{border-collapse:collapse;margin:0 0 12px;display:block;overflow:auto}.md th,.md td{border:1px solid var(--line);padding:6px 10px;text-align:left}.md th{background:var(--panel2)}
-.md blockquote{margin:0 0 10px;padding:2px 12px;border-left:3px solid var(--line);color:var(--muted)}.md a{color:inherit}.md hr{border:0;border-top:1px solid var(--line)}
-.think{border:1px solid var(--line);border-radius:10px;padding:6px 12px;margin:0 0 10px;color:var(--muted);font-size:13px}.think summary{cursor:pointer}
-.actions{display:flex;gap:4px;align-items:center;margin-top:2px;color:var(--muted);font-size:12px}.actions button{border:0;background:transparent;color:var(--muted);padding:3px 6px;border-radius:6px}.actions button:hover{background:var(--panel2);color:var(--text)}
-.error{color:var(--danger)}.cursor::after{content:'▍';animation:blink 1s steps(2) infinite}@keyframes blink{50%{opacity:0}}
-.composerWrap{padding:10px max(14px,calc((100% - 860px)/2)) 16px}
-.composer{border:1px solid var(--line);background:var(--panel);border-radius:18px;padding:8px 10px}.composer.drag{outline:2px dashed var(--muted)}
-.composer textarea{width:100%;min-height:44px;max-height:240px;resize:none;background:transparent;border:0;outline:0;padding:6px}
-.bar{display:flex;gap:8px;align-items:center}.btn{border:1px solid var(--line);background:var(--panel2);border-radius:9px;padding:7px 11px}
-.send{margin-left:auto;background:var(--accent);color:var(--accentText);border-color:var(--accent)}
-.hint{font-size:11px;color:var(--muted);text-align:center;margin-top:6px}
-.attachments{display:flex;flex-wrap:wrap;gap:6px}.chip{border:1px solid var(--line);background:var(--panel2);border-radius:999px;padding:3px 8px;font-size:12px;color:var(--muted)}.chip button{border:0;background:transparent;color:inherit}
-.overlay{position:fixed;inset:0;background:#0007;display:none;z-index:20}.overlay.open{display:block}
-.panel{position:fixed;right:0;top:0;bottom:0;width:min(520px,94vw);background:var(--panel);border-left:1px solid var(--line);padding:18px;overflow:auto;transform:translateX(100%);transition:.18s;z-index:21}.panel.open{transform:none}
-.panel h2{margin:0}.card{border:1px solid var(--line);background:var(--bg);border-radius:12px;padding:12px;margin:12px 0}.card h3{margin:0 0 8px;font-size:14px}
-.row{display:flex;gap:8px;align-items:center}.row>.grow{flex:1;min-width:0}.muted{color:var(--muted);font-size:12px}
-.card input,.card textarea,.card select{width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px}
-.model{display:flex;gap:8px;align-items:center;border-top:1px solid var(--line);padding:8px 0}.model:first-of-type{border-top:0}.model .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.fit{font-size:11px;border-radius:999px;padding:1px 7px;border:1px solid var(--line)}.fit.great{color:var(--ok)}.fit.ok{color:var(--text)}.fit.warn{color:var(--warn)}
-.small{padding:5px 9px;font-size:12px}
-@media(max-width:760px){.app{grid-template-columns:1fr}.sidebar{display:none}.chat{padding:20px 12px}.composerWrap{padding:8px}.pill{display:none}.msg.user .body{max-width:92%}}
-`;
+:root{
+  color-scheme:dark;
+  --bg:#0b0d10;
+  --sidebar:#0d0f12;
+  --surface:#111419;
+  --surface-2:#171b21;
+  --surface-3:#1c2128;
+  --line:#242a32;
+  --line-soft:#1b2026;
+  --text:#f4f6f8;
+  --muted:#8b949e;
+  --muted-2:#626b76;
+  --accent:#f4f6f8;
+  --accent-text:#0b0d10;
+  --danger:#ff8182;
+  --ok:#7dd3a6;
+  --warn:#e9c46a;
+  --focus:#7c8cff;
+  --user:#1a1f26;
+  --code:#080a0d;
+  --shadow:0 24px 70px rgba(0,0,0,.34);
+}
+[data-theme=light]{
+  color-scheme:light;
+  --bg:#ffffff;
+  --sidebar:#f8f9fa;
+  --surface:#ffffff;
+  --surface-2:#f4f5f6;
+  --surface-3:#eceff2;
+  --line:#dfe3e7;
+  --line-soft:#eceff2;
+  --text:#15181c;
+  --muted:#66707a;
+  --muted-2:#8b949e;
+  --accent:#15181c;
+  --accent-text:#fff;
+  --danger:#c33c3c;
+  --ok:#257a4d;
+  --warn:#9a6c14;
+  --focus:#5566e8;
+  --user:#f0f2f4;
+  --code:#f5f6f8;
+  --shadow:0 24px 70px rgba(20,25,30,.12);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;
+  overflow:hidden;
+  background:var(--bg);
+  color:var(--text);
+  font:14px/1.55 Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+button:disabled{opacity:.45;cursor:not-allowed}
+[hidden]{display:none!important}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{
+  outline:2px solid color-mix(in srgb,var(--focus) 70%,transparent);
+  outline-offset:2px;
+}
+svg{display:block}
+.app{
+  height:100%;
+  display:grid;
+  grid-template-columns:260px minmax(0,1fr);
+  background:var(--bg);
+}
+.sidebar{
+  min-height:0;
+  background:var(--sidebar);
+  border-right:1px solid var(--line-soft);
+  display:flex;
+  flex-direction:column;
+}
+.sidebarHead{
+  padding:16px 14px 12px;
+}
+.brandRow{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  min-height:32px;
+  padding:0 4px 12px;
+}
+.brandMark{
+  width:28px;height:28px;border-radius:8px;
+  display:grid;place-items:center;
+  background:var(--text);color:var(--bg);
+  font-size:11px;font-weight:800;letter-spacing:-.02em;
+}
+.brandCopy{min-width:0}
+.brand{
+  font-size:14px;
+  font-weight:730;
+  letter-spacing:-.01em;
+  line-height:1.2;
+}
+.brandSub{
+  margin-top:2px;
+  color:var(--muted-2);
+  font-size:10.5px;
+  line-height:1.2;
+}
+.newchat{
+  width:100%;
+  border:1px solid var(--line);
+  background:var(--surface);
+  border-radius:11px;
+  min-height:40px;
+  padding:0 12px;
+  display:flex;
+  align-items:center;
+  gap:9px;
+  color:var(--text);
+  text-align:left;
+  font-weight:610;
+  transition:.16s ease;
+}
+.newchat:hover{background:var(--surface-2);border-color:color-mix(in srgb,var(--line) 65%,var(--text))}
+.iconBox{
+  width:24px;height:24px;display:grid;place-items:center;color:var(--muted);
+}
+.iconBox svg{width:16px;height:16px;stroke:currentColor}
+.searchWrap{
+  position:relative;
+  margin-top:10px;
+}
+.searchIcon{
+  position:absolute;left:10px;top:50%;transform:translateY(-50%);
+  color:var(--muted-2);pointer-events:none;
+}
+.searchIcon svg{width:14px;height:14px;stroke:currentColor}
+.search{
+  width:100%;
+  min-height:36px;
+  border:0;
+  background:transparent;
+  border-radius:9px;
+  padding:0 10px 0 32px;
+  color:var(--text);
+  outline:0;
+}
+.search::placeholder{color:var(--muted-2)}
+.search:hover,.search:focus{background:var(--surface-2)}
+.sideSectionLabel{
+  padding:8px 16px 6px;
+  color:var(--muted-2);
+  font-size:10px;
+  font-weight:700;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+.history{
+  overflow:auto;
+  padding:0 8px 10px;
+  flex:1;
+  scrollbar-width:thin;
+  scrollbar-color:var(--line) transparent;
+}
+.item{
+  position:relative;
+  display:flex;
+  align-items:center;
+  border-radius:9px;
+  margin:1px 0;
+  min-height:36px;
+}
+.item:hover,.item.active{background:var(--surface-2)}
+.item .title{
+  flex:1;
+  min-width:0;
+  border:0;
+  background:transparent;
+  padding:8px 76px 8px 10px;
+  text-align:left;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  color:color-mix(in srgb,var(--text) 88%,var(--muted));
+}
+.item.active .title{color:var(--text)}
+.item .mini{
+  position:absolute;
+  right:6px;
+  visibility:hidden;
+  border:0;
+  background:transparent;
+  color:var(--muted-2);
+  padding:5px;
+  border-radius:7px;
+  width:28px;height:28px;
+  display:grid;place-items:center;
+}
+.item .mini svg{width:14px;height:14px;stroke:currentColor}
+.item .mini.rename{right:34px}
+.item:hover .mini,.item.active .mini{visibility:visible}
+.item .mini:hover{background:var(--surface-3);color:var(--text)}
+.sideBottom{
+  border-top:1px solid var(--line-soft);
+  padding:8px;
+  display:grid;
+  gap:2px;
+}
+.sideBottom button{
+  border:0;
+  background:transparent;
+  color:var(--muted);
+  text-align:left;
+  padding:8px 10px;
+  border-radius:8px;
+  min-height:36px;
+  display:flex;
+  align-items:center;
+  gap:9px;
+}
+.sideBottom button:hover{background:var(--surface-2);color:var(--text)}
+.sideBottom svg{width:16px;height:16px;stroke:currentColor}
+.main{min-width:0;min-height:0;display:flex;flex-direction:column;position:relative}
+.topbar{
+  height:58px;
+  flex:0 0 58px;
+  border-bottom:1px solid var(--line-soft);
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:0 18px;
+  background:color-mix(in srgb,var(--bg) 88%,transparent);
+  backdrop-filter:blur(14px);
+  z-index:4;
+}
+.modelControl{
+  min-width:0;
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.modelLabel{
+  color:var(--muted-2);
+  font-size:10px;
+  font-weight:700;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+.topbar select{
+  max-width:min(520px,52vw);
+  min-height:36px;
+  background:transparent;
+  border:0;
+  border-radius:9px;
+  padding:0 30px 0 9px;
+  font-weight:650;
+  letter-spacing:-.01em;
+  text-overflow:ellipsis;
+}
+.topbar select:hover{background:var(--surface-2)}
+.pill{
+  border:1px solid var(--line);
+  border-radius:999px;
+  min-height:26px;
+  padding:0 9px;
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  color:var(--muted);
+  font-size:11px;
+  white-space:nowrap;
+}
+.pillDot{width:6px;height:6px;border-radius:50%;background:var(--ok)}
+.pill.right{margin-left:auto}
+.modelActions{display:flex;gap:6px;align-items:center}
+.fitMeta{margin-top:5px;color:var(--muted);font-size:10.5px;line-height:1.45}
+.fitWhy{margin-top:4px;border:0;background:transparent;color:var(--muted);padding:0;font-size:10.5px;text-decoration:underline;text-underline-offset:2px;cursor:pointer}
+.fitWhy:hover{color:var(--text)}
+.fitReason{margin-top:6px;padding:8px 9px;border:1px solid var(--line-soft);border-radius:8px;background:var(--surface-2);color:var(--muted);font-size:10.5px;line-height:1.5}
+.fitBenchmarkMetrics{margin-top:5px;color:var(--muted);font-size:10px;line-height:1.45}
+.fitBenchmarkMetrics strong{color:var(--text);font-weight:650}
+.fitActionBar{display:flex;gap:8px;align-items:center;margin:0 0 8px}
+.fitActionBar .fitViewLead{flex:1;min-width:0;margin:0}
+.fitBenchmarkStatus{min-height:16px;margin:0 0 8px}
+@media(max-width:620px){.fitActionBar{align-items:flex-start;flex-direction:column}.fitActionBar .row{width:100%}.fitActionBar .btn{flex:1}}
+.modelLoadState{min-height:30px;display:inline-flex;align-items:center;padding:0 9px;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:10.5px;font-weight:650;white-space:nowrap}
+.modelLoadState.loaded{border-color:color-mix(in srgb,var(--ok) 40%,var(--line));background:color-mix(in srgb,var(--ok) 8%,transparent);color:var(--ok)}
+.modelLoadState.unloaded{color:var(--muted)}
+.activeModelPill{max-width:220px;overflow:hidden;text-overflow:ellipsis}
+.fitGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:12px}
+.fitMetric{border:1px solid var(--line);border-radius:11px;background:var(--bg);padding:11px;min-width:0}
+.fitMetric span{display:block;color:var(--muted);font-size:9.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;margin-bottom:4px}
+.fitMetric strong{display:block;font-size:12px;font-weight:650;overflow-wrap:anywhere}
+.fitUseCase{min-height:36px;background:var(--surface-2);border:1px solid var(--line);border-radius:9px;padding:0 10px}
+.connectBtn{margin-left:auto;border-radius:999px;min-height:30px;padding:0 11px;font-size:11px}
+.connectBtn.connected{border-color:color-mix(in srgb,var(--ok) 40%,var(--line));color:var(--ok)}
+.connectBtn.paired{border-color:color-mix(in srgb,var(--warn) 40%,var(--line));color:var(--warn)}
+.chat{
+  flex:1;
+  overflow:auto;
+  padding:36px max(22px,calc((100% - 820px)/2)) 160px;
+  scrollbar-width:thin;
+  scrollbar-color:var(--line) transparent;
+}
+.empty{
+  min-height:calc(100vh - 260px);
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  align-items:center;
+  max-width:720px;
+  margin:0 auto;
+  text-align:center;
+  color:var(--muted);
+}
+.emptyMark{
+  width:42px;height:42px;border-radius:13px;
+  display:grid;place-items:center;
+  margin-bottom:18px;
+  border:1px solid var(--line);
+  background:linear-gradient(180deg,var(--surface-2),var(--surface));
+  color:var(--text);
+  font-size:12px;font-weight:800;
+}
+.empty h1{
+  color:var(--text);
+  font-size:30px;
+  line-height:1.15;
+  letter-spacing:-.035em;
+  margin:0 0 8px;
+  font-weight:720;
+}
+.emptyLead{max-width:520px;font-size:13px;color:var(--muted)}
+.quickGrid{
+  width:100%;
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:9px;
+  margin-top:24px;
+}
+.quick{
+  border:1px solid var(--line);
+  background:var(--surface);
+  color:var(--text);
+  border-radius:12px;
+  padding:13px 14px;
+  min-height:58px;
+  text-align:left;
+  transition:.16s ease;
+}
+.quick:hover{background:var(--surface-2);transform:translateY(-1px)}
+.quick strong{display:block;font-size:12.5px;margin-bottom:2px}
+.quick span{display:block;color:var(--muted);font-size:11.5px}
+.msg{margin:0 0 28px}
+.msg.user{display:flex;flex-direction:column;align-items:flex-end}
+.msg.user .body{
+  background:var(--user);
+  border:1px solid color-mix(in srgb,var(--line) 70%,transparent);
+  border-radius:16px 16px 4px 16px;
+  padding:10px 14px;
+  max-width:min(78%,640px);
+  white-space:pre-wrap;
+  overflow-wrap:anywhere;
+}
+.msg.assistant{max-width:100%}
+.msg.assistant .who{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin-bottom:8px;
+  color:var(--muted);
+  font-size:11px;
+  font-weight:650;
+}
+.msg.assistant .who::before{
+  content:"BC";
+  width:22px;height:22px;border-radius:7px;
+  display:grid;place-items:center;
+  background:var(--text);color:var(--bg);
+  font-size:8px;font-weight:800;
+}
+.md{overflow-wrap:anywhere;color:color-mix(in srgb,var(--text) 94%,var(--muted))}
+.md p{margin:0 0 11px}
+.md h1,.md h2,.md h3,.md h4{margin:18px 0 9px;line-height:1.28;letter-spacing:-.02em}
+.md ul,.md ol{margin:0 0 11px;padding-left:24px}
+.md code{
+  background:var(--surface-2);
+  border:1px solid var(--line-soft);
+  border-radius:5px;
+  padding:1px 5px;
+  font:12.5px ui-monospace,SFMono-Regular,Consolas,monospace;
+}
+.md .code{
+  border:1px solid var(--line);
+  border-radius:12px;
+  margin:0 0 14px;
+  overflow:hidden;
+  background:var(--code);
+}
+.md .codeHead{
+  display:flex;justify-content:space-between;align-items:center;
+  background:var(--surface-2);
+  border-bottom:1px solid var(--line);
+  padding:6px 10px;
+  font-size:11px;color:var(--muted);
+}
+.md .codeHead button{border:0;background:transparent;color:var(--muted);padding:3px 6px;border-radius:6px}
+.md .codeHead button:hover{background:var(--surface-3);color:var(--text)}
+.md pre{margin:0;padding:13px;overflow:auto;background:var(--code)}
+.md pre code{background:transparent;border:0;padding:0}
+.md table{border-collapse:collapse;margin:0 0 12px;display:block;overflow:auto}
+.md th,.md td{border:1px solid var(--line);padding:7px 10px;text-align:left}
+.md th{background:var(--surface-2)}
+.md blockquote{margin:0 0 10px;padding:2px 12px;border-left:2px solid var(--muted-2);color:var(--muted)}
+.md a{color:inherit;text-decoration-color:var(--muted-2)}
+.md hr{border:0;border-top:1px solid var(--line)}
+.think{
+  border:1px solid var(--line);
+  border-radius:10px;
+  padding:7px 10px;
+  margin:0 0 10px;
+  color:var(--muted);
+  font-size:12px;
+  background:var(--surface);
+}
+.think summary{cursor:pointer;font-weight:620}
+.actions{
+  display:flex;
+  gap:3px;
+  align-items:center;
+  min-height:28px;
+  margin-top:4px;
+  color:var(--muted-2);
+  font-size:11px;
+}
+.actions button{
+  border:0;
+  background:transparent;
+  color:var(--muted-2);
+  padding:4px 7px;
+  border-radius:7px;
+}
+.actions button:hover{background:var(--surface-2);color:var(--text)}
+.responseStats{margin-left:3px;color:var(--muted-2);font-variant-numeric:tabular-nums}
+.send:disabled{opacity:.35;background:var(--surface-3);border-color:var(--line);color:var(--muted-2)}
+.error{color:var(--danger)}
+.cursor::after{content:"";display:inline-block;width:2px;height:1em;margin-left:3px;vertical-align:-2px;background:var(--text);animation:blink 1s steps(2) infinite}
+@keyframes blink{50%{opacity:0}}
+.composerWrap{
+  position:absolute;
+  left:0;right:0;bottom:0;
+  padding:16px max(18px,calc((100% - 820px)/2)) 18px;
+  background:linear-gradient(180deg,transparent 0%,var(--bg) 24%,var(--bg) 100%);
+  z-index:5;
+}
+.composer{
+  border:1px solid var(--line);
+  background:color-mix(in srgb,var(--surface) 96%,transparent);
+  border-radius:20px;
+  padding:9px 10px 8px;
+  box-shadow:0 12px 34px rgba(0,0,0,.18);
+  transition:border-color .16s ease,box-shadow .16s ease;
+}
+.composer:focus-within{
+  border-color:color-mix(in srgb,var(--line) 40%,var(--text));
+  box-shadow:0 16px 48px rgba(0,0,0,.24);
+}
+.composer.drag{border-color:var(--focus);box-shadow:0 0 0 3px color-mix(in srgb,var(--focus) 15%,transparent)}
+.composer textarea{
+  width:100%;
+  min-height:48px;
+  max-height:220px;
+  resize:none;
+  background:transparent;
+  border:0;
+  outline:0;
+  padding:7px 9px 4px;
+  line-height:1.55;
+}
+.composer textarea::placeholder{color:var(--muted-2)}
+.bar{display:flex;gap:6px;align-items:center;padding:2px 2px 0}
+.btn{
+  border:1px solid var(--line);
+  background:transparent;
+  border-radius:9px;
+  min-height:34px;
+  padding:0 10px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:7px;
+  color:var(--muted);
+  transition:.14s ease;
+}
+.btn:hover{background:var(--surface-2);color:var(--text)}
+.btn svg{width:15px;height:15px;stroke:currentColor}
+.btn.toolBtn.active{
+  border-color:color-mix(in srgb,var(--focus) 45%,var(--line));
+  background:color-mix(in srgb,var(--focus) 10%,transparent);
+  color:color-mix(in srgb,var(--text) 90%,var(--focus));
+}
+.send{
+  margin-left:auto;
+  width:34px;
+  padding:0;
+  border-radius:10px;
+  background:var(--accent);
+  color:var(--accent-text);
+  border-color:var(--accent);
+}
+.send:hover{background:color-mix(in srgb,var(--accent) 84%,var(--muted));color:var(--accent-text)}
+.hint{font-size:10.5px;color:var(--muted-2);text-align:center;margin-top:7px}
+.attachments{display:flex;flex-wrap:wrap;gap:6px;padding:0 5px}
+.chip{
+  border:1px solid var(--line);
+  background:var(--surface-2);
+  border-radius:9px;
+  padding:5px 8px;
+  font-size:11px;
+  color:var(--muted);
+}
+.chip button{border:0;background:transparent;color:inherit;padding:0 0 0 6px}
+.overlay{
+  position:fixed;inset:0;background:rgba(0,0,0,.46);
+  opacity:0;visibility:hidden;
+  transition:.18s ease;
+  z-index:20;
+  backdrop-filter:blur(2px);
+}
+.overlay.open{opacity:1;visibility:visible}
+.panel{
+  position:fixed;
+  right:12px;top:12px;bottom:12px;
+  width:min(500px,calc(100vw - 24px));
+  background:var(--surface);
+  border:1px solid var(--line);
+  border-radius:16px;
+  padding:18px;
+  overflow:auto;
+  transform:translateX(calc(100% + 24px));
+  transition:.2s ease;
+  z-index:21;
+  box-shadow:var(--shadow);
+}
+.panel.open{transform:none}
+.panelHead{
+  position:sticky;
+  top:-18px;
+  z-index:2;
+  margin:-18px -18px 14px;
+  padding:16px 18px 12px;
+  background:color-mix(in srgb,var(--surface) 94%,transparent);
+  border-bottom:1px solid var(--line-soft);
+  backdrop-filter:blur(12px);
+}
+.panel h2{margin:0;font-size:18px;letter-spacing:-.02em}
+.panelLead{margin-top:4px;color:var(--muted);font-size:11.5px}
+.card{
+  border:1px solid var(--line);
+  background:var(--bg);
+  border-radius:12px;
+  padding:13px;
+  margin:10px 0;
+}
+.card h3{margin:0 0 8px;font-size:12.5px;letter-spacing:-.01em}
+.row{display:flex;gap:8px;align-items:center}
+.row>.grow{flex:1;min-width:0}
+.muted{color:var(--muted);font-size:11.5px}
+.card input,.card textarea,.card select{
+  width:100%;
+  background:var(--surface-2);
+  border:1px solid var(--line);
+  border-radius:9px;
+  padding:8px 9px;
+}
+.model{
+  display:flex;
+  gap:7px;
+  align-items:center;
+  border-top:1px solid var(--line-soft);
+  padding:9px 0;
+}
+.model:first-of-type{border-top:0}
+.model .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.modelInfo{flex:1;min-width:0;display:grid;gap:5px}
+.modelInfo .name{display:block}
+.capabilities{display:flex;flex-wrap:wrap;gap:4px;min-height:17px}
+.capability{
+  display:inline-flex;
+  align-items:center;
+  min-height:18px;
+  border:1px solid var(--line);
+  border-radius:999px;
+  padding:0 6px;
+  font-size:9px;
+  font-weight:650;
+  line-height:1;
+  color:var(--muted);
+  background:var(--surface-2);
+  white-space:nowrap;
+}
+.capability.text{color:var(--text)}
+.capability.vision{color:var(--ok)}
+.capability.tools{color:var(--accent)}
+.capability.reasoning{color:var(--warn)}
+.fitFilters{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}
+.fitFilterCard{border:1px solid var(--line);border-radius:11px;background:var(--bg);padding:11px}
+.fitFilterLabel{font-size:10px;font-weight:700;color:var(--muted);margin-bottom:7px}
+.fitUseCases{display:flex;gap:5px;flex-wrap:wrap}
+.fitUseCaseBtn{min-height:30px;padding:0 9px;border-radius:8px;border:1px solid var(--line);background:var(--surface-2);color:var(--muted);font-size:10.5px;font-weight:650}
+.fitUseCaseBtn.active{color:var(--text);background:var(--surface-3);border-color:color-mix(in srgb,var(--line) 55%,var(--text))}
+.fitTabs{display:flex;gap:3px;border:1px solid var(--line);background:var(--bg);border-radius:10px;padding:3px;width:max-content;max-width:100%;margin:12px 0 9px}
+.fitTab{min-height:30px;padding:0 10px;border:0;border-radius:8px;background:transparent;color:var(--muted);font-size:10.5px;font-weight:650}
+.fitTab.active{background:var(--surface-3);color:var(--text)}
+.fitBrowse{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;margin-bottom:8px}
+.fitBrowse input,.fitBrowse select{min-height:36px;background:var(--surface-2);border:1px solid var(--line);border-radius:9px;padding:0 10px;color:var(--text)}
+.fitBrowse select{width:auto}
+.fitViewLead{margin:0 0 8px}
+.fit.installed,.fit.loaded{color:var(--ok)}
+@media(max-width:620px){.fitFilters{grid-template-columns:1fr}.fitBrowse{grid-template-columns:1fr}.fitBrowse select{width:100%}}
+.fit,.tag{
+  font-size:9.5px;
+  border-radius:999px;
+  padding:2px 7px;
+  border:1px solid var(--line);
+  color:var(--muted);
+}
+.fit.great{color:var(--ok)}.fit.ok{color:var(--text)}.fit.warn{color:var(--warn)}
+.small{min-height:30px;padding:0 8px;font-size:11px}
+.toolList{display:grid;gap:8px;margin-top:10px}
+.toolRow{
+  border:1px solid var(--line);
+  border-radius:11px;
+  padding:11px;
+  background:var(--bg);
+  transition:.15s ease;
+}
+.toolRow:hover{border-color:color-mix(in srgb,var(--line) 65%,var(--text))}
+.toolTop{display:flex;gap:10px;align-items:flex-start}
+.toolTop input{width:auto;margin-top:4px;accent-color:var(--text)}
+.toolMain{flex:1;min-width:0}
+.toolName{font-weight:650;font-size:12.5px}
+.toolDesc{color:var(--muted);font-size:11px;margin-top:2px}
+.toolMeta{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:8px}
+.tag.execute{color:var(--warn)}.tag.read{color:var(--ok)}
+.approve{margin-left:auto}
+.toolTrace{display:grid;gap:7px;margin:0 0 12px}
+.toolCall{
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:var(--surface);
+  overflow:hidden;
+}
+.toolCall summary{
+  display:flex;align-items:center;gap:8px;
+  cursor:pointer;
+  padding:8px 10px;
+  list-style:none;
+}
+.toolCall summary::-webkit-details-marker{display:none}
+.toolCall summary::before{
+  content:"";
+  width:7px;height:7px;border-radius:50%;background:var(--muted-2);
+}
+.toolCallName{font-weight:620;flex:1;font-size:11.5px}
+.toolState{font-size:10.5px;color:var(--muted)}
+.toolState.done{color:var(--ok)}
+.toolState.error{color:var(--danger)}
+.toolState.running{color:var(--warn)}
+.toolCall:has(.toolState.done) summary::before{background:var(--ok)}
+.toolCall:has(.toolState.error) summary::before{background:var(--danger)}
+.toolCall:has(.toolState.running) summary::before{background:var(--warn)}
+.toolPayload{border-top:1px solid var(--line);padding:9px 10px}
+.toolPayload strong{display:block;font-size:10px;color:var(--muted);margin:0 0 4px;text-transform:uppercase;letter-spacing:.06em}
+.toolPayload pre{
+  margin:0 0 8px;
+  white-space:pre-wrap;
+  overflow-wrap:anywhere;
+  font-size:10.5px;
+  color:var(--muted);
+  background:var(--code);
+  padding:8px;
+  border-radius:7px;
+}
+.mcpServer{display:flex;align-items:center;gap:8px;border-top:1px solid var(--line-soft);padding:8px 0}
+.mcpServer:first-child{border-top:0}
+.mcpServer .grow{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:900px){
+  .app{grid-template-columns:220px minmax(0,1fr)}
+}
+.mobileMenu{display:none}
+@media(max-width:760px){
+  body{overflow:hidden}
+  .app{grid-template-columns:1fr}
+  .sidebar{
+    position:fixed;
+    inset:0 auto 0 0;
+    width:min(300px,88vw);
+    display:flex;
+    transform:translateX(-102%);
+    transition:transform .2s ease;
+    z-index:23;
+    box-shadow:var(--shadow);
+  }
+  .sidebar.mobileOpen{transform:none}
+  .mobileMenu{display:grid;width:34px;padding:0}
+  .chat{padding:26px 14px 150px}
+  .composerWrap{padding:14px 10px 12px}
+  .pill{display:none}
+  .modelLabel{display:none}
+  .topbar{padding:0 10px}
+  .modelControl{flex:1;min-width:0}
+  .modelActions{display:none}
+  .activeModelPill{display:none}
+  #unloadActive{display:none}
+  #openDeviceFit{display:none}
+  .connectBtn{width:34px;padding:0;margin-left:auto;flex:0 0 34px}
+  .connectBtn span:last-child{display:none}
+  .topbar select{width:100%;max-width:calc(100vw - 104px)}
+  .msg.user .body{max-width:92%}
+  .empty{min-height:calc(100vh - 230px)}
+  .quickGrid{grid-template-columns:1fr}
+}
+`
 
 // Runs in the browser. Kept as a real function so `node --check` and the tests see it; embedded via toString().
 // The disk copy wins, except for what this page did before it arrived (e.g. a message sent right after
@@ -70,12 +742,40 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   const HEADERS = { 'content-type': 'application/json', 'x-botconnector-local-token': TOKEN };
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const iconSvg = (name) => ({
+    edit: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+    trash: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5M14 11v5"/></svg>',
+    send: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m6 11 6-6 6 6"/></svg>',
+    stop: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>',
+  }[name] || '');
   const load = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch { return fallback; } };
   const save = (key, value) => localStorage.setItem(key, JSON.stringify(value));
 
   let state = load('botconnector-local-chats-v1', { active: null, chats: [] });
-  let settings = load('botconnector-local-settings-v1', { system: '', temperature: 0.7, theme: 'dark', model: '' });
+  let settings = load('botconnector-local-settings-v1', { system: '', temperature: 0.7, theme: 'dark', model: '', tools: [] });
+  if (!Array.isArray(settings.tools)) settings.tools = [];
   let models = [];
+  let runtimeState = null;
+  let hardwareState = {};
+  let fitState = {
+    view: 'recommended',
+    useCases: ['general'],
+    preference: 'balanced',
+    query: '',
+    sort: 'best',
+    recommended: [],
+    compatible: [],
+    benchmarks: {},
+    benchmarkRunning: false,
+    benchmarkStop: false,
+    benchmarkProgress: null,
+    loading: false,
+  };
+  let fitSearchTimer = 0;
+  let webAppStatus = { paired: false, connection: 'DISCONNECTED', origin: 'https://app.botconnector.id' };
+  let tools = [];
+  let mcpServers = [];
+  let approvedOnce = new Set();
   let attachments = [];
   let streaming = null; // { requestId, controller, chatId, message }
   let filter = '';
@@ -109,6 +809,102 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     return p;
   }
   const selectedModel = () => models.find((m) => m.path === $('modelSelect').value) || null;
+  function friendlyModelName(model) {
+    const raw = String(model?.name || model?.id || 'Local model');
+    const leaf = raw.includes('/') ? raw.slice(raw.lastIndexOf('/') + 1) : raw;
+    return leaf
+      .replace(/\.gguf$/i, '')
+      .replace(/-GGUF$/i, '')
+      .replace(/[_-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+  function modelOptionLabel(model) {
+    return friendlyModelName(model) + (model?.quant ? ' · ' + model.quant : '');
+  }
+  function modelDetail(model) {
+    return [
+      String(model?.name || model?.id || '').trim(),
+      model?.quant || '',
+      model?.runtime || model?.source || '',
+    ].filter(Boolean).join(' · ');
+  }
+  function modelIsLoaded(model) {
+    if (!model || !runtimeState) return false;
+    const loaded = Array.isArray(runtimeState.loadedModels) ? runtimeState.loadedModels.map(String) : [];
+    return loaded.includes(String(model.id)) || String(runtimeState.activeModel || '') === String(model.id);
+  }
+  function activeLoadedModel() {
+    const active = String(runtimeState?.activeModel || '');
+    if (!active) return null;
+    return models.find((model) => String(model.id) === active) || { id: active, name: active };
+  }
+  function renderModelActions() {
+    const model = selectedModel();
+    const loaded = modelIsLoaded(model);
+    const state = $('modelLoadState');
+    state.textContent = !model ? 'No model' : loaded ? 'Loaded' : 'Unloaded';
+    state.classList.toggle('loaded', Boolean(model && loaded));
+    state.classList.toggle('unloaded', Boolean(model && !loaded));
+    $('loadSelected').hidden = !model || loaded;
+    $('unloadSelected').hidden = !model || !loaded;
+    $('loadSelected').disabled = !model;
+    $('unloadSelected').disabled = !model;
+
+    const active = activeLoadedModel();
+    const activePill = $('activeModelPill');
+    const selectedIsActive = Boolean(model && active && String(model.id) === String(active.id));
+    activePill.hidden = !active || selectedIsActive;
+    activePill.textContent = active && !selectedIsActive ? 'Loaded: ' + friendlyModelName(active) : '';
+    activePill.title = active && !selectedIsActive ? 'Currently loaded in memory: ' + modelDetail(active) : '';
+    $('unloadActive').hidden = !active || selectedIsActive;
+    $('unloadActive').disabled = !active || selectedIsActive;
+  }
+
+  async function unloadActiveModel() {
+    const active = activeLoadedModel();
+    if (!active) return;
+    const model = models.find((item) => String(item.id) === String(active.id)) || active;
+    const button = $('unloadActive');
+    button.disabled = true;
+    button.textContent = 'Unloading…';
+    try {
+      await api('/api/models/unload', {
+        method: 'POST',
+        body: JSON.stringify({ model: model.id, runtime: model.runtime || runtimeState?.runtime || '' }),
+      });
+      await refresh();
+      if (activeLoadedModel()) {
+        await new Promise((resolve) => setTimeout(resolve, 180));
+        await refresh();
+      }
+      if (activeLoadedModel()) throw new Error('Active model unload could not be verified.');
+    } catch (error) {
+      alert(error.message || error);
+    } finally {
+      button.textContent = 'Unload';
+      renderModelActions();
+    }
+  }
+  function renderWebAppStatus() {
+    const connected = webAppStatus.connection === 'CONNECTED';
+    const paired = Boolean(webAppStatus.paired);
+    const button = $('openWebApp');
+    button.classList.toggle('connected', connected);
+    button.classList.toggle('paired', paired && !connected);
+    button.innerHTML = '<span class="pillDot"></span><span>' + (
+      connected ? 'Web App connected' : paired ? 'Web App paired' : 'Connect Web App'
+    ) + '</span>';
+    $('webAppState').textContent = connected
+      ? 'Connected as ' + (webAppStatus.deviceName || 'this device') + '. Local AI can be used from BotConnector Web App while this session stays open.'
+      : paired
+        ? 'This device is already paired. BotConnector Local will reconnect to the Web App automatically when internet access is available.'
+        : 'Not paired yet. Pair this device once to use its local AI from BotConnector Web App.';
+    $('webAppCode').disabled = paired;
+    $('pairWebApp').hidden = paired;
+    $('disconnectWebApp').hidden = !paired;
+    $('disconnectWebApp').textContent = paired ? 'Forget pairing' : 'Disconnect';
+  }
 
   // ---- rendering ----
   function renderHistory() {
@@ -119,10 +915,10 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       if (f && !String(c.title).toLowerCase().includes(f) && !c.messages.some((m) => String(m.content).toLowerCase().includes(f))) continue;
       const row = document.createElement('div');
       row.className = 'item' + (c.id === state.active ? ' active' : '');
-      row.innerHTML = '<button class="title"></button><button class="mini" title="Rename">✎</button><button class="mini" title="Delete">🗑</button>';
+      row.innerHTML = '<button class="title"></button><button class="mini rename" title="Rename chat" aria-label="Rename chat">' + iconSvg('edit') + '</button><button class="mini" title="Delete chat" aria-label="Delete chat">' + iconSvg('trash') + '</button>';
       const [title, rename, del] = row.querySelectorAll('button');
       title.textContent = c.title || 'New chat';
-      title.onclick = () => { state.active = c.id; attachments = []; persist(); renderAll(); };
+      title.onclick = () => { state.active = c.id; attachments = []; persist(); renderAll(); close(); };
       rename.onclick = () => {
         const name = prompt('Chat name', c.title);
         if (name && name.trim()) { c.title = name.trim().slice(0, 80); persist(); renderHistory(); }
@@ -138,27 +934,67 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     }
   }
 
+  function toolTraceHtml(events) {
+    if (!Array.isArray(events) || !events.length) return '';
+    const calls = new Map();
+    const loose = [];
+    for (const event of events) {
+      if (!event || !String(event.type || '').startsWith('tool.')) continue;
+      if (!event.id) { loose.push(event); continue; }
+      const row = calls.get(event.id) || { id: event.id, name: event.name || 'Tool', source: event.source || '', permissionClass: event.permissionClass || '', status: 'running' };
+      if (event.name) row.name = event.name;
+      if (event.source) row.source = event.source;
+      if (event.permissionClass) row.permissionClass = event.permissionClass;
+      if (event.arguments !== undefined) row.arguments = event.arguments;
+      if (event.result !== undefined) row.result = event.result;
+      if (event.type === 'tool.completed') row.status = 'done';
+      if (event.type === 'tool.error') { row.status = 'error'; row.error = event.error || 'Tool failed.'; }
+      calls.set(event.id, row);
+    }
+    const rows = [...calls.values()];
+    for (const event of loose) {
+      if (event.type === 'tool.limit') rows.push({ id: 'limit-' + rows.length, name: 'Tool limit reached', status: 'error', error: 'Maximum tool rounds: ' + event.max_calls });
+      else if (event.type === 'tool.error') rows.push({ id: 'error-' + rows.length, name: event.name || 'Tool', status: 'error', error: event.error || 'Tool failed.' });
+    }
+    if (!rows.length) return '';
+    const json = (value) => {
+      try {
+        const out = JSON.stringify(value, null, 2);
+        return esc(out.length > 6000 ? out.slice(0, 6000) + '\n…[truncated]' : out);
+      } catch { return esc(String(value)); }
+    };
+    return '<div class="toolTrace">' + rows.map((row) => {
+      const state = row.status === 'done' ? 'Completed' : row.status === 'error' ? 'Failed' : 'Running';
+      const payload = (row.arguments !== undefined ? '<strong>Input</strong><pre>' + json(row.arguments) + '</pre>' : '') +
+        (row.result !== undefined ? '<strong>Result</strong><pre>' + json(row.result) + '</pre>' : '') +
+        (row.error ? '<strong>Error</strong><pre>' + esc(row.error) + '</pre>' : '');
+      return '<details class="toolCall"><summary><span class="toolCallName">' + esc(row.name) + '</span><span class="toolState ' + esc(row.status) + '">' + state + '</span></summary>' +
+        (payload ? '<div class="toolPayload">' + payload + '</div>' : '') + '</details>';
+    }).join('') + '</div>';
+  }
+
   function messageHtml(m, index, chat) {
     if (m.role === 'user') {
       return '<div class="msg user"><div class="body">' + esc(m.content) + '</div><div class="actions">' +
-        (m.files?.length ? '<span>📎 ' + esc(m.files.join(', ')) + '</span>' : '') +
+        (m.files?.length ? '<span>Files: ' + esc(m.files.join(', ')) + '</span>' : '') +
         '<button data-act="copy" data-i="' + index + '">Copy</button><button data-act="edit" data-i="' + index + '">Edit</button></div></div>';
     }
     const live = streaming && streaming.message === m;
     const think = m.reasoning ? '<details class="think"' + (live && !m.content ? ' open' : '') + '><summary>Thinking</summary><div>' + esc(m.reasoning) + '</div></details>' : '';
     const body = m.error ? '<p class="error">' + esc(m.error) + '</p>' : renderMarkdown(m.content || '');
+    const toolTrace = toolTraceHtml(m.toolEvents);
     const isLast = index === chat.messages.length - 1;
-    const stats = m.stats ? '<span>' + esc(m.stats) + '</span>' : '';
+    const stats = m.stats ? '<span class="responseStats" title="Local generation performance">' + esc(m.stats) + '</span>' : '';
     const actions = live ? '' : '<div class="actions"><button data-act="copy" data-i="' + index + '">Copy</button>' +
       (isLast ? '<button data-act="regen" data-i="' + index + '">Regenerate</button>' : '') + stats + '</div>';
-    return '<div class="msg assistant" data-i="' + index + '"><div class="who">◇ BotConnector Local</div><div class="md' + (live ? ' cursor' : '') + '">' + think + body + '</div>' + actions + '</div>';
+    return '<div class="msg assistant" data-i="' + index + '"><div class="who">BotConnector Local</div><div class="md' + (live ? ' cursor' : '') + '">' + think + toolTrace + body + '</div>' + actions + '</div>';
   }
 
   function renderChat() {
     const c = ensureChat();
     const box = $('chat');
     if (!c.messages.length) {
-      box.innerHTML = '<div class="empty"><h1>BotConnector Local</h1><div>Private local chat with files, local models, and offline conversation history.</div></div>';
+      box.innerHTML = '<div class="empty"><div class="emptyMark">BC</div><h1>How can I help on this device?</h1><div class="emptyLead">Choose a local model and start a conversation. Model inference runs on this computer, while optional tools are used only when you enable them.</div><div class="quickGrid"><button class="quick" data-prompt="Summarize the key points in this text:"><strong>Summarize something</strong><span>Paste text or attach a local document</span></button><button class="quick" data-prompt="Help me understand and improve this code:"><strong>Work with code</strong><span>Explain, review, or improve a snippet</span></button><button class="quick" data-prompt="Help me compare these options and their tradeoffs:"><strong>Compare options</strong><span>Structure a decision clearly</span></button><button class="quick" data-prompt="Use the selected tools when they are useful for this request:"><strong>Use local tools</strong><span>Search, run code, or call MCP when enabled</span></button></div></div>';
       return;
     }
     const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
@@ -188,15 +1024,19 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     attachments.forEach((a, i) => {
       const chip = document.createElement('span');
       chip.className = 'chip';
-      chip.innerHTML = esc(a.name) + ' <button title="Remove">×</button>';
+      chip.innerHTML = esc(a.name) + ' <button title="Remove file" aria-label="Remove file">Remove</button>';
       chip.querySelector('button').onclick = () => { attachments.splice(i, 1); renderAttachments(); };
       box.appendChild(chip);
     });
   }
 
   function renderComposer() {
-    $('sendBtn').textContent = streaming ? 'Stop' : 'Send';
-    $('sendBtn').classList.toggle('send', !streaming);
+    const button = $('sendBtn');
+    button.innerHTML = streaming ? iconSvg('stop') : iconSvg('send');
+    button.title = streaming ? 'Stop generation' : 'Send message';
+    button.setAttribute('aria-label', button.title);
+    button.classList.add('send');
+    button.disabled = !streaming && !$('prompt').value.trim();
   }
 
   function renderAll() { renderHistory(); renderChat(); renderAttachments(); renderComposer(); }
@@ -205,15 +1045,19 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   async function run(chat) {
     const model = selectedModel();
     if (!model) { alert('No local model selected. Open Models to download or load one.'); return; }
-    const message = { role: 'assistant', content: '', reasoning: '', model: model.name || model.id };
+    const message = { role: 'assistant', content: '', reasoning: '', toolEvents: [], model: model.name || model.id };
     chat.messages.push(message);
     const history = chat.messages.slice(0, -1).map((m) => ({ role: m.role, content: m.content || '' }));
     const system = settings.system.trim() ? [{ role: 'system', content: settings.system.trim() }] : [];
     const requestId = crypto.randomUUID();
     streaming = { requestId, controller: new AbortController(), chatId: chat.id, message };
     const documentIds = attachments.map((a) => a.id);
+    const selectedTools = [...new Set(settings.tools.map(String).filter(Boolean))].slice(0, 24);
+    const approvedForTurn = [...approvedOnce].filter((id) => selectedTools.includes(id));
+    approvedOnce = new Set();
     attachments = [];
     renderAll();
+    renderTools();
     const started = performance.now();
     let firstAt = 0;
     try {
@@ -223,6 +1067,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
         signal: streaming.controller.signal,
         body: JSON.stringify({
           model: model.id, runtime: model.runtime, stream: true, request_id: requestId, document_ids: documentIds,
+          tool_mode: selectedTools.length ? 'auto' : 'none', tools: selectedTools, approved_tools: approvedForTurn,
           options: { temperature: Number(settings.temperature) }, messages: [...system, ...history],
         }),
       });
@@ -241,12 +1086,18 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
           if (!line.startsWith('data: ')) continue;
           const ev = JSON.parse(line.slice(6));
           if (ev.error) throw new Error(ev.error.message);
+          if (ev.tool_event) {
+            message.toolEvents.push(ev.tool_event);
+            renderStreaming();
+            continue;
+          }
           // The final "done" event repeats the whole answer; only its usage is new.
           if (!ev.done) {
             if (!firstAt && (ev.content || ev.reasoning)) firstAt = performance.now();
             if (ev.reasoning) message.reasoning += ev.reasoning;
             if (ev.content) message.content += ev.content;
           } else {
+            if (!message.toolEvents.length && Array.isArray(ev.tool_events)) message.toolEvents = ev.tool_events;
             const secs = (performance.now() - (firstAt || started)) / 1000;
             const tokens = Number(ev.usage?.completion_tokens) || Math.round((message.content.length + message.reasoning.length) / 4);
             message.stats = tokens + ' tokens · ' + (secs > 0 ? (tokens / secs).toFixed(1) : '–') + ' tok/s';
@@ -262,6 +1113,9 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       streaming = null;
       persist();
       renderAll();
+      // Chat can auto-load the selected model. Re-read runtime state so Load/Unload
+      // immediately reflects what is actually in RAM/VRAM.
+      await refresh().catch(() => {});
     }
   }
 
@@ -274,6 +1128,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     chat.messages.push({ role: 'user', content: text, files: attachments.map((a) => a.name) });
     $('prompt').value = '';
     autosize();
+    renderComposer();
     persist();
     await run(chat);
   }
@@ -286,6 +1141,14 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   }
 
   async function onChatClick(e) {
+    const quick = e.target.closest('[data-prompt]');
+    if (quick && !streaming) {
+      $('prompt').value = quick.dataset.prompt || '';
+      autosize();
+      renderComposer();
+      $('prompt').focus();
+      return;
+    }
     const copyCode = e.target.closest('[data-copy]');
     if (copyCode) return copy(copyCode.closest('.code').querySelector('pre').textContent, copyCode);
     const btn = e.target.closest('[data-act]');
@@ -339,8 +1202,12 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     try {
       const [s, m] = await Promise.all([api('/api/status'), api('/api/models')]);
       models = Array.isArray(m.models) ? m.models : [];
+      runtimeState = s.runtime || null;
+      hardwareState = s.hardware || {};
       $('runtime').textContent = s.runtime?.available ? 'Ready · ' + (s.runtime.runtime || 'local runtime') : (s.runtime?.message || 'Runtime not ready');
-      $('runtimePill').textContent = s.runtime?.available ? (s.runtime.runtime || 'local') : 'no runtime';
+      const selectedRuntime = selectedModel()?.runtime || s.runtime?.runtime || '';
+      $('runtimePill').innerHTML = '<span class="pillDot"></span>' + esc(s.runtime?.available ? (selectedRuntime || 'local runtime') : 'Runtime unavailable');
+      $('runtimePill').title = selectedRuntime ? 'Backend for selected model: ' + selectedRuntime : 'Local runtime status';
       $('prepareRuntime').hidden = Boolean(s.runtime?.available);
       const h = s.hardware || {};
       const gpu = [...(h.nvidia || []), ...(h.amd || []), ...(h.intel || [])][0];
@@ -352,13 +1219,86 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       for (const x of models.filter((m) => !/embed|rerank/i.test((m.name || '') + ' ' + (m.id || '')))) {
         const o = document.createElement('option');
         o.value = x.path;
-        o.textContent = (x.name || x.id) + (x.quant ? ' · ' + x.quant : '') + ' · ' + (x.source || x.runtime || 'local');
+        o.textContent = modelOptionLabel(x);
+        o.title = modelDetail(x);
         sel.appendChild(o);
       }
       if (models.some((x) => x.path === want)) sel.value = want;
+      const current = selectedModel();
+      sel.title = current ? modelDetail(current) : 'Select a local chat model';
       renderInstalled();
+      renderModelActions();
+      renderComposer();
     } catch (e) {
       $('runtime').textContent = String(e.message || e);
+    }
+  }
+
+  async function selectedModelAction(action) {
+    const model = selectedModel();
+    if (!model) return;
+    const modelId = String(model.id);
+    const button = action === 'load' ? $('loadSelected') : $('unloadSelected');
+    button.disabled = true;
+    button.textContent = action === 'load' ? 'Loading…' : 'Unloading…';
+    try {
+      await api('/api/models/' + action, {
+        method: 'POST',
+        body: JSON.stringify({ model: model.id, runtime: model.runtime }),
+      });
+      await refresh();
+      let verified = action === 'load' ? modelIsLoaded(models.find((m) => String(m.id) === modelId)) : !modelIsLoaded({ id: modelId });
+      if (!verified) {
+        await new Promise((resolve) => setTimeout(resolve, 180));
+        await refresh();
+        verified = action === 'load' ? modelIsLoaded(models.find((m) => String(m.id) === modelId)) : !modelIsLoaded({ id: modelId });
+      }
+      if (!verified) throw new Error(action === 'load' ? 'Model load could not be verified.' : 'Model unload could not be verified.');
+    } catch (error) {
+      alert(error.message || error);
+    } finally {
+      button.textContent = action === 'load' ? 'Load' : 'Unload';
+      renderModelActions();
+    }
+  }
+
+  async function loadWebAppStatus() {
+    try {
+      webAppStatus = await api('/api/webapp/status');
+      renderWebAppStatus();
+    } catch {}
+  }
+
+  async function pairWebApp() {
+    const code = $('webAppCode').value.trim();
+    if (!code) return;
+    $('pairWebApp').disabled = true;
+    $('webAppMessage').textContent = 'Connecting…';
+    try {
+      webAppStatus = await api('/api/webapp/pair', {
+        method: 'POST',
+        body: JSON.stringify({ code }),
+      });
+      $('webAppCode').value = '';
+      $('webAppMessage').textContent = 'Connected.';
+      renderWebAppStatus();
+    } catch (error) {
+      $('webAppMessage').textContent = String(error.message || error);
+    } finally {
+      $('pairWebApp').disabled = false;
+    }
+  }
+
+  async function disconnectWebApp() {
+    $('disconnectWebApp').disabled = true;
+    try {
+      webAppStatus = await api('/api/webapp/disconnect', { method: 'POST', body: '{}' });
+      $('webAppMessage').textContent = 'Disconnected.';
+      renderWebAppStatus();
+    } catch (error) {
+      $('webAppMessage').textContent = String(error.message || error);
+    } finally {
+      $('disconnectWebApp').disabled = false;
     }
   }
 
@@ -369,14 +1309,57 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       const row = document.createElement('div');
       row.className = 'model';
       row.innerHTML = '<span class="name"></span><button class="btn small">Load</button><button class="btn small">Unload</button><button class="btn small">Delete</button>';
-      row.querySelector('.name').textContent = (m.name || m.id) + (m.quant ? ' · ' + m.quant : '');
+      row.querySelector('.name').textContent = modelOptionLabel(m);
+      row.querySelector('.name').title = modelDetail(m);
       const [loadBtn, unloadBtn, delBtn] = row.querySelectorAll('button');
-      const act = (action) => api('/api/models/' + action, { method: 'POST', body: JSON.stringify({ model: m.id, runtime: m.runtime }) }).then(refresh).catch((e) => alert(e.message));
+      const loaded = modelIsLoaded(m);
+      loadBtn.hidden = loaded;
+      unloadBtn.hidden = !loaded;
+      const act = async (action) => {
+        try {
+          await api('/api/models/' + action, { method: 'POST', body: JSON.stringify({ model: m.id, runtime: m.runtime }) });
+          await refresh();
+        } catch (e) {
+          alert(e.message);
+        }
+      };
       loadBtn.onclick = () => act('load');
       unloadBtn.onclick = () => act('unload');
       delBtn.onclick = () => { if (confirm('Delete ' + (m.name || m.id) + ' from this device?')) act('delete'); };
       box.appendChild(row);
     }
+  }
+
+  function catalogCapabilities(model) {
+    const c = { ...(model?.capabilities || {}) };
+    const tags = Array.isArray(model?.tags) ? model.tags.map(String) : [];
+    const hay = [model?.id, model?.name, ...tags].filter(Boolean).join(' ').toLowerCase();
+    const pipeline = String(model?.pipeline_tag || model?.pipeline || '').toLowerCase();
+    if (c.vision == null) c.vision = /vision-language|\bvlm\b|image-text-to-text|multimodal|smolvlm|llava/.test(hay + ' ' + pipeline);
+    if (c.coding == null) c.coding = /coder|coding|codegen|programming|fill-in-the-middle|\bfim\b/.test(hay);
+    if (c.tools == null) c.tools = /tool[-_ ]?(use|calling)|function[-_ ]?calling/.test(hay);
+    if (c.reasoning == null) c.reasoning = /reasoning|reasoner|thinking|qwq|gpt-oss|deepseek-r1|r1-distill|spark-reasoning/.test(hay);
+    if (c.embeddings == null) c.embeddings = /embedding|embeddings|sentence-transformers/.test(hay) || ['feature-extraction', 'sentence-similarity'].includes(pipeline);
+    if (c.audio == null) c.audio = /whisper|speech|audio/.test(hay) || /audio|speech/.test(pipeline);
+    if (c.chat == null) c.chat = !c.embeddings && !c.audio;
+    return c;
+  }
+
+  function modelCapabilityBadges(capabilities) {
+    const c = capabilities || {};
+    const items = [
+      ['chat', 'Text', 'text'],
+      ['vision', 'Vision', 'vision'],
+      ['tools', 'Tools', 'tools'],
+      ['coding', 'Coding', 'coding'],
+      ['reasoning', 'Reasoning', 'reasoning'],
+      ['embeddings', 'Embedding', 'embedding'],
+      ['audio', 'Audio', 'audio'],
+    ];
+    return items
+      .filter(([key]) => c[key] === true)
+      .map(([, label, cls]) => '<span class="capability ' + cls + '">' + label + '</span>')
+      .join('');
   }
 
   function renderCatalog(box, list) {
@@ -385,10 +1368,14 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       const level = m.compatibility?.level || 'unknown';
       const row = document.createElement('div');
       row.className = 'model';
-      row.innerHTML = '<span class="name"></span><span class="fit ' + esc(level) + '">' + esc(level) + '</span><button class="btn small">Download</button>';
+      row.innerHTML = '<div class="modelInfo"><span class="name"></span><div class="capabilities"></div></div><span class="fit ' + esc(level) + '">' + esc(level) + '</span><button class="btn small">Download</button>';
       const size = m.compatibility?.paramsB ? ' · ' + m.compatibility.paramsB + 'B' : '';
       row.querySelector('.name').textContent = m.id + size;
       row.querySelector('.name').title = m.id;
+      const badges = modelCapabilityBadges(catalogCapabilities(m));
+      const capabilityBox = row.querySelector('.capabilities');
+      capabilityBox.innerHTML = badges;
+      capabilityBox.hidden = !badges;
       row.querySelector('button').onclick = () => download(m.id);
       box.appendChild(row);
     }
@@ -436,10 +1423,543 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     } catch (e) { $('jobStatus').textContent = String(e.message || e); }
   }
 
+  // ---- device fit ----
+  function hardwareValue(h, key) {
+    const gpu = [...(h.nvidia || []), ...(h.amd || []), ...(h.intel || [])][0] || null;
+    if (key === 'cpu') return String(h.cpu || 'Unknown');
+    if (key === 'ram') return h.ramGb ? Number(h.ramGb).toFixed(1) + ' GB total' + (h.freeRamGb ? ' · ' + Number(h.freeRamGb).toFixed(1) + ' GB available' : '') : 'Unknown';
+    if (key === 'gpu') return gpu?.name || 'No GPU detected';
+    if (key === 'vram') {
+      const value = gpu?.vramGb ?? gpu?.vram_gb ?? gpu?.memoryGb ?? gpu?.memory_gb;
+      return value ? Number(value).toFixed(1) + ' GB' : (gpu ? 'Shared / dynamic or not reported' : 'Not available');
+    }
+    if (key === 'npu') return h.npu?.name || (h.npu?.available ? 'NPU detected' : 'No NPU detected');
+    if (key === 'system') return [h.platform, h.arch, h.release].filter(Boolean).join(' · ') || 'Unknown';
+    if (key === 'backend') {
+      const runtimes = Array.isArray(runtimeState?.runtimes)
+        ? runtimeState.runtimes.map((item) => item?.runtime).filter(Boolean)
+        : [];
+      return runtimes.length ? [...new Set(runtimes)].join(' · ') : (runtimeState?.runtime || 'Not ready');
+    }
+    return 'Unknown';
+  }
+
+  function renderFitHardware() {
+    const h = hardwareState || {};
+    const fields = {
+      fitCpu: hardwareValue(h, 'cpu'),
+      fitRam: hardwareValue(h, 'ram'),
+      fitGpu: hardwareValue(h, 'gpu'),
+      fitVram: hardwareValue(h, 'vram'),
+      fitNpu: hardwareValue(h, 'npu'),
+      fitSystem: hardwareValue(h, 'system'),
+      fitBackend: hardwareValue(h, 'backend'),
+    };
+    for (const [id, value] of Object.entries(fields)) $(id).textContent = value;
+  }
+
+  function fitUseCaseMatches(model, useCase) {
+    if (useCase === 'general') return true;
+    const c = catalogCapabilities(model);
+    if (useCase === 'coding') return c.coding === true;
+    if (useCase === 'reasoning') return c.reasoning === true;
+    if (useCase === 'vision') return c.vision === true;
+    if (useCase === 'tools') return c.tools === true;
+    if (useCase === 'indonesian') {
+      const hay = [model?.id, model?.name, ...(Array.isArray(model?.tags) ? model.tags : [])].filter(Boolean).join(' ').toLowerCase();
+      return /indones|bahasa[ -]?indonesia|id-id|bahasaindonesia/.test(hay);
+    }
+    return true;
+  }
+
+  function fitSpecificUseCases() {
+    const selected = fitState.useCases.filter((item) => item !== 'general');
+    return selected.length ? selected : ['general'];
+  }
+
+  function fitLevelRank(level) {
+    return ({ great: 0, ok: 1, warn: 2, unknown: 3, no: 9 })[String(level || 'unknown')] ?? 8;
+  }
+
+  function fitParams(model) {
+    return Number(model?.compatibility?.paramsB || 0);
+  }
+
+  function preferenceScore(model) {
+    const p = fitParams(model);
+    if (!p) return 0;
+    if (fitState.preference === 'fast') {
+      if (p <= 2) return 260;
+      if (p <= 4) return 180;
+      if (p <= 7) return 80;
+      return 0;
+    }
+    if (fitState.preference === 'quality') {
+      if (p >= 7 && p <= 14) return 260;
+      if (p >= 3) return 190;
+      return 60;
+    }
+    if (p >= 3 && p <= 9) return 220;
+    if (p > 0 && p < 3) return 120;
+    return 80;
+  }
+
+  function currentGpuName() {
+    const h = hardwareState || {};
+    return [...(h.nvidia || []), ...(h.amd || []), ...(h.intel || [])][0]?.name || '';
+  }
+
+  function benchmarkMatchesHardware(bench) {
+    if (!bench) return false;
+    const cpu = String(hardwareState?.cpu || '').trim().toLowerCase();
+    const gpu = String(currentGpuName() || '').trim().toLowerCase();
+    const benchCpu = String(bench?.hardware?.cpu || '').trim().toLowerCase();
+    const benchGpu = String(bench?.hardware?.gpu || '').trim().toLowerCase();
+    if (cpu && benchCpu && cpu !== benchCpu) return false;
+    if (gpu && benchGpu && gpu !== benchGpu) return false;
+    return true;
+  }
+
+  function benchmarkScore(model) {
+    const local = model?._local || installedMatch(model);
+    const bench = modelBenchmark(local);
+    if (!bench || !benchmarkMatchesHardware(bench)) return 0;
+    const tps = Math.max(0, Number(bench.tokensPerSecond || 0));
+    if (!tps) return 20;
+    if (fitState.preference === 'fast') return Math.min(320, 20 + tps * 6);
+    if (fitState.preference === 'quality') return Math.min(90, 10 + tps * 1.5);
+    return Math.min(190, 15 + tps * 3);
+  }
+
+  function fitScore(model) {
+    const useCases = fitSpecificUseCases();
+    const matched = useCases.filter((useCase) => fitUseCaseMatches(model, useCase)).length;
+    const missing = useCases.length - matched;
+    return (700 - fitLevelRank(model?.compatibility?.level) * 150) +
+      matched * 180 - missing * 260 + preferenceScore(model) + benchmarkScore(model) +
+      Math.min(90, Math.log10(Math.max(1, Number(model?.downloads || 0))) * 18);
+  }
+
+  function normalizedFitSearch(model) {
+    const caps = catalogCapabilities(model);
+    return [
+      model?.id, model?.name, ...(Array.isArray(model?.tags) ? model.tags : []),
+      caps.vision ? 'vision' : '', caps.tools ? 'tools' : '', caps.coding ? 'coding' : '',
+      caps.reasoning ? 'reasoning' : '', caps.audio ? 'audio' : '',
+    ].filter(Boolean).join(' ').toLowerCase();
+  }
+
+  function benchmarkKey(model, runtime) {
+    return String(runtime || '') + '::' + String(model || '');
+  }
+
+  function modelBenchmark(local) {
+    if (!local) return null;
+    return fitState.benchmarks[benchmarkKey(local.id, local.runtime)] || null;
+  }
+
+  function fitResourceSummary(model) {
+    const c = model?.compatibility || {};
+    const bits = [];
+    if (c.estimatedQ4Gb) bits.push('Est. Q4 weights ' + Number(c.estimatedQ4Gb).toFixed(1) + ' GB');
+    if (c.paramsB) bits.push(Number(c.paramsB).toFixed(1).replace(/\.0$/, '') + 'B parameters');
+    return bits.join(' · ');
+  }
+
+  function fitBenchmarkSummary(model) {
+    const local = model?._local || installedMatch(model);
+    const bench = modelBenchmark(local);
+    if (!bench) return '';
+    const bits = [];
+    const current = benchmarkMatchesHardware(bench);
+    if (bench.promptTokensPerSecond) bits.push('Prompt <strong>' + Number(bench.promptTokensPerSecond).toFixed(1) + ' tok/s</strong>');
+    if (bench.tokensPerSecond) {
+      bits.push((bench.source === 'runtime' ? 'Generate ' : 'Overall ~') + '<strong>' + Number(bench.tokensPerSecond).toFixed(1) + ' tok/s</strong>');
+    }
+    if (bench.loadMs) bits.push('Load ' + (Number(bench.loadMs) / 1000).toFixed(2) + ' s');
+    if (bench.wallMs) bits.push('End-to-end ' + (Number(bench.wallMs) / 1000).toFixed(2) + ' s');
+    if (bench.contextTokens) bits.push('Context ' + Math.round(Number(bench.contextTokens) / 1024) + 'K');
+    if (!current) bits.push('Previous hardware');
+    return bits.join(' · ');
+  }
+
+  function fitReasonText(model) {
+    const c = model?.compatibility || {};
+    const reasons = [];
+    const level = String(c.level || 'unknown');
+    if (level === 'great') reasons.push('Fits comfortably on the detected hardware.');
+    else if (level === 'ok') reasons.push('Fits the detected hardware with moderate headroom.');
+    else if (level === 'warn') reasons.push('Expected to run, but memory or speed headroom may be limited.');
+    if (c.estimatedQ4Gb) reasons.push('Q4 model weights are estimated at about ' + Number(c.estimatedQ4Gb).toFixed(1) + ' GB before runtime overhead.');
+    const useCases = fitSpecificUseCases().filter((item) => item !== 'general');
+    if (useCases.length) reasons.push('Matches selected capability: ' + useCases.join(', ') + '.');
+    const p = fitParams(model);
+    if (p) reasons.push('The ' + fitState.preference + ' preference ranks this ' + p + 'B model against the other compatible choices.');
+    const local = model?._local || installedMatch(model);
+    const bench = modelBenchmark(local);
+    if (bench?.tokensPerSecond && benchmarkMatchesHardware(bench)) {
+      reasons.push('Measured on this device at ' + Number(bench.tokensPerSecond).toFixed(1) + ' tok/s; this measured speed contributes to the ranking.');
+    }
+    return reasons.join(' ');
+  }
+
+  async function benchmarkOne(local) {
+    const result = await api('/api/models/benchmark', {
+      method: 'POST',
+      body: JSON.stringify({ model: local.id, runtime: local.runtime }),
+    });
+    fitState.benchmarks[benchmarkKey(local.id, local.runtime)] = result;
+    return result;
+  }
+
+  async function benchmarkLocalModel(local, button) {
+    if (!local || fitState.benchmarkRunning) return;
+    button.disabled = true;
+    const previous = button.textContent;
+    button.textContent = 'Benchmarking…';
+    try {
+      await benchmarkOne(local);
+      await refresh();
+      renderDeviceFitModels();
+    } catch (error) {
+      alert(error.message || error);
+      button.disabled = false;
+      button.textContent = previous;
+    }
+  }
+
+  async function benchmarkAllInstalled() {
+    if (fitState.benchmarkRunning) return;
+    const rows = installedFitModels()
+      .filter((model) => catalogCapabilities(model).chat !== false)
+      .map((model) => model._local)
+      .filter(Boolean);
+    if (!rows.length) return;
+
+    fitState.benchmarkRunning = true;
+    fitState.benchmarkStop = false;
+    fitState.benchmarkProgress = { current: 0, total: rows.length, failed: 0, model: '' };
+    renderDeviceFitModels();
+
+    for (let i = 0; i < rows.length; i++) {
+      if (fitState.benchmarkStop) break;
+      const local = rows[i];
+      fitState.benchmarkProgress = {
+        ...fitState.benchmarkProgress,
+        current: i + 1,
+        model: friendlyModelName(local),
+      };
+      renderDeviceFitModels();
+      try {
+        await benchmarkOne(local);
+      } catch {
+        fitState.benchmarkProgress.failed += 1;
+      }
+      renderDeviceFitModels();
+    }
+
+    const stopped = fitState.benchmarkStop;
+    fitState.benchmarkRunning = false;
+    fitState.benchmarkStop = false;
+    const progress = fitState.benchmarkProgress || { current: 0, total: rows.length, failed: 0 };
+    fitState.benchmarkProgress = {
+      ...progress,
+      done: true,
+      stopped,
+    };
+    await refresh().catch(() => {});
+    renderDeviceFitModels();
+  }
+
+  function installedMatch(candidate) {
+    const id = String(candidate?.id || candidate?.name || '').toLowerCase();
+    const leaf = id.split('/').pop().replace(/[-_.]?gguf$/i, '');
+    return models.find((local) => {
+      const hay = [local?.id, local?.name, local?.path].filter(Boolean).join(' ').toLowerCase();
+      return (id && hay.includes(id)) || (leaf && leaf.length > 5 && hay.includes(leaf));
+    }) || null;
+  }
+
+  function compatibleFiltered() {
+    const query = fitState.query.trim().toLowerCase();
+    return fitState.compatible
+      .filter((model) => model?.compatibility?.level !== 'no' && catalogCapabilities(model).chat !== false)
+      .filter((model) => fitSpecificUseCases().every((useCase) => fitUseCaseMatches(model, useCase)))
+      .filter((model) => !query || normalizedFitSearch(model).includes(query));
+  }
+
+  function recommendedFiltered() {
+    const pool = new Map();
+    for (const model of [...fitState.recommended, ...fitState.compatible]) {
+      const id = String(model?.id || model?.name || '');
+      if (id && !pool.has(id)) pool.set(id, model);
+    }
+    const query = fitState.query.trim().toLowerCase();
+    return [...pool.values()]
+      .filter((model) => model?.compatibility?.level !== 'no' && catalogCapabilities(model).chat !== false)
+      .filter((model) => fitSpecificUseCases().every((useCase) => fitUseCaseMatches(model, useCase)))
+      .filter((model) => !query || normalizedFitSearch(model).includes(query))
+      .sort((a, b) => fitScore(b) - fitScore(a))
+      .slice(0, 12);
+  }
+
+  function installedFitModels() {
+    const candidates = [...fitState.recommended, ...fitState.compatible];
+    return models.map((local) => {
+      const hay = [local?.id, local?.name, local?.path].filter(Boolean).join(' ').toLowerCase();
+      const matched = candidates.find((candidate) => {
+        const id = String(candidate?.id || '').toLowerCase();
+        const leaf = id.split('/').pop().replace(/[-_.]?gguf$/i, '');
+        return (id && hay.includes(id)) || (leaf && leaf.length > 5 && hay.includes(leaf));
+      });
+      return {
+        id: local.name || local.id,
+        name: local.name || local.id,
+        capabilities: matched?.capabilities || local.capabilities || null,
+        compatibility: matched?.compatibility || { level: modelIsLoaded(local) ? 'loaded' : 'installed' },
+        downloads: matched?.downloads || 0,
+        _local: local,
+        _installed: true,
+      };
+    });
+  }
+
+  function sortFitModels(list) {
+    const rows = [...list];
+    const sort = fitState.sort;
+    if (sort === 'smallest') return rows.sort((a, b) => (fitParams(a) || 999) - (fitParams(b) || 999) || String(a.id || '').localeCompare(String(b.id || '')));
+    if (sort === 'popular') return rows.sort((a, b) => Number(b.downloads || 0) - Number(a.downloads || 0));
+    if (sort === 'name') return rows.sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')));
+    return rows.sort((a, b) => fitScore(b) - fitScore(a));
+  }
+
+  function renderFitCatalog(list) {
+    const box = $('fitModels');
+    box.innerHTML = list.length ? '' : '<div class="muted">No models match these filters.</div>';
+    for (const m of list) {
+      const local = m._local || installedMatch(m);
+      const loaded = local ? modelIsLoaded(local) : false;
+      const level = local ? (loaded ? 'loaded' : 'installed') : (m.compatibility?.level || 'unknown');
+      const row = document.createElement('div');
+      row.className = 'model';
+      row.innerHTML = '<div class="modelInfo"><span class="name"></span><div class="capabilities"></div><div class="fitMeta"></div><div class="fitBenchmarkMetrics"></div><button class="fitWhy" type="button">Why recommended</button><div class="fitReason" hidden></div></div><span class="fit ' + esc(level) + '">' + esc(level) + '</span><div class="modelActions"><button class="btn small primary"></button><button class="btn small benchmark" type="button" hidden>Benchmark</button></div>';
+      const size = m.compatibility?.paramsB ? ' · ' + m.compatibility.paramsB + 'B' : '';
+      row.querySelector('.name').textContent = (m.id || m.name || 'Local model') + size;
+      row.querySelector('.name').title = m.id || m.name || '';
+      const badges = modelCapabilityBadges(catalogCapabilities(m));
+      const capabilityBox = row.querySelector('.capabilities');
+      capabilityBox.innerHTML = badges;
+      capabilityBox.hidden = !badges;
+      const meta = row.querySelector('.fitMeta');
+      meta.textContent = fitResourceSummary(m);
+      meta.hidden = !meta.textContent;
+      const perf = row.querySelector('.fitBenchmarkMetrics');
+      perf.innerHTML = fitBenchmarkSummary(m);
+      perf.hidden = !perf.textContent;
+      const why = row.querySelector('.fitWhy');
+      const reason = row.querySelector('.fitReason');
+      reason.textContent = fitReasonText(m);
+      why.hidden = fitState.view !== 'recommended' || !reason.textContent;
+      why.onclick = () => { reason.hidden = !reason.hidden; why.textContent = reason.hidden ? 'Why recommended' : 'Hide details'; };
+      const button = row.querySelector('.primary');
+      const benchmark = row.querySelector('.benchmark');
+      if (local) {
+        benchmark.hidden = catalogCapabilities(m).chat === false;
+        benchmark.disabled = fitState.benchmarkRunning;
+        benchmark.onclick = () => benchmarkLocalModel(local, benchmark);
+        button.disabled = fitState.benchmarkRunning;
+        button.textContent = loaded ? 'Unload' : 'Load';
+        button.onclick = async () => {
+          button.disabled = true;
+          try {
+            await api('/api/models/' + (loaded ? 'unload' : 'load'), {
+              method: 'POST',
+              body: JSON.stringify({ model: local.id, runtime: local.runtime }),
+            });
+            await refresh();
+            renderDeviceFitModels();
+          } catch (error) {
+            alert(error.message || error);
+          } finally {
+            button.disabled = false;
+          }
+        };
+      } else {
+        button.textContent = 'Download';
+        button.onclick = () => download(m.id).then(() => loadDeviceFit(false));
+      }
+      box.appendChild(row);
+    }
+  }
+
+  function renderDeviceFitModels() {
+    const recommended = recommendedFiltered();
+    const compatible = compatibleFiltered();
+    const installed = installedFitModels();
+    $('fitTabRecommended').textContent = 'Recommended (' + recommended.length + ')';
+    $('fitTabInstalled').textContent = 'Installed (' + installed.length + ')';
+    $('fitTabAll').textContent = 'All compatible (' + compatible.length + ')';
+    for (const tab of document.querySelectorAll('[data-fit-view]')) {
+      tab.classList.toggle('active', tab.dataset.fitView === fitState.view);
+    }
+    $('fitSort').value = fitState.sort;
+    const lead = fitState.view === 'recommended'
+      ? 'Ranked for this hardware, selected capabilities, preference, and measured performance when available.'
+      : fitState.view === 'installed'
+        ? 'Models already available on this device.'
+        : 'Browse compatible models discovered from the Local catalog.';
+    $('fitViewLead').textContent = lead;
+    const allButton = $('fitBenchmarkAll');
+    const stopButton = $('fitBenchmarkStop');
+    allButton.hidden = fitState.view !== 'installed' || !installed.length;
+    allButton.disabled = fitState.benchmarkRunning;
+    stopButton.hidden = !fitState.benchmarkRunning;
+    const progress = fitState.benchmarkProgress;
+    $('fitBenchmarkStatus').textContent = !progress
+      ? ''
+      : fitState.benchmarkRunning
+        ? 'Benchmarking ' + progress.current + ' / ' + progress.total + (progress.model ? ' · ' + progress.model : '') + (progress.failed ? ' · ' + progress.failed + ' failed' : '')
+        : progress.stopped
+          ? 'Benchmark stopped after ' + progress.current + ' / ' + progress.total + (progress.failed ? ' · ' + progress.failed + ' failed' : '')
+          : progress.done
+            ? 'Benchmark complete · ' + progress.total + ' models' + (progress.failed ? ' · ' + progress.failed + ' failed' : '')
+            : '';
+    const source = fitState.view === 'recommended' ? recommended : fitState.view === 'installed' ? installed : compatible;
+    renderFitCatalog(fitState.view === 'installed' ? source : sortFitModels(source));
+  }
+
+  function toggleFitUseCase(useCase) {
+    if (useCase === 'general') {
+      fitState.useCases = ['general'];
+    } else {
+      const current = fitState.useCases.filter((item) => item !== 'general');
+      fitState.useCases = current.includes(useCase) ? current.filter((item) => item !== useCase) : [...current, useCase];
+      if (!fitState.useCases.length) fitState.useCases = ['general'];
+    }
+    for (const button of document.querySelectorAll('[data-fit-usecase]')) {
+      button.classList.toggle('active', fitState.useCases.includes(button.dataset.fitUsecase));
+    }
+    renderDeviceFitModels();
+  }
+
+  async function loadFitCompatible(query = '') {
+    const params = new URLSearchParams({ q: query, limit: '80', sort: 'downloads' });
+    const payload = await api('/api/catalog/search?' + params.toString());
+    fitState.compatible = Array.isArray(payload.models) ? payload.models : [];
+  }
+
+  async function loadDeviceFit(scanHardware = true) {
+    fitState.loading = true;
+    $('fitModels').innerHTML = '<div class="muted">Checking models that fit this device…</div>';
+    try {
+      if (scanHardware) {
+        const status = await api('/api/status');
+        runtimeState = status.runtime || null;
+        hardwareState = status.hardware || {};
+        renderFitHardware();
+      }
+      const [recommended, , benchmarkPayload] = await Promise.all([
+        api('/api/catalog/recommendations', { method: 'POST', body: JSON.stringify({ limit: 24 }) }),
+        loadFitCompatible(fitState.query),
+        api('/api/models/benchmarks'),
+      ]);
+      fitState.recommended = Array.isArray(recommended.models) ? recommended.models : [];
+      fitState.benchmarks = Object.fromEntries(
+        (Array.isArray(benchmarkPayload?.benchmarks) ? benchmarkPayload.benchmarks : [])
+          .map((item) => [benchmarkKey(item?.model, item?.runtime), item]),
+      );
+      renderDeviceFitModels();
+    } catch (error) {
+      $('fitModels').innerHTML = '<div class="error">' + esc(error.message || error) + '</div>';
+    } finally {
+      fitState.loading = false;
+    }
+  }
+
+  // ---- tools ----
+  function renderTools() {
+    const box = $('toolsList');
+    if (!box) return;
+    const selected = new Set(settings.tools);
+    const visible = tools.filter((tool) => tool.status === 'READY');
+    box.innerHTML = visible.length ? '' : '<div class="muted">No local tools are available.</div>';
+    for (const tool of visible) {
+      const row = document.createElement('div');
+      row.className = 'toolRow';
+      const permission = String(tool.permissionClass || 'READ').toUpperCase();
+      const needsApproval = permission !== 'READ';
+      row.innerHTML = '<div class="toolTop"><input type="checkbox"><div class="toolMain"><div class="toolName"></div><div class="toolDesc"></div><div class="toolMeta"><span class="tag"></span><span class="tag permission"></span><button class="btn small approve" type="button"></button></div></div></div>';
+      const checkbox = row.querySelector('input');
+      checkbox.checked = selected.has(tool.id);
+      row.querySelector('.toolName').textContent = tool.name;
+      row.querySelector('.toolDesc').textContent = tool.description || '';
+      const tags = row.querySelectorAll('.tag');
+      tags[0].textContent = tool.source || 'local';
+      tags[1].textContent = permission;
+      tags[1].classList.add(permission === 'READ' ? 'read' : 'execute');
+      const approve = row.querySelector('.approve');
+      if (!needsApproval) approve.remove();
+      else {
+        approve.textContent = approvedOnce.has(tool.id) ? 'Approved for next message' : 'Approve once';
+        approve.onclick = () => {
+          if (!checkbox.checked) {
+            checkbox.checked = true;
+            if (!settings.tools.includes(tool.id)) settings.tools.push(tool.id);
+            persistSettings();
+          }
+          if (approvedOnce.has(tool.id)) approvedOnce.delete(tool.id);
+          else approvedOnce.add(tool.id);
+          renderTools();
+        };
+      }
+      checkbox.onchange = () => {
+        if (checkbox.checked) {
+          if (!settings.tools.includes(tool.id)) settings.tools.push(tool.id);
+        } else {
+          settings.tools = settings.tools.filter((id) => id !== tool.id);
+          approvedOnce.delete(tool.id);
+        }
+        persistSettings();
+        renderTools();
+      };
+      box.appendChild(row);
+    }
+    const count = settings.tools.length;
+    $('openTools').querySelector('.toolBtnLabel').textContent = count ? 'Tools (' + count + ')' : 'Tools';
+    $('openTools').classList.toggle('active', count > 0);
+
+    const mcp = $('mcpServers');
+    mcp.innerHTML = mcpServers.length ? '' : '<div class="muted">No MCP server configured. Add servers in ~/.botconnector-device/mcp.json.</div>';
+    for (const server of mcpServers) {
+      const row = document.createElement('div');
+      row.className = 'mcpServer';
+      row.innerHTML = '<span class="grow"></span><span class="tag"></span>';
+      row.querySelector('.grow').textContent = server.name || server.id;
+      row.querySelector('.tag').textContent = server.status || 'UNKNOWN';
+      mcp.appendChild(row);
+    }
+  }
+
+  async function loadTools() {
+    try {
+      const [toolPayload, mcpPayload] = await Promise.all([api('/api/tools'), api('/api/mcp')]);
+      tools = Array.isArray(toolPayload.tools) ? toolPayload.tools : [];
+      mcpServers = Array.isArray(mcpPayload.servers) ? mcpPayload.servers : [];
+      const valid = new Set(tools.map((tool) => tool.id));
+      settings.tools = settings.tools.filter((id) => valid.has(id));
+      persistSettings();
+      renderTools();
+    } catch (error) {
+      tools = [];
+      mcpServers = [];
+      $('toolsList').innerHTML = '<div class="error">' + esc(error.message || error) + '</div>';
+    }
+  }
+
   // ---- settings ----
   function applySettings() {
     document.documentElement.dataset.theme = settings.theme;
-    $('themeBtn').textContent = settings.theme === 'light' ? '☾ Dark mode' : '☀ Light mode';
+    $('themeBtn').querySelector('span').textContent = settings.theme === 'light' ? 'Dark mode' : 'Light mode';
     $('system').value = settings.system;
     $('temperature').value = settings.temperature;
     $('tempValue').textContent = Number(settings.temperature).toFixed(1);
@@ -447,20 +1967,68 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   const persistSettings = () => { save('botconnector-local-settings-v1', settings); saveToDisk(); };
 
   const open = (id) => { $(id).classList.add('open'); $('overlay').classList.add('open'); };
-  const close = () => { for (const el of document.querySelectorAll('.panel.open,.overlay.open')) el.classList.remove('open'); };
+  const close = () => {
+    for (const el of document.querySelectorAll('.panel.open,.overlay.open')) el.classList.remove('open');
+    $('sidebar').classList.remove('mobileOpen');
+  };
 
-  $('newChat').onclick = () => { if (streaming) return; state.active = null; attachments = []; ensureChat(); renderAll(); $('prompt').focus(); };
+  $('newChat').onclick = () => { if (streaming) return; state.active = null; attachments = []; ensureChat(); renderAll(); close(); $('prompt').focus(); };
   $('search').oninput = (e) => { filter = e.target.value; renderHistory(); };
   $('chat').onclick = onChatClick;
   $('sendBtn').onclick = send;
   $('prompt').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });
-  $('prompt').addEventListener('input', autosize);
+  $('prompt').addEventListener('input', () => { autosize(); renderComposer(); });
   $('attachBtn').onclick = () => $('fileInput').click();
   $('fileInput').onchange = (e) => uploadFiles([...e.target.files]).catch((err) => alert(err.message));
-  $('modelSelect').onchange = () => { settings.model = $('modelSelect').value; persistSettings(); };
+  $('modelSelect').onchange = () => {
+    settings.model = $('modelSelect').value;
+    const current = selectedModel();
+    $('modelSelect').title = current ? modelDetail(current) : 'Select a local chat model';
+    renderModelActions();
+    persistSettings();
+  };
+  $('loadSelected').onclick = () => selectedModelAction('load');
+  $('unloadSelected').onclick = () => selectedModelAction('unload');
+  $('unloadActive').onclick = unloadActiveModel;
   $('openModels').onclick = () => { open('modelsPanel'); refresh(); loadRecommendations(); };
+  const openFit = () => { open('deviceFitPanel'); loadDeviceFit(); };
+  $('openDeviceFit').onclick = openFit;
+  $('openDeviceFitSide').onclick = openFit;
+  $('fitScan').onclick = () => loadDeviceFit(true);
+  for (const button of document.querySelectorAll('[data-fit-usecase]')) {
+    button.onclick = () => toggleFitUseCase(button.dataset.fitUsecase);
+  }
+  for (const tab of document.querySelectorAll('[data-fit-view]')) {
+    tab.onclick = () => { fitState.view = tab.dataset.fitView; renderDeviceFitModels(); };
+  }
+  $('fitPreference').onchange = (event) => { fitState.preference = event.target.value; renderDeviceFitModels(); };
+  $('fitBenchmarkAll').onclick = benchmarkAllInstalled;
+  $('fitBenchmarkStop').onclick = () => {
+    if (!fitState.benchmarkRunning) return;
+    fitState.benchmarkStop = true;
+    $('fitBenchmarkStatus').textContent = 'Stopping after the current model…';
+  };
+  $('fitSort').onchange = (event) => { fitState.sort = event.target.value; renderDeviceFitModels(); };
+  $('fitSearch').oninput = (event) => {
+    fitState.query = event.target.value;
+    clearTimeout(fitSearchTimer);
+    fitSearchTimer = setTimeout(() => loadFitCompatible(fitState.query).then(renderDeviceFitModels).catch(() => renderDeviceFitModels()), 350);
+    renderDeviceFitModels();
+  };
+  $('openTools').onclick = () => { open('toolsPanel'); loadTools(); };
   $('openSettings').onclick = () => open('settingsPanel');
+  $('openWebApp').onclick = () => { open('webAppPanel'); loadWebAppStatus(); };
+  $('openBotConnectorApp').onclick = () => window.open(webAppStatus.origin || 'https://app.botconnector.id', '_blank', 'noopener,noreferrer');
+  $('pairWebApp').onclick = pairWebApp;
+  $('disconnectWebApp').onclick = disconnectWebApp;
+  $('mobileMenu').onclick = () => { $('sidebar').classList.add('mobileOpen'); $('overlay').classList.add('open'); };
   $('overlay').onclick = close;
+  window.addEventListener('focus', () => {
+    if (!streaming) refresh().catch(() => {});
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && !streaming) refresh().catch(() => {});
+  });
   for (const b of document.querySelectorAll('[data-close]')) b.onclick = close;
   $('themeBtn').onclick = () => { settings.theme = settings.theme === 'light' ? 'dark' : 'light'; persistSettings(); applySettings(); };
   $('system').oninput = (e) => { settings.system = e.target.value; persistSettings(); };
@@ -495,6 +2063,9 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   ensureChat();
   renderAll();
   refresh();
+  loadTools();
+  loadWebAppStatus();
+  setInterval(loadWebAppStatus, 4000);
   loadFromDisk();
 }
 
@@ -504,57 +2075,162 @@ function localUiHtml({ token, host, port }) {
   return '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width,initial-scale=1">\n' +
     '<title>BotConnector Local</title>\n<link rel="icon" href="data:,">\n<style>' + STYLE + '</style>\n</head>\n<body>\n' +
     `<div class="app">
-  <aside class="sidebar">
-    <div class="brand">◇ BotConnector Local</div>
-    <button class="newchat" id="newChat">＋ New chat</button>
-    <input class="search" id="search" placeholder="Search chats">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebarHead">
+      <div class="brandRow">
+        <div class="brandMark">BC</div>
+        <div class="brandCopy">
+          <div class="brand">BotConnector Local</div>
+          <div class="brandSub">On-device AI workspace</div>
+        </div>
+      </div>
+      <button class="newchat" id="newChat">
+        <span class="iconBox"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span>
+        <span>New chat</span>
+      </button>
+      <div class="searchWrap">
+        <span class="searchIcon"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>
+        <input class="search" id="search" placeholder="Search chats">
+      </div>
+    </div>
+    <div class="sideSectionLabel">Chats</div>
     <div class="history" id="history"></div>
     <div class="sideBottom">
-      <button id="openModels">▦ Models</button>
-      <button id="openSettings">⚙ Settings</button>
-      <button id="themeBtn">☀ Light mode</button>
+      <button id="openModels"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16v12H4z"/><path d="M8 10h8M8 14h5"/></svg><span>Models</span></button>
+      <button id="openDeviceFitSide"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17V7M8 14V10M12 18V6M16 15V9M20 12v0"/></svg><span>Device fit</span></button>
+      <button id="openSettings"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.8 1.8 0 0 0 .4 2l.1.1-2.8 2.8-.1-.1a1.8 1.8 0 0 0-2-.4 1.8 1.8 0 0 0-1 1.6v.2h-4V21a1.8 1.8 0 0 0-1-1.6 1.8 1.8 0 0 0-2 .4l-.1.1-2.8-2.8.1-.1a1.8 1.8 0 0 0 .4-2A1.8 1.8 0 0 0 3 14H2.8v-4H3a1.8 1.8 0 0 0 1.6-1 1.8 1.8 0 0 0-.4-2l-.1-.1L6.9 4l.1.1a1.8 1.8 0 0 0 2 .4A1.8 1.8 0 0 0 10 3V2.8h4V3a1.8 1.8 0 0 0 1 1.6 1.8 1.8 0 0 0 2-.4l.1-.1 2.8 2.8-.1.1a1.8 1.8 0 0 0-.4 2A1.8 1.8 0 0 0 21 10h.2v4H21a1.8 1.8 0 0 0-1.6 1Z"/></svg><span>Settings</span></button>
+      <button id="themeBtn"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9Z"/></svg><span>Light mode</span></button>
     </div>
   </aside>
   <main class="main">
     <div class="topbar">
-      <select id="modelSelect"><option value="">Detecting local models…</option></select>
-      <span class="pill" id="runtimePill">…</span>
-      <span class="pill right">OFFLINE · Localhost only</span>
+      <button class="btn mobileMenu" id="mobileMenu" aria-label="Open navigation"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+      <div class="modelControl">
+        <span class="modelLabel">Model</span>
+        <select id="modelSelect"><option value="">Detecting local models…</option></select>
+      </div>
+      <div class="modelActions">
+        <span class="modelLoadState" id="modelLoadState">Checking</span>
+        <button class="btn small" id="loadSelected" hidden>Load</button>
+        <button class="btn small" id="unloadSelected" hidden>Unload</button>
+      </div>
+      <span class="pill activeModelPill" id="activeModelPill" hidden></span>
+      <button class="btn small" id="unloadActive" hidden>Unload</button>
+      <span class="pill" id="runtimePill"><span class="pillDot"></span>Checking runtime</span>
+      <button class="btn" id="openDeviceFit">Device fit</button>
+      <button class="btn connectBtn right" id="openWebApp"><span class="pillDot"></span><span>Connect Web App</span></button>
     </div>
     <div class="chat" id="chat"></div>
     <div class="composerWrap">
       <div class="composer" id="composer">
         <div class="attachments" id="attachments"></div>
-        <textarea id="prompt" rows="1" placeholder="Message your local model…  (Enter to send, Shift+Enter for a new line)"></textarea>
+        <textarea id="prompt" rows="1" placeholder="Message your local model"></textarea>
         <div class="bar">
           <input id="fileInput" type="file" hidden multiple accept=".txt,.md,.markdown,.csv,.json,.jsonl,.yaml,.yml,.xml,.html,.htm,.docx,.js,.ts,.tsx,.jsx,.py,.rs,.go,.java,.c,.cpp,.h,.hpp,.css,.sql,.sh,.ps1,.toml,.ini,.conf,.log">
-          <button class="btn" id="attachBtn">📎 Attach</button>
-          <button class="btn send" id="sendBtn">Send</button>
+          <button class="btn" id="attachBtn"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.4 11.6-8.5 8.5a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg><span>Attach</span></button>
+          <button class="btn toolBtn" id="openTools"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14.7 6.3 3-3a4.2 4.2 0 0 1-5.5 5.5l-6.7 6.7a2 2 0 1 1-2.8-2.8l6.7-6.7a4.2 4.2 0 0 1 5.5-5.5l-3 3 2.8 2.8Z"/></svg><span class="toolBtnLabel">Tools</span></button>
+          <button class="btn send" id="sendBtn" aria-label="Send message"></button>
         </div>
       </div>
-      <div class="hint">Inference and attached document text stay on this device.</div>
+      <div class="hint">Local model inference runs on this device. Optional connected tools run only when selected.</div>
     </div>
   </main>
 </div>
 <div class="overlay" id="overlay"></div>
 <aside class="panel" id="modelsPanel">
-  <div class="row"><h2 class="grow">Models</h2><button class="btn" data-close>✕</button></div>
+  <div class="panelHead"><div class="row"><div class="grow"><h2>Models</h2><div class="panelLead">Manage local runtimes and models for this device.</div></div><button class="btn" data-close>Close</button></div></div>
   <div class="card"><h3>This device</h3><div class="muted" id="hardware">Checking…</div><div class="muted" id="runtime">Checking…</div>
     <button class="btn small" id="prepareRuntime" hidden style="margin-top:8px">Install local runtime</button></div>
   <div class="muted" id="jobStatus"></div>
   <div class="card"><h3>Installed</h3><div id="installed"></div></div>
   <div class="card"><h3>Recommended for this device</h3><div id="recommended"></div></div>
-  <div class="card"><h3>Search Hugging Face (GGUF)</h3>
-    <div class="row"><input class="grow" id="catalogQuery" placeholder="e.g. qwen, gemma, llama — or a repo id"><button class="btn small" id="catalogSearch">Search</button></div>
+  <div class="card"><h3>Find GGUF models</h3>
+    <div class="row"><input class="grow" id="catalogQuery" placeholder="Search Qwen, Gemma, Llama, or enter a repo id"><button class="btn small" id="catalogSearch">Search</button></div>
     <div id="results"></div></div>
   <div class="card"><h3>Local endpoint</h3><div class="muted">__LOCAL_URL__ · OpenAI-compatible API at /v1</div></div>
 </aside>
+<aside class="panel deviceFitPanel" id="deviceFitPanel">
+  <div class="panelHead"><div class="row"><div class="grow"><h2>Device fit</h2><div class="panelLead">Hardware detected on this computer and local models that fit it.</div></div><button class="btn" id="fitScan">Scan again</button><button class="btn" data-close>Close</button></div></div>
+  <div class="fitGrid">
+    <div class="fitMetric"><span>CPU</span><strong id="fitCpu">Checking…</strong></div>
+    <div class="fitMetric"><span>RAM</span><strong id="fitRam">Checking…</strong></div>
+    <div class="fitMetric"><span>GPU</span><strong id="fitGpu">Checking…</strong></div>
+    <div class="fitMetric"><span>VRAM</span><strong id="fitVram">Checking…</strong></div>
+    <div class="fitMetric"><span>NPU</span><strong id="fitNpu">Checking…</strong></div>
+    <div class="fitMetric"><span>System</span><strong id="fitSystem">Checking…</strong></div>
+    <div class="fitMetric"><span>Backend</span><strong id="fitBackend">Checking…</strong></div>
+  </div>
+  <div class="fitFilters">
+    <div class="fitFilterCard">
+      <div class="fitFilterLabel">Use cases · select one or more</div>
+      <div class="fitUseCases">
+        <button class="fitUseCaseBtn active" data-fit-usecase="general">General</button>
+        <button class="fitUseCaseBtn" data-fit-usecase="indonesian">Bahasa Indonesia</button>
+        <button class="fitUseCaseBtn" data-fit-usecase="coding">Coding</button>
+        <button class="fitUseCaseBtn" data-fit-usecase="reasoning">Reasoning</button>
+        <button class="fitUseCaseBtn" data-fit-usecase="vision">Vision</button>
+        <button class="fitUseCaseBtn" data-fit-usecase="tools">Tools</button>
+      </div>
+    </div>
+    <label class="fitFilterCard">
+      <div class="fitFilterLabel">Preference</div>
+      <select id="fitPreference">
+        <option value="fast">Fast</option>
+        <option value="balanced" selected>Balanced</option>
+        <option value="quality">Quality</option>
+      </select>
+    </label>
+  </div>
+  <div class="fitTabs">
+    <button class="fitTab active" id="fitTabRecommended" data-fit-view="recommended">Recommended</button>
+    <button class="fitTab" id="fitTabInstalled" data-fit-view="installed">Installed</button>
+    <button class="fitTab" id="fitTabAll" data-fit-view="all">All compatible</button>
+  </div>
+  <div class="fitActionBar">
+    <div class="muted fitViewLead" id="fitViewLead">Ranked for this hardware, selected capabilities, and preference.</div>
+    <div class="row">
+      <button class="btn small" id="fitBenchmarkAll" hidden>Benchmark all</button>
+      <button class="btn small" id="fitBenchmarkStop" hidden>Stop</button>
+    </div>
+  </div>
+  <div class="muted fitBenchmarkStatus" id="fitBenchmarkStatus"></div>
+  <div class="fitBrowse">
+    <input id="fitSearch" placeholder="Search model, capability, or family">
+    <select id="fitSort" aria-label="Sort models">
+      <option value="best">Best fit</option>
+      <option value="smallest">Smallest first</option>
+      <option value="popular">Most popular</option>
+      <option value="name">Name</option>
+    </select>
+  </div>
+  <div class="card"><div id="fitModels"></div></div>
+</aside>
+<aside class="panel" id="toolsPanel">
+  <div class="panelHead"><div class="row"><div class="grow"><h2>Tools</h2><div class="panelLead">Choose capabilities the local model may use.</div></div><button class="btn" data-close>Close</button></div></div>
+  <div class="card"><h3>Available tools</h3><div class="muted">READ tools can run when selected. WRITE and EXECUTE tools also require one-time approval for the next message.</div><div class="toolList" id="toolsList"></div></div>
+  <div class="card"><h3>MCP servers</h3><div class="muted">Local MCP servers are loaded from ~/.botconnector-device/mcp.json.</div><div id="mcpServers"></div></div>
+</aside>
+<aside class="panel" id="webAppPanel">
+  <div class="panelHead"><div class="row"><div class="grow"><h2>Connect to Web App</h2><div class="panelLead">Use this local model from BotConnector Web App while inference continues on this device.</div></div><button class="btn" data-close>Close</button></div></div>
+  <div class="card">
+    <h3>1. Get a pairing code</h3>
+    <div class="muted">Open BotConnector Web App, go to Devices, and choose Connect a device.</div>
+    <button class="btn" id="openBotConnectorApp" style="margin-top:10px">Open BotConnector Web App</button>
+  </div>
+  <div class="card">
+    <h3>2. Pair this device</h3>
+    <div class="muted" id="webAppState"></div>
+    <div class="row" style="margin-top:10px"><input class="grow" id="webAppCode" placeholder="Enter pairing code" autocomplete="off"><button class="btn" id="pairWebApp">Connect</button><button class="btn" id="disconnectWebApp" hidden>Disconnect</button></div>
+    <div class="muted" id="webAppMessage" style="margin-top:8px"></div>
+  </div>
+  <div class="card"><h3>How it works</h3><div class="muted">The Web App becomes the interface while inference still runs on this computer. Pairing is saved for this OS user, so after sleep, restart, or hours offline, BotConnector Local reconnects automatically the next time it runs. Use Forget pairing only when you want this device to require a new pairing code.</div></div>
+</aside>
 <aside class="panel" id="settingsPanel">
-  <div class="row"><h2 class="grow">Settings</h2><button class="btn" data-close>✕</button></div>
-  <div class="card"><h3>System prompt</h3><textarea id="system" rows="5" placeholder="Optional instructions for every chat, e.g. Answer in Bahasa Indonesia."></textarea></div>
+  <div class="panelHead"><div class="row"><div class="grow"><h2>Settings</h2><div class="panelLead">Tune the local chat experience on this device.</div></div><button class="btn" data-close>Close</button></div></div>
+  <div class="card"><h3>System prompt</h3><textarea id="system" rows="5" placeholder="Optional instructions for every chat, for example: Answer in Bahasa Indonesia."></textarea></div>
   <div class="card"><h3>Temperature <span class="muted" id="tempValue"></span></h3><input id="temperature" type="range" min="0" max="2" step="0.1">
-    <div class="muted">Lower is more precise, higher is more creative.</div></div>
-  <div class="card"><h3>Privacy</h3><div class="muted">Chats are saved in this browser only. Nothing is sent to BotConnector cloud from this page.</div></div>
+    <div class="muted">Lower values are more focused. Higher values are more varied.</div></div>
+  <div class="card"><h3>On-device storage</h3><div class="muted">Chat history is stored on this device. Local model inference stays on this computer. Connected tools such as Web Search may access their configured external source only when you select them.</div></div>
 </aside>
 `.replace('__LOCAL_URL__', localUrl) +
     '<script>\n' + renderMarkdown.toString() + '\n' + mergeChatStates.toString() + '\n(' + app.toString() + ')(' + JSON.stringify(token) + ', renderMarkdown, mergeChatStates);\n</script>\n</body>\n</html>';

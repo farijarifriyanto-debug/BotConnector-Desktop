@@ -180,6 +180,57 @@ test('detects Ollama, exposes only verified local models, and chats locally', as
   }
 });
 
+test('passes function tools to Ollama and preserves returned tool calls', async () => {
+  let sent;
+  const fetchImpl = async (url, init = {}) => {
+    if (String(url).endsWith('/api/chat')) {
+      sent = JSON.parse(init.body);
+      return jsonResponse(200, {
+        message: {
+          content: '',
+          tool_calls: [
+            {
+              id: 'call-search',
+              type: 'function',
+              function: { name: 'web_search', arguments: { query: 'BotConnector' } },
+            },
+          ],
+        },
+        prompt_eval_count: 8,
+        eval_count: 3,
+      });
+    }
+    throw new Error('Unexpected URL ' + url);
+  };
+  const runtime = new LocalAiRuntime({ enabled: true, fetchImpl });
+  runtime.assertOllamaModelLocal = async (model) => model;
+  runtime.findOllamaBase = async () => 'http://127.0.0.1:11434';
+
+  const result = await runtime.chat({
+    model: 'qwen:test',
+    runtime: 'ollama',
+    messages: [{ role: 'user', content: 'search the web' }],
+    tools: [
+      {
+        type: 'function',
+        function: {
+          name: 'web_search',
+          description: 'Search the public web',
+          parameters: {
+            type: 'object',
+            properties: { query: { type: 'string' } },
+            required: ['query'],
+          },
+        },
+      },
+    ],
+  });
+
+  assert.equal(sent.tools[0].function.name, 'web_search');
+  assert.equal(result.tool_calls[0].function.name, 'web_search');
+  assert.equal(result.content, '');
+});
+
 test('falls back to Lemonade when Ollama is unavailable', async () => {
   const fetchImpl = async (url) => {
     if (url.endsWith('/api/tags')) throw new TypeError('Failed to fetch');
@@ -495,4 +546,99 @@ test('chat streams Ollama NDJSON deltas', async () => {
   assert.deepEqual(deltas, [{ content: 'Ja' }, { content: 'karta' }]);
   assert.equal(out.content, 'Jakarta');
   assert.deepEqual(out.usage, { prompt_tokens: 5, completion_tokens: 2 });
+});
+
+
+test('status reports loaded models from secondary runtimes even when managed llama.cpp is primary', async () => {
+  const fetchImpl = async (url) => {
+    if (String(url).endsWith('/api/tags')) throw new TypeError('ollama unavailable');
+    if (String(url).endsWith('/v1/health')) {
+      return jsonResponse(200, {
+        status: 'ok',
+        model_loaded: 'Qwen3-0.6B-GGUF',
+        all_models_loaded: [{ model_name: 'Qwen3-0.6B-GGUF' }],
+      });
+    }
+    throw new Error('Unexpected URL ' + url);
+  };
+
+  const runtime = new LocalAiRuntime({ enabled: true, fetchImpl });
+  runtime.runtimeManager.installed = async () => ({ installed: true, binary: '/tmp/llama-server' });
+  runtime.findOllamaBase = async () => null;
+  runtime.listModels = async () => [
+    { id: 'managed-model', runtime: 'llamacpp' },
+    { id: 'Qwen3-0.6B-GGUF', runtime: 'lemonade' },
+  ];
+
+  const status = await runtime.status();
+  assert.equal(status.runtime, 'llamacpp');
+  assert.equal(status.activeModel, 'Qwen3-0.6B-GGUF');
+  assert.deepEqual(status.loadedModels, ['Qwen3-0.6B-GGUF']);
+  assert.deepEqual(
+    status.runtimes.map((item) => item.runtime),
+    ['llamacpp', 'lemonade'],
+  );
+  assert.deepEqual(status.runtimes[1].loadedModels, ['Qwen3-0.6B-GGUF']);
+});
+
+
+test('benchmark stores measured local throughput and reuses runtime token timing when available', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bc-benchmark-'));
+  try {
+    const runtime = new LocalAiRuntime({
+      enabled: true,
+      dataDir: root,
+      detectHardware: async () => ({ cpu: 'Test CPU', ramGb: 16, nvidia: [{ name: 'Test GPU' }], amd: [], intel: [] }),
+    });
+    let unloaded = null;
+    runtime.chat = async () => ({
+      content: 'benchmark result',
+      usage: { prompt_tokens: 12, completion_tokens: 48 },
+      performance: {
+        tokens_per_second: 24.5,
+        prompt_tokens_per_second: 180.2,
+        load_ms: 750,
+        prompt_ms: 120,
+        generation_ms: 1959,
+      },
+    });
+    runtime.unloadModel = async (model, runtimeName) => {
+      unloaded = { model, runtime: runtimeName };
+      return { loaded: false, model, runtime: runtimeName };
+    };
+    const result = await runtime.benchmarkModel('model-1', 'ollama');
+    assert.equal(result.tokensPerSecond, 24.5);
+    assert.equal(result.source, 'runtime');
+    assert.equal(result.benchmarkVersion, 2);
+    assert.equal(result.contextTokens, 4096);
+    assert.equal(result.completionTokens, 48);
+    assert.equal(result.promptTokensPerSecond, 180.2);
+    assert.equal(result.loadMs, 750);
+    assert.equal(result.promptMs, 120);
+    assert.equal(result.generationMs, 1959);
+    assert.equal(result.hardware.gpu, 'Test GPU');
+    assert.deepEqual(unloaded, { model: 'model-1', runtime: 'ollama' });
+
+    const saved = runtime.benchmarkResults().benchmarks;
+    assert.equal(saved.length, 1);
+    assert.equal(saved[0].model, 'model-1');
+    assert.equal(saved[0].runtime, 'ollama');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+
+test('benchmark unloads the model even when inference fails', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bc-benchmark-fail-'));
+  try {
+    const runtime = new LocalAiRuntime({ enabled: true, dataDir: root });
+    let unloaded = false;
+    runtime.chat = async () => { throw new Error('benchmark inference failed'); };
+    runtime.unloadModel = async () => { unloaded = true; return { loaded: false }; };
+    await assert.rejects(runtime.benchmarkModel('model-fail', 'ollama'), /benchmark inference failed/);
+    assert.equal(unloaded, true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

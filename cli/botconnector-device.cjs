@@ -8,7 +8,9 @@ const { DeviceBridge } = require('../desktop/local/device-bridge.cjs');
 const { detectHardware } = require('../desktop/local/hardware.cjs');
 const { LocalLauncher } = require('../desktop/local/launcher.cjs');
 const { LocalAiRuntime } = require('./local-runtime.cjs');
+const { ToolRegistry } = require('../desktop/local/tools.cjs');
 const { startOfflineServer, DEFAULT_PORT } = require('./offline-server.cjs');
+const { DeviceSettings } = require('./device-settings.cjs');
 
 const PUBLIC_PACKAGE_URL = 'https://app.botconnector.id/device-cli-launcher-v1.0.2.tgz';
 
@@ -78,9 +80,10 @@ Usage:
   npx --offline ${PUBLIC_PACKAGE_URL} offline --allow-local-ai
 
 Modes:
-  connect   Pair with app.botconnector.id. When Local AI is allowed, localhost
-            UI is also available as an offline fallback.
-  offline   No pairing or cloud connection. Opens the local browser UI only.
+  connect   Connect to app.botconnector.id. The first connection uses a pairing
+            code; later launches reuse the saved device credential automatically.
+  offline   Opens the local browser UI. If this device was paired before, it
+            also reconnects to the Web App automatically when internet is available.
 
 Options:
   --code <code>                  Pairing code from app.botconnector.id
@@ -100,7 +103,7 @@ Offline cold start:
 Security:
   - Local UI binds only to 127.0.0.1.
   - Local API requires a random in-memory session token and same-origin checks.
-  - Pairing credentials stay in process memory for the online session only.
+  - Pairing credentials are stored only in this OS user profile so the same device can reconnect after restart.
   - Local AI model management and inference require explicit session approval.
   - Arbitrary remote shell access is not available.
 `.trim());
@@ -171,77 +174,28 @@ function createLocalAi(enabled) {
   });
 }
 
-async function startLocalUi(localAi, options) {
-  const localServer = await startOfflineServer({
-    localAi,
-    detectHardware,
-    port: options.port,
-    // An explicit --port is respected exactly; the default port may move to the next free one.
-    portFallback: options.portExplicit ? 0 : 10,
-    open: !options.noBrowser,
-  });
-  console.log(`[BotConnector] Local browser UI: ${localServer.url}`);
-  console.log(
-    '[BotConnector] This localhost UI keeps working if the internet connection drops.',
-  );
-  return localServer;
-}
-
-async function runOffline(options) {
-  const allowLocalAi = await promptLocalAi(options);
-  if (!allowLocalAi) {
-    throw new Error('Offline mode requires Local AI permission for this session.');
-  }
-
-  const localAi = createLocalAi(true);
-  const localServer = await startLocalUi(localAi, options);
-
-  const shutdown = () => {
-    void localServer.close();
-    localAi.close();
-    console.log('\n[BotConnector] Local offline session stopped.');
-    process.exit(0);
-  };
-  process.once('SIGINT', shutdown);
-  process.once('SIGTERM', shutdown);
-
-  console.log(
-    '[BotConnector] Offline mode is ready. No BotConnector cloud pairing is active.',
-  );
-  const hold = setInterval(() => {}, 60_000);
-  hold.unref();
-}
-
-async function connect(options) {
-  const code = await promptForCode(options);
-  const allowLocalAi = await promptLocalAi(options);
-  const allowDesktopCommander = await promptDesktopCommander(options);
-
-  const settings = new SessionSettings({
-    launcherProfiles: {
-      'desktop-commander-remote': allowDesktopCommander,
-      'ollama-serve': allowLocalAi,
+async function createToolRegistry() {
+  const registry = new ToolRegistry({
+    emit(event, payload) {
+      if (event === 'mcp:changed') {
+        const ready = Array.isArray(payload)
+          ? payload.filter(server => server?.status === 'READY').length
+          : 0;
+        if (ready) console.log(`[BotConnector] MCP servers ready: ${ready}`);
+      }
     },
   });
-
-  const launcher = new LocalLauncher({ settings });
-  const localAi = createLocalAi(allowLocalAi);
-  const tools = { list: () => [] };
-
-  let localServer = null;
-  if (allowLocalAi) {
-    try {
-      localServer = await startLocalUi(localAi, options);
-    } catch (error) {
-      console.error(
-        `[BotConnector] Local browser UI could not start: ${error?.message || error}`,
-      );
-      console.error('[BotConnector] Online Device mode will continue.');
-    }
+  try {
+    await registry.loadMcpConfig();
+  } catch (error) {
+    console.error(`[BotConnector] MCP config was not loaded: ${error?.message || error}`);
   }
+  return registry;
+}
 
+function createBridgeSession({ settings, launcher, localAi, tools, options, allowLocalAi, allowDesktopCommander = false }) {
   let lastState = '';
-  const bridge = new DeviceBridge({
+  return new DeviceBridge({
     settings,
     detectHardware,
     tools,
@@ -260,25 +214,147 @@ async function connect(options) {
       lastState = state;
       if (state === 'CONNECTED') {
         console.log(`[BotConnector] Online as ${payload.deviceName} (${payload.deviceId}).`);
-        console.log('[BotConnector] Close the terminal or press Ctrl+C to disconnect.');
-        if (allowLocalAi) {
-          console.log('[BotConnector] Local AI model management and inference are allowed for this session.');
-        }
-        if (allowDesktopCommander) {
-          console.log('[BotConnector] Desktop Commander Remote is allowed for this session.');
-        }
-      } else if (state === 'DISCONNECTED') {
-        console.log(
-          '[BotConnector] Cloud connection lost. Local browser mode remains available.',
-        );
+        if (allowLocalAi) console.log('[BotConnector] Local AI is available to BotConnector Web App for this session.');
+        if (allowDesktopCommander) console.log('[BotConnector] Desktop Commander Remote is allowed for this session.');
+      } else if (state === 'DISCONNECTED' && payload?.paired) {
+        console.log('[BotConnector] Web App connection lost. Local browser mode remains available.');
       }
     },
   });
+}
+
+function webAppController(bridge, origin) {
+  return {
+    origin,
+    status: () => bridge.status(),
+    pair: (code) => bridge.pair(code),
+    disconnect: () => bridge.unpair(),
+  };
+}
+
+async function startLocalUi(localAi, options, tools = null, webApp = null) {
+  const localServer = await startOfflineServer({
+    localAi,
+    detectHardware,
+    tools,
+    webApp,
+    port: options.port,
+    // An explicit --port is respected exactly; the default port may move to the next free one.
+    portFallback: options.portExplicit ? 0 : 10,
+    open: !options.noBrowser,
+  });
+  console.log(`[BotConnector] Local browser UI: ${localServer.url}`);
+  console.log(
+    '[BotConnector] This localhost UI keeps working if the internet connection drops.',
+  );
+  return localServer;
+}
+
+async function runOffline(options) {
+  const allowLocalAi = await promptLocalAi(options);
+  if (!allowLocalAi) {
+    throw new Error('Offline mode requires Local AI permission for this session.');
+  }
+
+  const settings = new DeviceSettings({
+    launcherProfiles: {
+      'desktop-commander-remote': false,
+      'ollama-serve': true,
+    },
+  });
+  const launcher = new LocalLauncher({ settings });
+  const localAi = createLocalAi(true);
+  const tools = await createToolRegistry();
+  const bridge = createBridgeSession({
+    settings,
+    launcher,
+    localAi,
+    tools,
+    options,
+    allowLocalAi: true,
+  });
+  const localServer = await startLocalUi(
+    localAi,
+    options,
+    tools,
+    webAppController(bridge, options.origin),
+  );
+
+  if (settings.get('devicePairing')) {
+    bridge.connect().catch((error) => {
+      console.error('[BotConnector] Saved Web App connection is unavailable: ' + (error?.message || error));
+    });
+  }
+
+  const shutdown = () => {
+    bridge.close();
+    void localServer.close();
+    void tools.close();
+    localAi.close();
+    launcher.stopAll();
+    console.log('\n[BotConnector] Local offline session stopped.');
+    process.exit(0);
+  };
+  process.once('SIGINT', shutdown);
+  process.once('SIGTERM', shutdown);
+
+  console.log(
+    settings.get('devicePairing')
+      ? '[BotConnector] Local mode is ready. Saved Web App pairing will reconnect automatically when online.'
+      : '[BotConnector] Local mode is ready. Pair with Web App once to enable automatic reconnect on future launches.',
+  );
+  const hold = setInterval(() => {}, 60_000);
+  hold.unref();
+}
+
+async function connect(options) {
+  const allowLocalAi = await promptLocalAi(options);
+  const allowDesktopCommander = await promptDesktopCommander(options);
+
+  const settings = new DeviceSettings({
+    launcherProfiles: {
+      'desktop-commander-remote': allowDesktopCommander,
+      'ollama-serve': allowLocalAi,
+    },
+  });
+  const savedPairing = settings.get('devicePairing');
+  const code = options.code || (!savedPairing ? await promptForCode(options) : '');
+
+  const launcher = new LocalLauncher({ settings });
+  const localAi = createLocalAi(allowLocalAi);
+  const tools = await createToolRegistry();
+  const bridge = createBridgeSession({
+    settings,
+    launcher,
+    localAi,
+    tools,
+    options,
+    allowLocalAi,
+    allowDesktopCommander,
+  });
+
+  let localServer = null;
+  if (allowLocalAi) {
+    try {
+      localServer = await startLocalUi(
+        localAi,
+        options,
+        tools,
+        webAppController(bridge, options.origin),
+      );
+    } catch (error) {
+      console.error(
+        `[BotConnector] Local browser UI could not start: ${error?.message || error}`,
+      );
+      console.error('[BotConnector] Online Device mode will continue.');
+    }
+  }
 
   const shutdown = () => {
     bridge.close();
     if (localServer) void localServer.close();
     localAi.close();
+    void tools.close();
     launcher.stopAll();
     console.log('\n[BotConnector] Device offline.');
     process.exit(0);
@@ -286,9 +362,16 @@ async function connect(options) {
   process.once('SIGINT', shutdown);
   process.once('SIGTERM', shutdown);
 
-  console.log(`[BotConnector] Pairing with ${options.origin}...`);
-  const status = await bridge.pair(code);
-  console.log(`[BotConnector] Pairing accepted. Device ID: ${status.deviceId}`);
+  let status;
+  if (code) {
+    console.log(`[BotConnector] Pairing with ${options.origin}...`);
+    status = await bridge.pair(code);
+    console.log(`[BotConnector] Pairing accepted. Device ID: ${status.deviceId}`);
+  } else {
+    console.log(`[BotConnector] Reconnecting saved device to ${options.origin}...`);
+    status = await bridge.connect();
+    console.log(`[BotConnector] Saved pairing loaded. Device ID: ${status.deviceId}`);
+  }
 
   // Keep this foreground process alive. The WebSocket itself also holds the
   // event loop, while this timer makes the intended session lifetime explicit.
@@ -337,6 +420,7 @@ module.exports = {
   promptDesktopCommander,
   promptLocalAi,
   createLocalAi,
+  createToolRegistry,
   startLocalUi,
   runOffline,
   connect,

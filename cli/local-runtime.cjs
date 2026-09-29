@@ -1,6 +1,7 @@
 const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
+const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const { spawn } = require('node:child_process');
 const { RuntimeManager } = require('../desktop/local/runtime-manager.cjs');
@@ -77,7 +78,49 @@ function normalizeMessages(messages) {
     const content = message?.content == null ? '' : String(message.content);
     total += content.length;
     if (total > MAX_CHAT_CHARS) throw new Error('Local chat payload is too large.');
-    return { role, content };
+    const normalized = { role, content };
+    if (role === 'tool' && message?.tool_call_id) {
+      normalized.tool_call_id = String(message.tool_call_id).slice(0, 256);
+    }
+    if (role === 'assistant' && Array.isArray(message?.tool_calls)) {
+      normalized.tool_calls = message.tool_calls.slice(0, 16).map((call) => {
+        const args =
+          call?.function?.arguments && typeof call.function.arguments === 'object'
+            ? JSON.stringify(call.function.arguments)
+            : String(call?.function?.arguments || '{}');
+        total += args.length;
+        if (total > MAX_CHAT_CHARS) throw new Error('Local chat payload is too large.');
+        return {
+          id: String(call?.id || crypto.randomUUID()).slice(0, 256),
+          type: 'function',
+          function: {
+            name: String(call?.function?.name || '').slice(0, 256),
+            arguments: args,
+          },
+        };
+      });
+    }
+    return normalized;
+  });
+}
+
+function normalizeTools(tools) {
+  if (!Array.isArray(tools)) return [];
+  return tools.slice(0, 24).map((tool) => {
+    const fn = tool?.function || {};
+    const name = String(fn.name || '').trim();
+    if (!name || name.length > 256) throw new Error('Invalid local tool name.');
+    return {
+      type: 'function',
+      function: {
+        name,
+        description: String(fn.description || '').slice(0, 2000),
+        parameters:
+          fn.parameters && typeof fn.parameters === 'object' && !Array.isArray(fn.parameters)
+            ? fn.parameters
+            : { type: 'object', properties: {} },
+      },
+    };
   });
 }
 
@@ -436,6 +479,7 @@ class LocalAiRuntime {
       Number(process.env.BOTCONNECTOR_LOCAL_AI_IDLE_MS || 5 * 60 * 1000),
     );
     this.idleTimer = null;
+    this.benchmarksFile = path.join(this.dataDir, 'benchmarks.json');
 
     this.runtimeManager = new RuntimeManager({
       baseDir: this.runtimeDir,
@@ -569,38 +613,45 @@ class LocalAiRuntime {
 
   async status() {
     this.assertEnabled();
-    const runtime = await this.detect();
-    if (!runtime) {
-      return {
-        available: false,
-        runtime: null,
-        installable: true,
-        message:
-          'No local AI runtime is available. BotConnector can install its managed llama.cpp runtime without a desktop installer.',
-      };
+
+    const runtimes = [];
+    const loadedModels = [];
+    const addRuntime = (runtime, baseUrl, models = []) => {
+      const normalized = [...new Set((Array.isArray(models) ? models : []).map(String).filter(Boolean))];
+      runtimes.push({ runtime, baseUrl, loadedModels: normalized });
+      loadedModels.push(...normalized);
+    };
+
+    const managed = await this.managedInstalled().catch(() => ({ installed: false }));
+    if (managed?.installed) {
+      addRuntime(
+        'llamacpp',
+        MANAGED_LLAMA_BASE,
+        this.managedRunning() && this.managedModel ? [this.managedModel] : [],
+      );
     }
 
-    const models = await this.listModels(runtime);
-    let loadedModels = [];
-
-    if (runtime.kind === 'llamacpp') {
-      if (this.managedRunning() && this.managedModel) loadedModels = [this.managedModel];
-    } else if (runtime.kind === 'ollama') {
+    const ollamaBase = await this.findOllamaBase().catch(() => null);
+    if (ollamaBase) {
+      let running = [];
       try {
-        const running = await this.fetchJson(`${runtime.baseUrl}/api/ps`, { method: 'GET' }, 3000);
-        loadedModels = (Array.isArray(running?.models) ? running.models : [])
+        const payload = await this.fetchJson(`${ollamaBase}/api/ps`, { method: 'GET' }, 3000);
+        running = (Array.isArray(payload?.models) ? payload.models : [])
           .map((model) => String(model?.name || model?.model || ''))
           .filter(Boolean);
       } catch {}
-    } else {
-      try {
-        const health = await this.fetchJson(
-          `${LEMONADE_BASE}/v1/health`,
-          { method: 'GET' },
-          3000,
-        );
+      addRuntime('ollama', ollamaBase, running);
+    }
+
+    try {
+      const health = await this.fetchJson(
+        `${LEMONADE_BASE}/v1/health`,
+        { method: 'GET' },
+        3000,
+      );
+      if (!health?.status || health.status === 'ok') {
         const primary = String(health?.model_loaded || '');
-        loadedModels = [
+        const running = [
           ...(primary ? [primary] : []),
           ...(Array.isArray(health?.all_models_loaded)
             ? health.all_models_loaded
@@ -608,18 +659,36 @@ class LocalAiRuntime {
                 .filter(Boolean)
             : []),
         ];
-        loadedModels = [...new Set(loadedModels)];
-      } catch {}
+        addRuntime('lemonade', LEMONADE_BASE, running);
+      }
+    } catch {}
+
+    if (!runtimes.length) {
+      return {
+        available: false,
+        runtime: null,
+        runtimes: [],
+        loadedModels: [],
+        activeModel: null,
+        installable: true,
+        message:
+          'No local AI runtime is available. BotConnector can install its managed llama.cpp runtime without a desktop installer.',
+      };
     }
+
+    const models = await this.listModels();
+    const uniqueLoaded = [...new Set(loadedModels)];
+    const primary = runtimes[0];
 
     return {
       available: true,
-      runtime: runtime.kind,
-      baseUrl: runtime.baseUrl,
+      runtime: primary.runtime,
+      baseUrl: primary.baseUrl,
+      runtimes,
       models: models.length,
-      activeModel: loadedModels[0] || null,
-      loadedModels,
-      managed: runtime.kind === 'llamacpp',
+      activeModel: uniqueLoaded[0] || null,
+      loadedModels: uniqueLoaded,
+      managed: primary.runtime === 'llamacpp',
     };
   }
 
@@ -1297,10 +1366,11 @@ class LocalAiRuntime {
     return { content, reasoning, usage };
   }
 
-  async chat({ model, messages, runtime: runtimeHint = '', options = {}, request_id: requestId = '', onDelta } = {}) {
+  async chat({ model, messages, runtime: runtimeHint = '', options = {}, request_id: requestId = '', onDelta, tools = [], tool_choice: toolChoice = 'auto' } = {}) {
     this.assertEnabled();
     const modelName = validModelName(model);
     const normalized = normalizeMessages(messages);
+    const toolDefs = normalizeTools(tools);
     const runtime = runtimeHint || (await this.detect())?.kind;
     if (!runtime) throw new Error('No supported local AI runtime is available.');
     this.clearIdleTimer();
@@ -1318,7 +1388,14 @@ class LocalAiRuntime {
         await this.loadModel(modelName, runtime);
       }
       this.clearIdleTimer();
-      const body = { model: 'botconnector-local', messages: normalized, stream, temperature };
+      const body = {
+        model: 'botconnector-local',
+        messages: normalized,
+        stream,
+        temperature,
+        ...(options?.max_tokens ? { max_tokens: Math.max(8, Math.min(512, Number(options.max_tokens) || 64)) } : {}),
+        ...(toolDefs.length ? { tools: toolDefs, tool_choice: toolChoice === 'none' ? 'none' : 'auto' } : {}),
+      };
       const url = `${MANAGED_LLAMA_BASE}/v1/chat/completions`;
       let result;
       if (stream) {
@@ -1329,11 +1406,20 @@ class LocalAiRuntime {
           { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal },
           15 * 60 * 1000,
         );
+        const message = payload?.choices?.[0]?.message || {};
         result = {
-          content: String(payload?.choices?.[0]?.message?.content || ''),
+          content: String(message?.content || ''),
+          tool_calls: Array.isArray(message?.tool_calls) ? message.tool_calls : [],
           model: modelName,
           runtime,
           usage: payload?.usage,
+          performance: payload?.timings ? {
+            tokens_per_second: Number(payload.timings.predicted_per_second || 0) || null,
+            prompt_tokens_per_second: Number(payload.timings.prompt_per_second || 0) || null,
+            load_ms: Number(payload.timings.load_ms || 0) || null,
+            prompt_ms: Number(payload.timings.prompt_ms || 0) || null,
+            generation_ms: Number(payload.timings.predicted_ms || 0) || null,
+          } : null,
         };
       }
       this.scheduleIdleUnload(runtime, modelName);
@@ -1352,7 +1438,9 @@ class LocalAiRuntime {
         options: {
           temperature,
           ...(options?.num_ctx ? { num_ctx: Math.max(512, Math.min(262144, Number(options.num_ctx) || 4096)) } : {}),
+          ...(options?.max_tokens ? { num_predict: Math.max(8, Math.min(512, Number(options.max_tokens) || 64)) } : {}),
         },
+        ...(toolDefs.length ? { tools: toolDefs } : {}),
       };
       let payload;
       let content = '';
@@ -1375,11 +1463,24 @@ class LocalAiRuntime {
       }
       const result = {
         content,
+        tool_calls: Array.isArray(payload?.message?.tool_calls) ? payload.message.tool_calls : [],
         model: modelName,
         runtime: 'ollama',
         usage: {
           prompt_tokens: Number(payload?.prompt_eval_count || 0),
           completion_tokens: Number(payload?.eval_count || 0),
+        },
+        performance: {
+          tokens_per_second: Number(payload?.eval_count || 0) && Number(payload?.eval_duration || 0)
+            ? +(Number(payload.eval_count) / (Number(payload.eval_duration) / 1e9)).toFixed(2)
+            : null,
+          prompt_tokens_per_second: Number(payload?.prompt_eval_count || 0) && Number(payload?.prompt_eval_duration || 0)
+            ? +(Number(payload.prompt_eval_count) / (Number(payload.prompt_eval_duration) / 1e9)).toFixed(2)
+            : null,
+          load_ms: Number(payload?.load_duration || 0) ? +(Number(payload.load_duration) / 1e6).toFixed(1) : null,
+          prompt_ms: Number(payload?.prompt_eval_duration || 0) ? +(Number(payload.prompt_eval_duration) / 1e6).toFixed(1) : null,
+          generation_ms: Number(payload?.eval_duration || 0) ? +(Number(payload.eval_duration) / 1e6).toFixed(1) : null,
+          total_ms: Number(payload?.total_duration || 0) ? +(Number(payload.total_duration) / 1e6).toFixed(1) : null,
         },
       };
       this.scheduleIdleUnload('ollama', modelName);
@@ -1388,7 +1489,14 @@ class LocalAiRuntime {
 
     await this.loadModel(modelName, 'lemonade');
     this.clearIdleTimer();
-    const body = { model: modelName, messages: normalized, stream, temperature };
+    const body = {
+      model: modelName,
+      messages: normalized,
+      stream,
+      temperature,
+      ...(options?.max_tokens ? { max_tokens: Math.max(8, Math.min(512, Number(options.max_tokens) || 64)) } : {}),
+      ...(toolDefs.length ? { tools: toolDefs, tool_choice: toolChoice === 'none' ? 'none' : 'auto' } : {}),
+    };
     const url = `${LEMONADE_BASE}/v1/chat/completions`;
     let result;
     if (stream) {
@@ -1399,17 +1507,109 @@ class LocalAiRuntime {
         { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal },
         15 * 60 * 1000,
       );
+      const message = payload?.choices?.[0]?.message || {};
       result = {
-        content: String(payload?.choices?.[0]?.message?.content || ''),
+        content: String(message?.content || ''),
+        tool_calls: Array.isArray(message?.tool_calls) ? message.tool_calls : [],
         model: modelName,
         runtime: 'lemonade',
         usage: payload?.usage,
+        performance: payload?.timings ? {
+          tokens_per_second: Number(payload.timings.predicted_per_second || payload.timings.tokens_per_second || 0) || null,
+          prompt_tokens_per_second: Number(payload.timings.prompt_per_second || 0) || null,
+          load_ms: Number(payload.timings.load_ms || 0) || null,
+          prompt_ms: Number(payload.timings.prompt_ms || 0) || null,
+          generation_ms: Number(payload.timings.predicted_ms || payload.timings.generation_ms || 0) || null,
+        } : null,
       };
     }
     this.scheduleIdleUnload('lemonade', modelName);
     return result;
     } finally {
       this.chatControllers.delete(id);
+    }
+  }
+
+  benchmarkResults() {
+    this.assertEnabled();
+    try {
+      const saved = JSON.parse(fs.readFileSync(this.benchmarksFile, 'utf8'));
+      const rows = saved?.version === 1 && Array.isArray(saved.benchmarks) ? saved.benchmarks : [];
+      return { benchmarks: rows };
+    } catch {
+      return { benchmarks: [] };
+    }
+  }
+
+  async benchmarkModel(model, runtimeHint = '') {
+    this.assertEnabled();
+    const modelName = validModelName(model);
+    const runtime = String(runtimeHint || (await this.detect())?.kind || '');
+    if (!runtime) throw new Error('No supported local AI runtime is available.');
+
+    const benchmarkVersion = 2;
+    const contextTokens = 4096;
+    const benchmarkSeed = 'Local AI should answer quickly while preserving useful context, predictable memory use, and stable tool behavior on the same device.';
+    const benchmarkContext = Array.from({ length: 28 }, () => benchmarkSeed).join(' ');
+    const started = Date.now();
+    try {
+      const result = await this.chat({
+        model: modelName,
+        runtime,
+        request_id: 'benchmark-' + crypto.randomUUID(),
+        messages: [{
+          role: 'user',
+          content: benchmarkContext + '\n\nWrite one concise paragraph of about 60 words explaining why local AI latency matters. Do not use a list.',
+        }],
+        options: { temperature: 0, max_tokens: 96, num_ctx: contextTokens, keep_alive: '0' },
+      });
+      const wallMs = Math.max(1, Date.now() - started);
+      const completionTokens = Number(result?.usage?.completion_tokens || result?.usage?.completionTokens || 0);
+      const promptTokens = Number(result?.usage?.prompt_tokens || result?.usage?.promptTokens || 0);
+      const nativeTps = Number(result?.performance?.tokens_per_second || 0);
+      const promptTps = Number(result?.performance?.prompt_tokens_per_second || 0);
+      const tokensPerSecond = nativeTps > 0
+        ? +nativeTps.toFixed(2)
+        : completionTokens > 0
+          ? +(completionTokens / (wallMs / 1000)).toFixed(2)
+          : null;
+
+      const hardware = await Promise.resolve(this.detectHardware()).catch(() => ({}));
+      const row = {
+        benchmarkVersion,
+        model: modelName,
+        runtime,
+        measuredAt: new Date().toISOString(),
+        wallMs,
+        contextTokens,
+        promptTokens,
+        completionTokens,
+        tokensPerSecond,
+        promptTokensPerSecond: promptTps > 0 ? +promptTps.toFixed(2) : null,
+        loadMs: Number(result?.performance?.load_ms || 0) || null,
+        promptMs: Number(result?.performance?.prompt_ms || 0) || null,
+        generationMs: Number(result?.performance?.generation_ms || 0) || null,
+        runtimeTotalMs: Number(result?.performance?.total_ms || 0) || null,
+        source: nativeTps > 0 ? 'runtime' : completionTokens > 0 ? 'wall-clock' : 'wall-clock-only',
+        hardware: {
+          cpu: hardware?.cpu || null,
+          ramGb: Number(hardware?.ramGb || 0) || null,
+          gpu: [...(hardware?.nvidia || []), ...(hardware?.amd || []), ...(hardware?.intel || [])][0]?.name || null,
+        },
+      };
+
+      const current = this.benchmarkResults().benchmarks.filter(
+        (item) => !(String(item?.model) === modelName && String(item?.runtime) === runtime),
+      );
+      current.unshift(row);
+      fs.mkdirSync(this.dataDir, { recursive: true });
+      const tmp = this.benchmarksFile + '.' + process.pid + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify({ version: 1, benchmarks: current.slice(0, 100) }, null, 2) + '\n', { mode: 0o600 });
+      fs.renameSync(tmp, this.benchmarksFile);
+      return row;
+    } finally {
+      // Benchmarks are transient work. Do not leave the tested model resident in RAM/VRAM.
+      await this.unloadModel(modelName, runtime).catch(() => {});
     }
   }
 

@@ -1,5 +1,7 @@
 const os = require('node:os');
+const crypto = require('node:crypto');
 const defaultCatalog = require('./catalog.cjs');
+const { MAX_TOOL_CALLS_PER_TURN } = require('./tools.cjs');
 
 function defaultDeviceName() {
   return os.hostname() || 'BotConnector device';
@@ -8,6 +10,233 @@ function defaultDeviceName() {
 function wsState(socket) {
   if (!socket) return 'DISCONNECTED';
   return ['CONNECTING', 'CONNECTED', 'CLOSING', 'DISCONNECTED'][socket.readyState] || 'DISCONNECTED';
+}
+
+function parseToolArguments(call) {
+  const raw = call?.function?.arguments;
+  if (raw == null || raw === '') return {};
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw;
+  try {
+    const parsed = JSON.parse(String(raw));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error();
+    return parsed;
+  } catch {
+    throw new Error(`Tool '${call?.function?.name || 'unknown'}' returned invalid JSON arguments.`);
+  }
+}
+
+function toolResultContent(value) {
+  try {
+    const serialized = JSON.stringify(value);
+    return serialized.length > 64 * 1024
+      ? serialized.slice(0, 64 * 1024) + '…[truncated]'
+      : serialized;
+  } catch {
+    return JSON.stringify({ error: 'Tool result could not be serialized.' });
+  }
+}
+
+function messageText(message) {
+  const content = message?.content;
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.map(part => {
+    if (typeof part === 'string') return part;
+    if (part?.type === 'text' || part?.type === 'input_text') return String(part?.text || '');
+    return '';
+  }).filter(Boolean).join(' ');
+}
+
+function needsDeviceContext(messages = []) {
+  const users = (Array.isArray(messages) ? messages : [])
+    .filter(message => message?.role === 'user')
+    .slice(-3)
+    .map(messageText)
+    .filter(Boolean);
+  if (!users.length) return false;
+  const text = users.join(' ').toLowerCase();
+
+  const ownedDevice =
+    /\b(my\s+(?:laptop|computer|pc|device|machine)|(?:laptop|komputer|computer|pc|device|perangkat|mesin)\s+(?:saya|aku|ku|ini))\b/i;
+  const hardwareFact =
+    /\b(?:spesifikasi|specs?|specification|hardware|cpu|processor|prosesor|ram|memory|memori|gpu|graphics?|grafis|vram|npu|operating\s+system|sistem\s+operasi|windows|linux|macos?)\b/i;
+  const selfReference =
+    /\b(?:saya|aku|ku|my|mine|laptop|komputer|computer|pc|device|perangkat|this\s+device|this\s+laptop)\b/i;
+  const localModelFit =
+    /\b(?:model|llm|gguf|qwen|llama|gemma|deepseek|glm|mistral)\b/i.test(text) &&
+    /\b(?:cocok|fit|jalan|jalankan|run|running|muat|cukup|recommended|recommendation|rekomendasi|cepat|lambat)\b/i.test(text);
+
+  return ownedDevice.test(text) || (hardwareFact.test(text) && selfReference.test(text)) || localModelFit;
+}
+
+function publicHardwareSnapshot(hardware = {}) {
+  const gpuRows = [
+    ...(Array.isArray(hardware?.nvidia) ? hardware.nvidia : []),
+    ...(Array.isArray(hardware?.amd) ? hardware.amd : []),
+    ...(Array.isArray(hardware?.intel) ? hardware.intel : []),
+  ].map(gpu => ({
+    name: gpu?.name || null,
+    vramGb: Number(gpu?.vramGb || gpu?.memoryGb || 0) || null,
+    vendor: gpu?.vendor || null,
+  }));
+  return {
+    cpu: hardware?.cpu || null,
+    ramGb: Number(hardware?.ramGb || 0) || null,
+    gpu: gpuRows,
+    npu: hardware?.npu ? {
+      available: Boolean(hardware.npu.available || hardware.npu.name),
+      name: hardware.npu.name || null,
+    } : null,
+    platform: hardware?.platform || process.platform,
+    arch: hardware?.arch || process.arch,
+    release: hardware?.release || null,
+  };
+}
+
+function deviceContextMessage(hardware, benchmarks = []) {
+  const measured = (Array.isArray(benchmarks) ? benchmarks : [])
+    .filter(item => item && item.model)
+    .slice(0, 12)
+    .map(item => ({
+      model: item.model,
+      runtime: item.runtime || null,
+      tokensPerSecond: Number(item.tokensPerSecond || 0) || null,
+      promptTokensPerSecond: Number(item.promptTokensPerSecond || 0) || null,
+      measuredAt: item.measuredAt || null,
+    }));
+  return {
+    role: 'system',
+    content:
+      'BotConnector current-device context (read-only; detected locally for this request). ' +
+      'Use these facts when the user asks about their current laptop/device or local-model fit. ' +
+      'Do not invent hardware that is not listed. Device JSON: ' +
+      JSON.stringify(publicHardwareSnapshot(hardware)) +
+      (measured.length ? ' Local benchmark JSON: ' + JSON.stringify(measured) : ''),
+  };
+}
+
+
+async function runToolAgent({ localAi, tools, params = {}, onEvent = () => {} } = {}) {
+  const selected = Array.isArray(params.tools)
+    ? [...new Set(params.tools.map(String).filter(Boolean))].slice(0, 24)
+    : [];
+  const toolSchemas = tools?.schemas ? tools.schemas(selected) : [];
+  if (!selected.length || !toolSchemas.length) {
+    return localAi.chat({ ...params, tools: [] });
+  }
+
+  const approved = new Set(
+    Array.isArray(params.approved_tools) ? params.approved_tools.map(String) : [],
+  );
+  const messages = Array.isArray(params.messages)
+    ? params.messages.map(message => ({ ...message }))
+    : [];
+  const events = [];
+  const record = (event) => {
+    events.push(event);
+    try { onEvent(event); } catch {}
+  };
+  let lastResult = null;
+
+  for (let round = 0; round < MAX_TOOL_CALLS_PER_TURN; round += 1) {
+    lastResult = await localAi.chat({
+      ...params,
+      messages,
+      tools: toolSchemas,
+      tool_choice: 'auto',
+    });
+    const calls = Array.isArray(lastResult?.tool_calls) ? lastResult.tool_calls : [];
+    if (!calls.length) return { ...lastResult, tool_events: events };
+
+    messages.push({
+      role: 'assistant',
+      content: String(lastResult?.content || ''),
+      tool_calls: calls,
+    });
+
+    for (const call of calls) {
+      const name = String(call?.function?.name || '');
+      const tool = tools.findTool(name);
+      if (!tool || (!selected.includes(tool.id) && !selected.includes(tool.name))) {
+        const error = `Tool '${name || 'unknown'}' was not selected for this turn.`;
+        record({ type: 'tool.error', name, error });
+        messages.push({
+          role: 'tool',
+          tool_call_id: String(call?.id || crypto.randomUUID()),
+          content: JSON.stringify({ error }),
+        });
+        continue;
+      }
+
+      const callId = String(call?.id || crypto.randomUUID());
+      let args;
+      try {
+        args = parseToolArguments(call);
+      } catch (error) {
+        const message = error?.message || String(error);
+        record({ type: 'tool.error', id: callId, name, error: message });
+        messages.push({
+          role: 'tool',
+          tool_call_id: callId,
+          content: JSON.stringify({ error: message }),
+        });
+        continue;
+      }
+
+      record({
+        type: 'tool.started',
+        id: callId,
+        name,
+        source: tool.source,
+        permissionClass: tool.permissionClass,
+        arguments: args,
+      });
+      try {
+        const result = await tools.invoke(name, args, {
+          selected: true,
+          approved: approved.has(tool.id) || approved.has(tool.name),
+        });
+        record({
+          type: 'tool.completed',
+          id: callId,
+          name,
+          source: tool.source,
+          permissionClass: tool.permissionClass,
+          result,
+        });
+        messages.push({
+          role: 'tool',
+          tool_call_id: callId,
+          content: toolResultContent(result),
+        });
+      } catch (error) {
+        const message = error?.message || String(error);
+        record({
+          type: 'tool.error',
+          id: callId,
+          name,
+          source: tool.source,
+          permissionClass: tool.permissionClass,
+          error: message,
+        });
+        messages.push({
+          role: 'tool',
+          tool_call_id: callId,
+          content: JSON.stringify({ error: message }),
+        });
+      }
+    }
+  }
+
+  const final = await localAi.chat({
+    ...params,
+    messages,
+    tools: [],
+    tool_choice: 'none',
+  });
+  const limit = { type: 'tool.limit', max_calls: MAX_TOOL_CALLS_PER_TURN };
+  record(limit);
+  return { ...final, tool_events: events };
 }
 
 class DeviceBridge {
@@ -45,7 +274,7 @@ class DeviceBridge {
 
   async pair(code) {
     const pairingCode = String(code || '').trim().toUpperCase();
-    if (!/^[A-Z0-9-]{6,32}$/.test(pairingCode)) throw new Error('Invalid pairing code.');
+    if (!/^[A-Z0-9_-]{6,32}$/.test(pairingCode)) throw new Error('Invalid pairing code.');
     const response = await fetch(`${this.cloudBase}/api/devices/pair/exchange`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', accept: 'application/json' },
@@ -151,6 +380,28 @@ class DeviceBridge {
       this.reply(message.id, { ok: false, error: { message: error.message || String(error) } });
     }
   }
+  async withDeviceContext(params = {}) {
+    const messages = Array.isArray(params?.messages) ? params.messages : [];
+    if (!needsDeviceContext(messages)) return params;
+    const hardware = await this.detectHardware();
+    const benchmarks = this.localAi?.benchmarkResults?.().benchmarks || [];
+    return {
+      ...params,
+      messages: [
+        deviceContextMessage(hardware, benchmarks),
+        ...messages.map(message => ({ ...message })),
+      ],
+    };
+  }
+
+  async agentChat(params = {}) {
+    return runToolAgent({
+      localAi: this.localAi,
+      tools: this.tools,
+      params: await this.withDeviceContext(params),
+    });
+  }
+
   async execute(method, params) {
     if (method === 'hardware.get') return this.detectHardware();
     // Read-only public catalog lookup ranked for this device's hardware; no local AI permission needed.
@@ -159,7 +410,7 @@ class DeviceBridge {
     if (method === 'launcher.start') return this.launcher.start(params.id);
     if (method === 'launcher.stop') return this.launcher.stop(params.id);
     if (method === 'tools.list') return this.tools.list().map(tool => ({
-      id: tool.id, name: tool.name, source: tool.source,
+      id: tool.id, name: tool.name, description: tool.description, source: tool.source,
       permissionClass: tool.permissionClass, enabled: Boolean(tool.enabled), status: tool.status,
     }));
     if (method === 'runtime.status') return this.localAi.status();
@@ -184,7 +435,10 @@ class DeviceBridge {
     if (method === 'models.delete') return this.localAi.deleteModel(params.model, params.runtime);
     if (method === 'model.load') return this.localAi.loadModel(params.model, params.runtime);
     if (method === 'model.unload') return this.localAi.unloadModel(params.model, params.runtime);
-    if (method === 'chat.completions') return this.localAi.chat(params);
+    if (method === 'chat.completions') {
+      if (params?.tool_mode === 'auto') return this.agentChat(params);
+      return this.localAi.chat(await this.withDeviceContext(params));
+    }
     if (method === 'chat.cancel') return this.localAi.cancelChat(params.id);
     throw new Error('Remote capability is not allowed.');
   }
@@ -202,4 +456,12 @@ class DeviceBridge {
   }
 }
 
-module.exports = { DeviceBridge, defaultDeviceName, wsState };
+module.exports = {
+  DeviceBridge,
+  defaultDeviceName,
+  wsState,
+  runToolAgent,
+  needsDeviceContext,
+  publicHardwareSnapshot,
+  deviceContextMessage,
+};

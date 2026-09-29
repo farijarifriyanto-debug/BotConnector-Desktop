@@ -46,7 +46,52 @@ test('offline UI serves localhost HTML and protects local API with a session tok
   assert.equal(page.status, 200);
   const html = await page.text();
   assert.match(html, /BotConnector Local/);
-  assert.match(html, /OFFLINE · Localhost only/);
+  assert.match(html, /Connect Web App/);
+  assert.match(html, /How can I help on this device\?/);
+  assert.match(html, /id="openTools"/);
+  assert.match(html, /On-device AI workspace/);
+  assert.match(html, /\[hidden\]\{display:none!important\}/);
+  assert.match(html, /friendlyModelName/);
+  assert.match(html, /button\.disabled = !streaming/);
+  assert.match(html, /id="loadSelected"/);
+  assert.match(html, /id="unloadSelected"/);
+  assert.match(html, /id="modelLoadState"/);
+  assert.match(html, /loaded \? 'Loaded' : 'Unloaded'/);
+  assert.match(html, /Chat can auto-load the selected model/);
+  assert.match(html, /id="openWebApp"/);
+  assert.match(html, /Connect to Web App/);
+  assert.match(html, /Web App paired/);
+  assert.match(html, /reconnects automatically/);
+  assert.match(html, /Forget pairing/);
+  assert.match(html, /id="openDeviceFit"/);
+  assert.match(html, /id="deviceFitPanel"/);
+  assert.match(html, /Recommended \(/);
+  assert.match(html, /id="activeModelPill"/);
+  assert.match(html, /id="unloadActive"/);
+  assert.match(html, /Model unload could not be verified/);
+  assert.match(html, /Active model unload could not be verified/);
+  assert.match(html, /id="fitTabRecommended"/);
+  assert.match(html, /id="fitTabInstalled"/);
+  assert.match(html, /id="fitTabAll"/);
+  assert.match(html, /id="fitPreference"/);
+  assert.match(html, /id="fitSearch"/);
+  assert.match(html, /id="fitSort"/);
+  assert.match(html, /data-fit-usecase="vision"/);
+  assert.match(html, /All compatible/);
+  assert.match(html, /modelCapabilityBadges/);
+  assert.match(html, /Why recommended/);
+  assert.match(html, /Est\. Q4 weights/);
+  assert.match(html, /Benchmark all/);
+  assert.match(html, /fitBenchmarkStop/);
+  assert.match(html, /benchmarkScore/);
+  assert.match(html, /Prompt <strong>/);
+  assert.match(html, /Generate /);
+  assert.match(html, /Benchmarking/);
+  assert.match(html, /\/api\/models\/benchmark/);
+  assert.match(html, /\['chat', 'Text', 'text'\]/);
+  assert.match(html, /\['vision', 'Vision', 'vision'\]/);
+  assert.match(html, /\['tools', 'Tools', 'tools'\]/);
+  assert.match(html, /\['reasoning', 'Reasoning', 'reasoning'\]/);
 
   const anonymous = await fetch(server.url + '/api/status');
   assert.equal(anonymous.status, 401);
@@ -155,6 +200,8 @@ test('Local UI catalog search and recommendations use detected hardware', async 
   assert.equal(search.status, 200);
   const searchPayload = await search.json();
   assert.equal(searchPayload.models.length, 5);
+  const searchCall = calls.find((call) => call.kind === 'search');
+  assert.equal(searchCall.args.hardware.ramGb, 16);
 
   const recs = await fetch(server.url + '/api/catalog/recommendations', {
     method: 'POST',
@@ -330,4 +377,263 @@ test('chats made before the disk copy loaded are merged into it, not lost or ove
   const html = localUiHtml({ token: 't', host: '127.0.0.1', port: 1 });
   assert.match(html, /function mergeChatStates\(/);
   assert.match(html, /renderMarkdown, mergeChatStates\);/);
+});
+
+
+test('offline browser exposes selected tools and streams tool activity', async (t) => {
+  const tool = {
+    id: 'web_search',
+    name: 'web_search',
+    description: 'Search the web.',
+    source: 'builtin',
+    permissionClass: 'READ',
+    status: 'READY',
+  };
+  let invoked = 0;
+  const localAi = runtimeFixture();
+  localAi.chat = async ({ messages = [], tools = [] }) => {
+    const hasToolResult = messages.some((message) => message.role === 'tool');
+    if (tools.length && !hasToolResult) {
+      return {
+        content: '',
+        tool_calls: [
+          {
+            id: 'call-search-1',
+            type: 'function',
+            function: {
+              name: 'web_search',
+              arguments: JSON.stringify({ query: 'BotConnector Local' }),
+            },
+          },
+        ],
+      };
+    }
+    return {
+      content: hasToolResult ? 'Local answer after tool result.' : 'Local answer without tools.',
+      tool_calls: [],
+      usage: { completion_tokens: 6 },
+    };
+  };
+  const registry = {
+    list: () => [tool],
+    mcpStatus: () => [
+      { id: 'fixture', name: 'Fixture MCP', transport: 'stdio', status: 'READY', error: null, tools: [] },
+    ],
+    schemas: (selected) => selected.includes('web_search')
+      ? [{
+          type: 'function',
+          function: {
+            name: 'web_search',
+            description: 'Search the web.',
+            parameters: {
+              type: 'object',
+              properties: { query: { type: 'string' } },
+              required: ['query'],
+            },
+          },
+        }]
+      : [],
+    findTool: (name) => name === 'web_search' ? tool : null,
+    invoke: async (name, args) => {
+      invoked += 1;
+      assert.equal(name, 'web_search');
+      assert.equal(args.query, 'BotConnector Local');
+      return { query: args.query, results: [{ title: 'Result', url: 'https://example.test' }] };
+    },
+  };
+
+  const server = await startOfflineServer({
+    localAi,
+    tools: registry,
+    detectHardware: async () => ({ cpu: 'Test CPU', ramGb: 16 }),
+    port: 0,
+    open: false,
+  });
+  t.after(() => server.close());
+
+  const headers = {
+    origin: server.url,
+    'content-type': 'application/json',
+    'x-botconnector-local-token': server.token,
+  };
+  const toolsResponse = await fetch(server.url + '/api/tools', { headers });
+  assert.equal(toolsResponse.status, 200);
+  const toolsPayload = await toolsResponse.json();
+  assert.equal(toolsPayload.tools[0].id, 'web_search');
+  assert.equal(toolsPayload.tools[0].permissionClass, 'READ');
+
+  const mcpResponse = await fetch(server.url + '/api/mcp', { headers });
+  assert.equal(mcpResponse.status, 200);
+  const mcpPayload = await mcpResponse.json();
+  assert.equal(mcpPayload.servers[0].status, 'READY');
+
+  const response = await fetch(server.url + '/api/chat', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      model: 'model-1',
+      runtime: 'test',
+      stream: true,
+      tool_mode: 'auto',
+      tools: ['web_search'],
+      messages: [{ role: 'user', content: 'search this' }],
+    }),
+  });
+  assert.equal(response.status, 200);
+  const stream = await response.text();
+  assert.match(stream, /"type":"tool\.started"/);
+  assert.match(stream, /"type":"tool\.completed"/);
+  assert.match(stream, /"arguments":\{"query":"BotConnector Local"\}/);
+  assert.match(stream, /Local answer after tool result/);
+  assert.equal(invoked, 1);
+});
+
+
+test('Local UI Web App pairing routes stay behind localhost session auth', async (t) => {
+  let pairedCode = '';
+  let disconnected = 0;
+  const webApp = {
+    origin: 'https://app.botconnector.id',
+    status: () => ({ paired: false, connection: 'DISCONNECTED', deviceName: 'Test device' }),
+    pair: async (code) => {
+      pairedCode = code;
+      return { paired: true, connection: 'CONNECTING', deviceId: 'device-1', deviceName: 'Test device' };
+    },
+    disconnect: async () => {
+      disconnected += 1;
+      return { paired: false, connection: 'DISCONNECTED', deviceName: 'Test device' };
+    },
+  };
+  const server = await startOfflineServer({
+    localAi: runtimeFixture(),
+    detectHardware: async () => ({ cpu: 'Test CPU', ramGb: 16 }),
+    webApp,
+    port: 0,
+    open: false,
+  });
+  t.after(() => server.close());
+
+  const unauthorized = await fetch(server.url + '/api/webapp/status');
+  assert.equal(unauthorized.status, 401);
+
+  const headers = {
+    origin: server.url,
+    'content-type': 'application/json',
+    'x-botconnector-local-token': server.token,
+  };
+  const status = await fetch(server.url + '/api/webapp/status', { headers });
+  assert.equal(status.status, 200);
+  const statusPayload = await status.json();
+  assert.equal(statusPayload.origin, 'https://app.botconnector.id');
+  assert.equal(statusPayload.available, true);
+
+  const pair = await fetch(server.url + '/api/webapp/pair', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ code: 'ABC-123' }),
+  });
+  assert.equal(pair.status, 200);
+  assert.equal(pairedCode, 'ABC-123');
+
+  const disconnect = await fetch(server.url + '/api/webapp/disconnect', {
+    method: 'POST',
+    headers,
+    body: '{}',
+  });
+  assert.equal(disconnect.status, 200);
+  assert.equal(disconnected, 1);
+});
+
+
+test('Local UI load and unload endpoints return verified model lifecycle responses', async (t) => {
+  let loaded = false;
+  const localAi = {
+    ...runtimeFixture(),
+    status: async () => ({
+      available: true,
+      runtime: 'test',
+      activeModel: loaded ? 'model-1' : null,
+      loadedModels: loaded ? ['model-1'] : [],
+    }),
+    loadModel: async (model, runtime) => {
+      loaded = true;
+      return { loaded: true, model, runtime };
+    },
+    unloadModel: async (model, runtime) => {
+      loaded = false;
+      return { loaded: false, model, runtime };
+    },
+  };
+  const server = await startOfflineServer({
+    localAi,
+    detectHardware: async () => ({ cpu: 'Test CPU', ramGb: 16 }),
+    port: 0,
+    open: false,
+  });
+  t.after(() => server.close());
+
+  const headers = {
+    origin: server.url,
+    'content-type': 'application/json',
+    'x-botconnector-local-token': server.token,
+  };
+
+  const load = await fetch(server.url + '/api/models/load', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ model: 'model-1', runtime: 'test' }),
+  });
+  assert.equal(load.status, 200);
+  assert.equal((await load.json()).loaded, true);
+  assert.deepEqual((await (await fetch(server.url + '/api/status', { headers })).json()).runtime.loadedModels, ['model-1']);
+
+  const unload = await fetch(server.url + '/api/models/unload', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ model: 'model-1', runtime: 'test' }),
+  });
+  assert.equal(unload.status, 200);
+  assert.equal((await unload.json()).loaded, false);
+  assert.deepEqual((await (await fetch(server.url + '/api/status', { headers })).json()).runtime.loadedModels, []);
+});
+
+
+test('Local UI benchmark endpoint returns and lists persisted measurements', async (t) => {
+  const row = {
+    model: 'model-1',
+    runtime: 'test',
+    measuredAt: '2026-09-29T00:00:00.000Z',
+    wallMs: 2000,
+    completionTokens: 40,
+    tokensPerSecond: 20,
+  };
+  const localAi = {
+    ...runtimeFixture(),
+    benchmarkModel: async (model, runtime) => ({ ...row, model, runtime }),
+    benchmarkResults: () => ({ benchmarks: [row] }),
+  };
+  const server = await startOfflineServer({
+    localAi,
+    detectHardware: async () => ({ cpu: 'Test CPU', ramGb: 16 }),
+    port: 0,
+    open: false,
+  });
+  t.after(() => server.close());
+
+  const headers = {
+    origin: server.url,
+    'content-type': 'application/json',
+    'x-botconnector-local-token': server.token,
+  };
+  const run = await fetch(server.url + '/api/models/benchmark', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ model: 'model-1', runtime: 'test' }),
+  });
+  assert.equal(run.status, 200);
+  assert.equal((await run.json()).tokensPerSecond, 20);
+
+  const list = await fetch(server.url + '/api/models/benchmarks', { headers });
+  assert.equal(list.status, 200);
+  assert.equal((await list.json()).benchmarks[0].model, 'model-1');
 });

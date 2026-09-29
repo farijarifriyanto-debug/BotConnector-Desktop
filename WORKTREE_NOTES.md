@@ -448,3 +448,23 @@ Untuk setiap perubahan pada source, UI, konfigurasi, dependency, dokumentasi, at
 - Artifact GitHub: `BotConnector-Windows-x64` (artifact id `10821605478`); run URL: `https://github.com/farijarifriyanto-debug/BotConnector-Desktop/actions/runs/36029630151`.
 - Workflow upload berikutnya dioptimalkan agar hanya mengunggah `*.exe`, `*.blockmap`, dan `*.yml`, bukan seluruh folder `win-unpacked`.
 - Build installer dilakukan seluruhnya di GitHub runner publik; laptop/VPS tidak dipakai untuk compile/package installer.
+
+## 2026-09-28 — Device CLI local tool layer (0.4.13 candidate)
+
+- Area: Device CLI / Local AI tool orchestration.
+- Changes:
+  - Wired the existing local `ToolRegistry` into Device CLI instead of exposing an empty tool list.
+  - Added turn-scoped Web Search (READ) and Run Code (EXECUTE) tools.
+  - Added local MCP config discovery from `~/.botconnector-device/mcp.json`; MCP tools default to EXECUTE unless explicitly declared otherwise.
+  - Added a bounded local agent loop that feeds tool results back into the selected local model, maximum 4 tool-call rounds.
+  - Passed OpenAI/Ollama-compatible function tool schemas and tool-call messages through the local runtime adapters.
+  - Kept Run Code and MCP behind explicit approval; tool selection does not implicitly enable arbitrary remote capabilities.
+  - Prepared package metadata as Device CLI `0.4.13` candidate and included `desktop/local/tools.cjs` in the installer-free package.
+- Files: `desktop/local/tools.cjs`, `desktop/local/tools.test.cjs`, `desktop/local/device-bridge.cjs`, `desktop/local/device-bridge.test.cjs`, `cli/local-runtime.cjs`, `cli/local-runtime.test.cjs`, `cli/botconnector-device.cjs`, `package.json`, `package-lock.json`.
+- Verification:
+  - Clean VPS checkout: `npm run check:device` PASS — 63 tests, 0 failures.
+  - `npm pack --dry-run` PASS and includes `cli/botconnector-device.cjs`, `cli/local-runtime.cjs`, `desktop/local/device-bridge.cjs`, and `desktop/local/tools.cjs`.
+  - GitHub Actions run 36339288927 PASS on head `9c6264b5fce4bb6ee2a5a46f8789b130cea9ce8a`: Installer-free device CLI PASS, fresh TGZ install PASS, stable launcher PASS, Windows hardware/Local AI/Local tools/offline browser smoke PASS.
+  - Web Search fallback regression covers DuckDuckGo Lite result links with href/class attributes in either order; Run Code and MCP executor smoke tests PASS.
+- Release/deployment: candidate only. No `device-v0.4.13` release and no `app.botconnector.id` manifest/deployment performed in this task yet.
+
