@@ -53,7 +53,7 @@ class WorkspaceStore {
   defaultWorkspace() {
     const base = path.basename(this.defaultPath) || 'Home';
     return {
-      id: crypto.randomUUID(),
+      id: 'default-' + crypto.createHash('sha256').update(this.defaultPath).digest('hex').slice(0, 16),
       name: cleanName(base, 'Home'),
       path: this.defaultPath,
       mode: 'standard',
@@ -76,9 +76,7 @@ class WorkspaceStore {
       : [];
     if (!rows.length) {
       const first = this.defaultWorkspace();
-      const state = { schema: 1, activeId: first.id, workspaces: [first] };
-      this.persist(state);
-      return state;
+      return { schema: 1, activeId: first.id, workspaces: [first] };
     }
     const activeId = rows.some((item) => item.id === parsed?.activeId)
       ? parsed.activeId
