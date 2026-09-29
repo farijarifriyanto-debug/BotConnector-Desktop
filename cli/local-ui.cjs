@@ -1884,7 +1884,10 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
 
   function fitPublisher(model) {
     const m = fitModelData(model) || {};
-    return String(m.author || String(m.id || '').split('/')[0] || 'Local');
+    if (m.author) return String(m.author);
+    const raw = String(m.id || '');
+    if (raw.includes('/')) return raw.split('/')[0];
+    return String(m?._local?.source || 'Local model');
   }
 
   function fitLicenseLabel(model) {
@@ -1963,9 +1966,10 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   function fitTrustSummary(model) {
     const m = fitModelData(model) || {};
     const parts = [];
-    parts.push(m.publisherType === 'official' ? 'Official publisher' : 'Community');
+    const isLocalOnly = Boolean(m?._local && !m.author && !String(m.id || '').includes('/'));
+    parts.push(isLocalOnly ? 'Local model' : (m.publisherType === 'official' ? 'Official publisher' : 'Community'));
     parts.push(fitLicenseLabel(m));
-    parts.push(m.source || 'Hugging Face');
+    parts.push(m.source || m?._local?.source || (String(m.id || '').includes('/') ? 'Hugging Face' : 'Local device'));
     return parts;
   }
 
@@ -2644,7 +2648,8 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
 
   async function loadDeviceFit(scanHardware = true) {
     fitState.loading = true;
-    $('fitModels').innerHTML = '<div class="muted">Checking models that fit this device…</div>';
+    fitState.error = '';
+    renderFitSkeleton(scanHardware ? 'Scanning hardware…' : 'Finding compatible models…');
     try {
       if (scanHardware) {
         const status = await api('/api/status');
@@ -2652,6 +2657,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
         hardwareState = status.hardware || {};
         renderFitHardware();
         $('fitScanStatus').textContent = 'Detected locally · updated just now';
+        renderFitSkeleton('Finding compatible models…');
       }
       const [recommended, , benchmarkPayload] = await Promise.all([
         api('/api/catalog/recommendations', { method: 'POST', body: JSON.stringify({ limit: 24 }) }),
@@ -2663,11 +2669,11 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
         (Array.isArray(benchmarkPayload?.benchmarks) ? benchmarkPayload.benchmarks : [])
           .map((item) => [benchmarkKey(item?.model, item?.runtime), item]),
       );
-      renderDeviceFitModels();
     } catch (error) {
-      $('fitModels').innerHTML = '<div class="error">' + esc(error.message || error) + '</div>';
+      fitState.error = String(error.message || error);
     } finally {
       fitState.loading = false;
+      renderDeviceFitModels();
     }
   }
 
@@ -2794,7 +2800,11 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     button.onclick = () => toggleFitUseCase(button.dataset.fitUsecase);
   }
   for (const tab of document.querySelectorAll('[data-fit-view]')) {
-    tab.onclick = () => { fitState.view = tab.dataset.fitView; renderDeviceFitModels(); };
+    tab.onclick = () => {
+      fitState.view = tab.dataset.fitView;
+      fitState.compareOpen = false;
+      renderDeviceFitModels();
+    };
   }
   for (const button of document.querySelectorAll('[data-fit-preference]')) {
     button.onclick = () => {
@@ -2802,6 +2812,30 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       renderDeviceFitModels();
     };
   }
+  $('fitFiltersBtn').onclick = () => {
+    fitState.filtersOpen = !fitState.filtersOpen;
+    renderFitFilters();
+  };
+  $('fitFilterSize').onchange = (event) => { fitState.filters.maxSizeGb = event.target.value; renderDeviceFitModels(); };
+  $('fitFilterContext').onchange = (event) => { fitState.filters.minContext = event.target.value; renderDeviceFitModels(); };
+  $('fitFilterQuant').onchange = (event) => { fitState.filters.quant = event.target.value; renderDeviceFitModels(); };
+  $('fitFilterPublisher').onchange = (event) => { fitState.filters.publisher = event.target.value; renderDeviceFitModels(); };
+  $('fitFilterInstalled').onchange = (event) => { fitState.filters.installedOnly = event.target.checked; renderDeviceFitModels(); };
+  $('fitFilterBenchmarked').onchange = (event) => { fitState.filters.benchmarkedOnly = event.target.checked; renderDeviceFitModels(); };
+  $('fitFiltersClear').onclick = () => {
+    fitState.filters = { maxSizeGb: '', minContext: '', quant: '', publisher: '', installedOnly: false, benchmarkedOnly: false };
+    renderDeviceFitModels();
+  };
+  $('fitCompareOpen').onclick = () => {
+    if (fitState.compare.length < 2) return;
+    fitState.compareOpen = !fitState.compareOpen;
+    renderFitCompare();
+  };
+  $('fitCompareClear').onclick = () => {
+    fitState.compare = [];
+    fitState.compareOpen = false;
+    renderDeviceFitModels();
+  };
   $('fitBenchmarkAll').onclick = benchmarkAllInstalled;
   $('fitBenchmarkStop').onclick = () => {
     if (!fitState.benchmarkRunning) return;
