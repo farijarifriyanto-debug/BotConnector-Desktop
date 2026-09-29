@@ -36,6 +36,85 @@ function toolResultContent(value) {
   }
 }
 
+function messageText(message) {
+  const content = message?.content;
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.map(part => {
+    if (typeof part === 'string') return part;
+    if (part?.type === 'text' || part?.type === 'input_text') return String(part?.text || '');
+    return '';
+  }).filter(Boolean).join(' ');
+}
+
+function needsDeviceContext(messages = []) {
+  const users = (Array.isArray(messages) ? messages : [])
+    .filter(message => message?.role === 'user')
+    .slice(-3)
+    .map(messageText)
+    .filter(Boolean);
+  if (!users.length) return false;
+  const text = users.join(' ').toLowerCase();
+
+  const ownedDevice =
+    /\b(my\s+(?:laptop|computer|pc|device|machine)|(?:laptop|komputer|computer|pc|device|perangkat|mesin)\s+(?:saya|aku|ku|ini))\b/i;
+  const hardwareFact =
+    /\b(?:spesifikasi|specs?|specification|hardware|cpu|processor|prosesor|ram|memory|memori|gpu|graphics?|grafis|vram|npu|operating\s+system|sistem\s+operasi|windows|linux|macos?)\b/i;
+  const selfReference =
+    /\b(?:saya|aku|ku|my|mine|laptop|komputer|computer|pc|device|perangkat|this\s+device|this\s+laptop)\b/i;
+  const localModelFit =
+    /\b(?:model|llm|gguf|qwen|llama|gemma|deepseek|glm|mistral)\b/i.test(text) &&
+    /\b(?:cocok|fit|jalan|jalankan|run|running|muat|cukup|recommended|recommendation|rekomendasi|cepat|lambat)\b/i.test(text);
+
+  return ownedDevice.test(text) || (hardwareFact.test(text) && selfReference.test(text)) || localModelFit;
+}
+
+function publicHardwareSnapshot(hardware = {}) {
+  const gpuRows = [
+    ...(Array.isArray(hardware?.nvidia) ? hardware.nvidia : []),
+    ...(Array.isArray(hardware?.amd) ? hardware.amd : []),
+    ...(Array.isArray(hardware?.intel) ? hardware.intel : []),
+  ].map(gpu => ({
+    name: gpu?.name || null,
+    vramGb: Number(gpu?.vramGb || gpu?.memoryGb || 0) || null,
+    vendor: gpu?.vendor || null,
+  }));
+  return {
+    cpu: hardware?.cpu || null,
+    ramGb: Number(hardware?.ramGb || 0) || null,
+    gpu: gpuRows,
+    npu: hardware?.npu ? {
+      available: Boolean(hardware.npu.available || hardware.npu.name),
+      name: hardware.npu.name || null,
+    } : null,
+    platform: hardware?.platform || process.platform,
+    arch: hardware?.arch || process.arch,
+    release: hardware?.release || null,
+  };
+}
+
+function deviceContextMessage(hardware, benchmarks = []) {
+  const measured = (Array.isArray(benchmarks) ? benchmarks : [])
+    .filter(item => item && item.model)
+    .slice(0, 12)
+    .map(item => ({
+      model: item.model,
+      runtime: item.runtime || null,
+      tokensPerSecond: Number(item.tokensPerSecond || 0) || null,
+      promptTokensPerSecond: Number(item.promptTokensPerSecond || 0) || null,
+      measuredAt: item.measuredAt || null,
+    }));
+  return {
+    role: 'system',
+    content:
+      'BotConnector current-device context (read-only; detected locally for this request). ' +
+      'Use these facts when the user asks about their current laptop/device or local-model fit. ' +
+      'Do not invent hardware that is not listed. Device JSON: ' +
+      JSON.stringify(publicHardwareSnapshot(hardware)) +
+      (measured.length ? ' Local benchmark JSON: ' + JSON.stringify(measured) : ''),
+  };
+}
+
 
 async function runToolAgent({ localAi, tools, params = {}, onEvent = () => {} } = {}) {
   const selected = Array.isArray(params.tools)
@@ -301,11 +380,25 @@ class DeviceBridge {
       this.reply(message.id, { ok: false, error: { message: error.message || String(error) } });
     }
   }
+  async withDeviceContext(params = {}) {
+    const messages = Array.isArray(params?.messages) ? params.messages : [];
+    if (!needsDeviceContext(messages)) return params;
+    const hardware = await this.detectHardware();
+    const benchmarks = this.localAi?.benchmarkResults?.().benchmarks || [];
+    return {
+      ...params,
+      messages: [
+        deviceContextMessage(hardware, benchmarks),
+        ...messages.map(message => ({ ...message })),
+      ],
+    };
+  }
+
   async agentChat(params = {}) {
     return runToolAgent({
       localAi: this.localAi,
       tools: this.tools,
-      params,
+      params: await this.withDeviceContext(params),
     });
   }
 
@@ -343,7 +436,8 @@ class DeviceBridge {
     if (method === 'model.load') return this.localAi.loadModel(params.model, params.runtime);
     if (method === 'model.unload') return this.localAi.unloadModel(params.model, params.runtime);
     if (method === 'chat.completions') {
-      return params?.tool_mode === 'auto' ? this.agentChat(params) : this.localAi.chat(params);
+      if (params?.tool_mode === 'auto') return this.agentChat(params);
+      return this.localAi.chat(await this.withDeviceContext(params));
     }
     if (method === 'chat.cancel') return this.localAi.cancelChat(params.id);
     throw new Error('Remote capability is not allowed.');
@@ -362,4 +456,12 @@ class DeviceBridge {
   }
 }
 
-module.exports = { DeviceBridge, defaultDeviceName, wsState, runToolAgent };
+module.exports = {
+  DeviceBridge,
+  defaultDeviceName,
+  wsState,
+  runToolAgent,
+  needsDeviceContext,
+  publicHardwareSnapshot,
+  deviceContextMessage,
+};

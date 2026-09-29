@@ -204,3 +204,132 @@ test('pair still rejects non-Base64URL characters', async () => {
   });
   await assert.rejects(() => bridge.pair('ABC$123'), /Invalid pairing code/);
 });
+
+
+test('Web App local chat injects current hardware for device-spec questions without tool mode', async () => {
+  const calls = [];
+  let hardwareReads = 0;
+  const localAi = {
+    enabled: true,
+    benchmarkResults: () => ({
+      benchmarks: [{
+        model: 'qwen-local',
+        runtime: 'ollama',
+        tokensPerSecond: 42.5,
+        promptTokensPerSecond: 190.2,
+        measuredAt: '2026-09-29T00:00:00.000Z',
+      }],
+    }),
+    async chat(params) {
+      calls.push(params);
+      return { content: 'grounded hardware answer' };
+    },
+  };
+  const bridge = new DeviceBridge({
+    settings: { get: () => null, set: async () => {} },
+    detectHardware: async () => {
+      hardwareReads += 1;
+      return {
+        cpu: 'Intel Core i7-11800H',
+        ramGb: 32,
+        nvidia: [{ name: 'NVIDIA RTX Test', vramGb: 6 }],
+        amd: [],
+        intel: [],
+        npu: { available: false },
+        platform: 'win32',
+        arch: 'x64',
+        release: '10.0-test',
+        secretInternalField: 'must-not-leak',
+      };
+    },
+    tools: { list: () => [] },
+    launcher: { list: () => [] },
+    localAi,
+    WebSocketImpl: null,
+  });
+
+  const result = await bridge.execute('chat.completions', {
+    model: 'qwen-local',
+    runtime: 'ollama',
+    messages: [{ role: 'user', content: 'Cek spesifikasi laptop saya' }],
+  });
+
+  assert.equal(result.content, 'grounded hardware answer');
+  assert.equal(hardwareReads, 1);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].messages[0].role, 'system');
+  assert.match(calls[0].messages[0].content, /Intel Core i7-11800H/);
+  assert.match(calls[0].messages[0].content, /NVIDIA RTX Test/);
+  assert.match(calls[0].messages[0].content, /42\.5/);
+  assert.doesNotMatch(calls[0].messages[0].content, /secretInternalField|must-not-leak/);
+  assert.equal(calls[0].messages[1].content, 'Cek spesifikasi laptop saya');
+});
+
+test('Web App local chat does not read hardware for unrelated prompts', async () => {
+  const calls = [];
+  let hardwareReads = 0;
+  const localAi = {
+    enabled: true,
+    async chat(params) {
+      calls.push(params);
+      return { content: 'normal answer' };
+    },
+  };
+  const bridge = new DeviceBridge({
+    settings: { get: () => null, set: async () => {} },
+    detectHardware: async () => { hardwareReads += 1; return { cpu: 'Should not be read' }; },
+    tools: { list: () => [] },
+    launcher: { list: () => [] },
+    localAi,
+    WebSocketImpl: null,
+  });
+
+  await bridge.execute('chat.completions', {
+    model: 'qwen-local',
+    runtime: 'ollama',
+    messages: [{ role: 'user', content: 'Jelaskan fotosintesis secara singkat' }],
+  });
+
+  assert.equal(hardwareReads, 0);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].messages, [{ role: 'user', content: 'Jelaskan fotosintesis secara singkat' }]);
+});
+
+test('Web App local agent mode also receives automatic current-device context', async () => {
+  const calls = [];
+  const localAi = {
+    enabled: true,
+    async chat(params) {
+      calls.push(params);
+      return { content: 'model fit answer', tool_calls: [] };
+    },
+  };
+  const bridge = new DeviceBridge({
+    settings: { get: () => null, set: async () => {} },
+    detectHardware: async () => ({
+      cpu: 'Ryzen Test',
+      ramGb: 64,
+      nvidia: [{ name: 'RTX 3090', vramGb: 24 }],
+      amd: [],
+      intel: [],
+    }),
+    tools: { list: () => [], schemas: () => [] },
+    launcher: { list: () => [] },
+    localAi,
+    WebSocketImpl: null,
+  });
+
+  const result = await bridge.execute('chat.completions', {
+    model: 'qwen-local',
+    runtime: 'ollama',
+    tool_mode: 'auto',
+    messages: [{ role: 'user', content: 'Model coding apa yang cocok untuk saya jalankan?' }],
+    tools: [],
+  });
+
+  assert.equal(result.content, 'model fit answer');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].messages[0].role, 'system');
+  assert.match(calls[0].messages[0].content, /RTX 3090/);
+  assert.match(calls[0].messages[0].content, /64/);
+});
