@@ -2,7 +2,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const { spawn } = require('node:child_process');
-const vm = require('node:vm');
+const { Worker } = require('node:worker_threads');
 
 const MAX_TOOL_CALLS_PER_TURN = 4;
 const TOOL_TIMEOUT_MS = 10_000;
@@ -10,11 +10,8 @@ const WEB_SEARCH_TIMEOUT_MS = 15_000;
 const RUN_CODE_TIMEOUT_MS = 8_000;
 const MAX_TOOL_OUTPUT_CHARS = 32 * 1024;
 const PTC_TIMEOUT_MS = 30_000;
+const PTC_WORKER_SOURCE = "const { parentPort, workerData } = require('node:worker_threads');\nconst vm = require('node:vm');\n\nlet sequence = 0;\nconst pending = new Map();\n\nfunction bridge(name, argsJson = '{}') {\n  return new Promise((resolve, reject) => {\n    const id = String(++sequence);\n    pending.set(id, { resolve, reject });\n    parentPort.postMessage({ type: 'tool.call', id, name: String(name), argsJson: String(argsJson || '{}') });\n  });\n}\nObject.setPrototypeOf(bridge, null);\nObject.freeze(bridge);\n\nparentPort.on('message', (message) => {\n  if (message?.type !== 'tool.result') return;\n  const row = pending.get(String(message.id));\n  if (!row) return;\n  pending.delete(String(message.id));\n  if (message.ok) row.resolve(String(message.value || 'null'));\n  else row.reject(new Error(String(message.error || 'PTC tool failed.')));\n});\n\n(async () => {\n  try {\n    const sdkEntries = workerData.toolNames.map((name) =>\n      JSON.stringify(name) +\n      ': async (args = {}) => JSON.parse(await __bcCall(' +\n      JSON.stringify(name) +\n      ', JSON.stringify(args)))'\n    ).join(',');\n\n    const context = vm.createContext(\n      { __bcCall: bridge },\n      {\n        name: 'BotConnector PTC',\n        codeGeneration: { strings: false, wasm: false },\n      },\n    );\n    const script = new vm.Script(\n      '(async () => { \"use strict\"; const tools = Object.freeze({' + sdkEntries + '});\\\\n' +\n      workerData.source +\n      '\\\\n})()',\n      { filename: 'botconnector-ptc.js' },\n    );\n    const value = await Promise.resolve(script.runInContext(context, { timeout: 1000 }));\n    parentPort.postMessage({\n      type: 'done',\n      value: JSON.stringify(value === undefined ? null : value),\n    });\n  } catch (error) {\n    parentPort.postMessage({\n      type: 'error',\n      error: String(error?.message || error),\n    });\n  }\n})();";
 
-function normalizeVmResult(value) {
-  if (value === undefined) return null;
-  return JSON.parse(JSON.stringify(value));
-}
 
 const BUILTIN_TOOLS = [
   {
@@ -524,60 +521,95 @@ class ToolRegistry {
     const rows = this.selectedTools(selected, { permission });
     const allowed = new Map(rows.map((tool) => [tool.name, tool]));
 
-    // Only expose a null-prototype bridge into the VM. Tool results cross the
-    // boundary as JSON and are parsed inside the VM, so model code never
-    // receives host-realm objects/functions from the registry.
-    const bridge = async (name, argsJson = '{}') => {
-      const tool = allowed.get(String(name));
-      if (!tool) throw new Error(`PTC tool is not allowed: ${String(name)}`);
-      let args;
-      try {
-        args = JSON.parse(String(argsJson || '{}'));
-      } catch {
-        throw new Error('PTC tool arguments must be JSON serializable.');
-      }
-      const result = await this.invoke(tool.name, args, {
-        selected: true,
-        approved:
-          permission === 'full-access' ||
-          approvedSet.has(tool.id) ||
-          approvedSet.has(tool.name),
-        permission,
-        workspacePath,
+    return await new Promise((resolve, reject) => {
+      const worker = new Worker(PTC_WORKER_SOURCE, {
+        eval: true,
+        workerData: {
+          source,
+          toolNames: rows.map((tool) => tool.name),
+        },
       });
-      return JSON.stringify(result === undefined ? null : result);
-    };
-    Object.setPrototypeOf(bridge, null);
-    Object.freeze(bridge);
+      let settled = false;
+      let timer = null;
+      const finish = async (error, value) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        worker.removeAllListeners();
+        try { await worker.terminate(); } catch {}
+        if (error) reject(error);
+        else resolve(value);
+      };
+      timer = setTimeout(
+        () => finish(new Error('PTC program timed out.')),
+        PTC_TIMEOUT_MS,
+      );
 
-    const sdkEntries = rows.map((tool) =>
-      JSON.stringify(tool.name) +
-      ': async (args = {}) => JSON.parse(await __bcCall(' +
-      JSON.stringify(tool.name) +
-      ', JSON.stringify(args)))'
-    ).join(',');
-
-    const context = vm.createContext(
-      { __bcCall: bridge },
-      {
-        name: 'BotConnector PTC',
-        codeGeneration: { strings: false, wasm: false },
-        microtaskMode: 'afterEvaluate',
-      },
-    );
-    const script = new vm.Script(
-      '(async () => { "use strict"; const tools = Object.freeze({' + sdkEntries + '});\n' +
-      source +
-      '\n})()',
-      { filename: 'botconnector-ptc.js' },
-    );
-    const promise = script.runInContext(context, { timeout: 1000 });
-    const result = await withTimeout(
-      Promise.resolve(promise),
-      PTC_TIMEOUT_MS,
-      'PTC program timed out.',
-    );
-    return normalizeVmResult(result);
+      worker.on('message', async (message) => {
+        if (message?.type === 'tool.call') {
+          const tool = allowed.get(String(message.name));
+          if (!tool) {
+            worker.postMessage({
+              type: 'tool.result',
+              id: message.id,
+              ok: false,
+              error: 'PTC tool is not allowed: ' + String(message.name),
+            });
+            return;
+          }
+          let args;
+          try {
+            args = JSON.parse(String(message.argsJson || '{}'));
+          } catch {
+            worker.postMessage({
+              type: 'tool.result',
+              id: message.id,
+              ok: false,
+              error: 'PTC tool arguments must be JSON serializable.',
+            });
+            return;
+          }
+          try {
+            const result = await this.invoke(tool.name, args, {
+              selected: true,
+              approved:
+                permission === 'full-access' ||
+                approvedSet.has(tool.id) ||
+                approvedSet.has(tool.name),
+              permission,
+              workspacePath,
+            });
+            worker.postMessage({
+              type: 'tool.result',
+              id: message.id,
+              ok: true,
+              value: JSON.stringify(result === undefined ? null : result),
+            });
+          } catch (error) {
+            worker.postMessage({
+              type: 'tool.result',
+              id: message.id,
+              ok: false,
+              error: String(error?.message || error),
+            });
+          }
+          return;
+        }
+        if (message?.type === 'done') {
+          let value = null;
+          try { value = JSON.parse(String(message.value || 'null')); }
+          catch { return finish(new Error('PTC result was not valid JSON.')); }
+          return finish(null, value);
+        }
+        if (message?.type === 'error') {
+          return finish(new Error(String(message.error || 'PTC program failed.')));
+        }
+      });
+      worker.on('error', (error) => finish(error));
+      worker.on('exit', (code) => {
+        if (!settled && code !== 0) finish(new Error('PTC worker exited with code ' + code + '.'));
+      });
+    });
   }
 
   async close() {
