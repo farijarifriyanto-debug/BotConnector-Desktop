@@ -132,6 +132,7 @@ test('offline UI serves localhost HTML and protects local API with a session tok
   assert.match(html, /data-workspace-mode="ptc"/);
   assert.match(html, /data-workspace-mode="minimal"/);
   assert.match(html, /data-workspace-mode="custom"/);
+  assert.match(html, /Creator mode/);
   assert.match(html, /id="permissionSelect"/);
   assert.match(html, /Workspace write/);
   assert.match(html, /id="workspacePanel"/);
