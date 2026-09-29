@@ -203,6 +203,7 @@ class DeviceRelay {
         socket.deviceId = device.id;
         return;
       }
+      if (message?.type === 'device.event') this.forwardEvent(socket.deviceId, message);
       if (message?.type === 'device.response') this.resolveResponse(socket.deviceId, message);
     });
     socket.on('close', () => {
@@ -214,6 +215,15 @@ class DeviceRelay {
         this.persistState();
       }
     });
+  }
+
+  forwardEvent(deviceId, message) {
+    const key = String(message?.id || '');
+    const waiter = this.pending.get(key);
+    if (!waiter || waiter.deviceId !== deviceId || typeof waiter.onEvent !== 'function') return;
+    try {
+      waiter.onEvent(message?.event && typeof message.event === 'object' ? message.event : {});
+    } catch {}
   }
 
   resolveResponse(deviceId, message) {
@@ -236,7 +246,7 @@ class DeviceRelay {
     }
   }
 
-  request(userId, deviceId, method, params = {}) {
+  request(userId, deviceId, method, params = {}, options = {}) {
     const device = this.devices.get(String(deviceId || ''));
     if (!device || device.userId !== userId) {
       const error = new Error('Perangkat tidak ditemukan.');
@@ -262,7 +272,14 @@ class DeviceRelay {
         this.pending.delete(id);
         reject(Object.assign(new Error('Device request timed out.'), { status: 504 }));
       }, timeoutMs);
-      this.pending.set(id, { deviceId: device.id, method: String(method), resolve, reject, timer });
+      this.pending.set(id, {
+        deviceId: device.id,
+        method: String(method),
+        resolve,
+        reject,
+        timer,
+        onEvent: typeof options?.onEvent === 'function' ? options.onEvent : null,
+      });
       try {
         device.socket.send(JSON.stringify({ type: 'device.request', id, method: String(method), params: params && typeof params === 'object' ? params : {} }));
       } catch (error) {

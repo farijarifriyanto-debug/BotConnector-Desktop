@@ -206,6 +206,65 @@ test('pair still rejects non-Base64URL characters', async () => {
 });
 
 
+test('streaming local chat emits thinking status and answer deltas without reasoning text', async () => {
+  const sent = [];
+  const localAi = {
+    enabled: true,
+    async chat(params) {
+      assert.equal(typeof params.onDelta, 'function');
+      params.onDelta({ reasoning: 'private reasoning must not cross the bridge' });
+      params.onDelta({ content: 'Halo' });
+      return {
+        content: 'Halo',
+        reasoning: 'private reasoning must not cross the bridge',
+        usage: { completion_tokens: 1 },
+      };
+    },
+  };
+  const bridge = new DeviceBridge({
+    settings: { get: () => null, set: async () => {} },
+    detectHardware: async () => ({}),
+    tools: { list: () => [] },
+    launcher: { list: () => [] },
+    localAi,
+    WebSocketImpl: null,
+  });
+  bridge.socket = {
+    readyState: 1,
+    send(raw) {
+      sent.push(JSON.parse(raw));
+    },
+  };
+
+  await bridge.handleMessage(JSON.stringify({
+    type: 'device.request',
+    id: 'stream-1',
+    method: 'chat.completions',
+    params: {
+      stream: true,
+      model: 'qwen-local',
+      runtime: 'llamacpp',
+      messages: [{ role: 'user', content: 'halo' }],
+    },
+  }));
+
+  assert.deepEqual(sent[0], {
+    type: 'device.event',
+    id: 'stream-1',
+    event: { thinking: true },
+  });
+  assert.deepEqual(sent[1], {
+    type: 'device.event',
+    id: 'stream-1',
+    event: { content: 'Halo' },
+  });
+  assert.equal(sent[2].type, 'device.response');
+  assert.equal(sent[2].ok, true);
+  assert.equal(sent[2].result.content, 'Halo');
+  assert.equal('reasoning' in sent[2].result, false);
+  assert.doesNotMatch(JSON.stringify(sent), /private reasoning/);
+});
+
 test('Web App local chat injects current hardware for device-spec questions without tool mode', async () => {
   const calls = [];
   let hardwareReads = 0;

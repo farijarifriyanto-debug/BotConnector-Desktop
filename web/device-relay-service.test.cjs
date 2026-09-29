@@ -62,6 +62,53 @@ test('relay refuses to start without internal authentication', () => {
   );
 });
 
+test('internal streaming API relays incremental local chat events', async () => {
+  const relay = {
+    attach() {},
+    close() {},
+    async request(userId, deviceId, method, params, options) {
+      assert.equal(userId, USER_A);
+      assert.equal(deviceId, 'device-stream');
+      assert.equal(method, 'chat.completions');
+      assert.equal(params.stream, true);
+      options.onEvent({ thinking: true });
+      options.onEvent({ content: 'Halo' });
+      return { content: 'Halo', usage: { completion_tokens: 1 } };
+    },
+  };
+  const { server } = createDeviceRelayServer({
+    host: '127.0.0.1',
+    port: 0,
+    appOrigin: 'https://app.botconnector.id',
+    internalToken: TOKEN,
+    relay,
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const base = 'http://127.0.0.1:' + server.address().port;
+
+  try {
+    const response = await internal(base, '/internal/devices/device-stream/stream', {
+      method: 'POST',
+      body: JSON.stringify({
+        user_id: USER_A,
+        method: 'chat.completions',
+        params: { model: 'qwen-local', messages: [] },
+      }),
+    });
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type') || '', /text\/event-stream/);
+    const text = await response.text();
+    assert.match(text, /"thinking":true/);
+    assert.match(text, /"content":"Halo"/);
+    assert.match(text, /"done":true/);
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test('internal API creates owner-bound pair and public exchange is one-time', async () => {
   const { server, base } = await startRelay();
   try {
