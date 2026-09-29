@@ -79,6 +79,10 @@ test('offline UI serves localhost HTML and protects local API with a session tok
   assert.match(html, /data-fit-usecase="vision"/);
   assert.match(html, /All compatible/);
   assert.match(html, /modelCapabilityBadges/);
+  assert.match(html, /Why recommended/);
+  assert.match(html, /Est\. Q4 weights/);
+  assert.match(html, /Benchmarking/);
+  assert.match(html, /\/api\/models\/benchmark/);
   assert.match(html, /\['chat', 'Text', 'text'\]/);
   assert.match(html, /\['vision', 'Vision', 'vision'\]/);
   assert.match(html, /\['tools', 'Tools', 'tools'\]/);
@@ -586,4 +590,45 @@ test('Local UI load and unload endpoints return verified model lifecycle respons
   assert.equal(unload.status, 200);
   assert.equal((await unload.json()).loaded, false);
   assert.deepEqual((await (await fetch(server.url + '/api/status', { headers })).json()).runtime.loadedModels, []);
+});
+
+
+test('Local UI benchmark endpoint returns and lists persisted measurements', async (t) => {
+  const row = {
+    model: 'model-1',
+    runtime: 'test',
+    measuredAt: '2026-09-29T00:00:00.000Z',
+    wallMs: 2000,
+    completionTokens: 40,
+    tokensPerSecond: 20,
+  };
+  const localAi = {
+    ...runtimeFixture(),
+    benchmarkModel: async (model, runtime) => ({ ...row, model, runtime }),
+    benchmarkResults: () => ({ benchmarks: [row] }),
+  };
+  const server = await startOfflineServer({
+    localAi,
+    detectHardware: async () => ({ cpu: 'Test CPU', ramGb: 16 }),
+    port: 0,
+    open: false,
+  });
+  t.after(() => server.close());
+
+  const headers = {
+    origin: server.url,
+    'content-type': 'application/json',
+    'x-botconnector-local-token': server.token,
+  };
+  const run = await fetch(server.url + '/api/models/benchmark', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ model: 'model-1', runtime: 'test' }),
+  });
+  assert.equal(run.status, 200);
+  assert.equal((await run.json()).tokensPerSecond, 20);
+
+  const list = await fetch(server.url + '/api/models/benchmarks', { headers });
+  assert.equal(list.status, 200);
+  assert.equal((await list.json()).benchmarks[0].model, 'model-1');
 });

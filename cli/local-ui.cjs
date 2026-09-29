@@ -275,6 +275,10 @@ svg{display:block}
 .pillDot{width:6px;height:6px;border-radius:50%;background:var(--ok)}
 .pill.right{margin-left:auto}
 .modelActions{display:flex;gap:6px;align-items:center}
+.fitMeta{margin-top:5px;color:var(--muted);font-size:10.5px;line-height:1.45}
+.fitWhy{margin-top:4px;border:0;background:transparent;color:var(--muted);padding:0;font-size:10.5px;text-decoration:underline;text-underline-offset:2px;cursor:pointer}
+.fitWhy:hover{color:var(--text)}
+.fitReason{margin-top:6px;padding:8px 9px;border:1px solid var(--line-soft);border-radius:8px;background:var(--surface-2);color:var(--muted);font-size:10.5px;line-height:1.5}
 .modelLoadState{min-height:30px;display:inline-flex;align-items:center;padding:0 9px;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:10.5px;font-weight:650;white-space:nowrap}
 .modelLoadState.loaded{border-color:color-mix(in srgb,var(--ok) 40%,var(--line));background:color-mix(in srgb,var(--ok) 8%,transparent);color:var(--ok)}
 .modelLoadState.unloaded{color:var(--muted)}
@@ -755,6 +759,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     sort: 'best',
     recommended: [],
     compatible: [],
+    benchmarks: {},
     loading: false,
   };
   let fitSearchTimer = 0;
@@ -1508,6 +1513,62 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     ].filter(Boolean).join(' ').toLowerCase();
   }
 
+  function benchmarkKey(model, runtime) {
+    return String(runtime || '') + '::' + String(model || '');
+  }
+
+  function modelBenchmark(local) {
+    if (!local) return null;
+    return fitState.benchmarks[benchmarkKey(local.id, local.runtime)] || null;
+  }
+
+  function fitResourceSummary(model) {
+    const c = model?.compatibility || {};
+    const bits = [];
+    if (c.estimatedQ4Gb) bits.push('Est. Q4 weights ' + Number(c.estimatedQ4Gb).toFixed(1) + ' GB');
+    if (c.paramsB) bits.push(Number(c.paramsB).toFixed(1).replace(/\.0$/, '') + 'B parameters');
+    const local = model?._local || installedMatch(model);
+    const bench = modelBenchmark(local);
+    if (bench?.tokensPerSecond) bits.push('Measured ' + Number(bench.tokensPerSecond).toFixed(1) + ' tok/s');
+    else if (bench) bits.push('Measured ' + (Number(bench.wallMs || 0) / 1000).toFixed(1) + ' s');
+    return bits.join(' · ');
+  }
+
+  function fitReasonText(model) {
+    const c = model?.compatibility || {};
+    const reasons = [];
+    const level = String(c.level || 'unknown');
+    if (level === 'great') reasons.push('Fits comfortably on the detected hardware.');
+    else if (level === 'ok') reasons.push('Fits the detected hardware with moderate headroom.');
+    else if (level === 'warn') reasons.push('Expected to run, but memory or speed headroom may be limited.');
+    if (c.estimatedQ4Gb) reasons.push('Q4 model weights are estimated at about ' + Number(c.estimatedQ4Gb).toFixed(1) + ' GB before runtime overhead.');
+    const useCases = fitSpecificUseCases().filter((item) => item !== 'general');
+    if (useCases.length) reasons.push('Matches selected capability: ' + useCases.join(', ') + '.');
+    const p = fitParams(model);
+    if (p) reasons.push('The ' + fitState.preference + ' preference ranks this ' + p + 'B model against the other compatible choices.');
+    return reasons.join(' ');
+  }
+
+  async function benchmarkLocalModel(local, button) {
+    if (!local) return;
+    button.disabled = true;
+    const previous = button.textContent;
+    button.textContent = 'Benchmarking…';
+    try {
+      const result = await api('/api/models/benchmark', {
+        method: 'POST',
+        body: JSON.stringify({ model: local.id, runtime: local.runtime }),
+      });
+      fitState.benchmarks[benchmarkKey(local.id, local.runtime)] = result;
+      await refresh();
+      renderDeviceFitModels();
+    } catch (error) {
+      alert(error.message || error);
+      button.disabled = false;
+      button.textContent = previous;
+    }
+  }
+
   function installedMatch(candidate) {
     const id = String(candidate?.id || candidate?.name || '').toLowerCase();
     const leaf = id.split('/').pop().replace(/[-_.]?gguf$/i, '');
@@ -1579,7 +1640,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       const level = local ? (loaded ? 'loaded' : 'installed') : (m.compatibility?.level || 'unknown');
       const row = document.createElement('div');
       row.className = 'model';
-      row.innerHTML = '<div class="modelInfo"><span class="name"></span><div class="capabilities"></div></div><span class="fit ' + esc(level) + '">' + esc(level) + '</span><button class="btn small"></button>';
+      row.innerHTML = '<div class="modelInfo"><span class="name"></span><div class="capabilities"></div><div class="fitMeta"></div><button class="fitWhy" type="button">Why recommended</button><div class="fitReason" hidden></div></div><span class="fit ' + esc(level) + '">' + esc(level) + '</span><div class="modelActions"><button class="btn small primary"></button><button class="btn small benchmark" type="button" hidden>Benchmark</button></div>';
       const size = m.compatibility?.paramsB ? ' · ' + m.compatibility.paramsB + 'B' : '';
       row.querySelector('.name').textContent = (m.id || m.name || 'Local model') + size;
       row.querySelector('.name').title = m.id || m.name || '';
@@ -1587,8 +1648,19 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       const capabilityBox = row.querySelector('.capabilities');
       capabilityBox.innerHTML = badges;
       capabilityBox.hidden = !badges;
-      const button = row.querySelector('button');
+      const meta = row.querySelector('.fitMeta');
+      meta.textContent = fitResourceSummary(m);
+      meta.hidden = !meta.textContent;
+      const why = row.querySelector('.fitWhy');
+      const reason = row.querySelector('.fitReason');
+      reason.textContent = fitReasonText(m);
+      why.hidden = fitState.view !== 'recommended' || !reason.textContent;
+      why.onclick = () => { reason.hidden = !reason.hidden; why.textContent = reason.hidden ? 'Why recommended' : 'Hide details'; };
+      const button = row.querySelector('.primary');
+      const benchmark = row.querySelector('.benchmark');
       if (local) {
+        benchmark.hidden = false;
+        benchmark.onclick = () => benchmarkLocalModel(local, benchmark);
         button.textContent = loaded ? 'Unload' : 'Load';
         button.onclick = async () => {
           button.disabled = true;
@@ -1664,11 +1736,16 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
         hardwareState = status.hardware || {};
         renderFitHardware();
       }
-      const [recommended] = await Promise.all([
+      const [recommended, , benchmarkPayload] = await Promise.all([
         api('/api/catalog/recommendations', { method: 'POST', body: JSON.stringify({ limit: 24 }) }),
         loadFitCompatible(fitState.query),
+        api('/api/models/benchmarks'),
       ]);
       fitState.recommended = Array.isArray(recommended.models) ? recommended.models : [];
+      fitState.benchmarks = Object.fromEntries(
+        (Array.isArray(benchmarkPayload?.benchmarks) ? benchmarkPayload.benchmarks : [])
+          .map((item) => [benchmarkKey(item?.model, item?.runtime), item]),
+      );
       renderDeviceFitModels();
     } catch (error) {
       $('fitModels').innerHTML = '<div class="error">' + esc(error.message || error) + '</div>';

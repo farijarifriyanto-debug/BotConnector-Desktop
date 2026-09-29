@@ -468,6 +468,10 @@ async function startOfflineServer({
         sendJson(res, 200, { documents: documentStore.list() });
         return;
       }
+      if (req.method === 'GET' && url.pathname === '/api/models/benchmarks') {
+        sendJson(res, 200, localAi.benchmarkResults ? localAi.benchmarkResults() : { benchmarks: [] });
+        return;
+      }
       if (req.method === 'GET' && url.pathname === '/api/catalog/search') {
         const payload = await catalog.searchCatalog({
           query: url.searchParams.get('q') || '',
@@ -526,6 +530,11 @@ async function startOfflineServer({
       }
       if (req.method === 'POST' && url.pathname === '/api/models/pull/status') {
         sendJson(res, 200, localAi.jobStatus(body.id));
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/models/benchmark') {
+        if (!localAi.benchmarkModel) throw new Error('Benchmarking is unavailable in this local runtime.');
+        sendJson(res, 200, await localAi.benchmarkModel(body.model, body.runtime));
         return;
       }
       if (req.method === 'POST' && url.pathname === '/api/models/load') {

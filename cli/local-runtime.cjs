@@ -478,6 +478,7 @@ class LocalAiRuntime {
       Number(process.env.BOTCONNECTOR_LOCAL_AI_IDLE_MS || 5 * 60 * 1000),
     );
     this.idleTimer = null;
+    this.benchmarksFile = path.join(this.dataDir, 'benchmarks.json');
 
     this.runtimeManager = new RuntimeManager({
       baseDir: this.runtimeDir,
@@ -1391,6 +1392,7 @@ class LocalAiRuntime {
         messages: normalized,
         stream,
         temperature,
+        ...(options?.max_tokens ? { max_tokens: Math.max(8, Math.min(512, Number(options.max_tokens) || 64)) } : {}),
         ...(toolDefs.length ? { tools: toolDefs, tool_choice: toolChoice === 'none' ? 'none' : 'auto' } : {}),
       };
       const url = `${MANAGED_LLAMA_BASE}/v1/chat/completions`;
@@ -1410,6 +1412,10 @@ class LocalAiRuntime {
           model: modelName,
           runtime,
           usage: payload?.usage,
+          performance: payload?.timings ? {
+            tokens_per_second: Number(payload.timings.predicted_per_second || 0) || null,
+            prompt_tokens_per_second: Number(payload.timings.prompt_per_second || 0) || null,
+          } : null,
         };
       }
       this.scheduleIdleUnload(runtime, modelName);
@@ -1428,6 +1434,7 @@ class LocalAiRuntime {
         options: {
           temperature,
           ...(options?.num_ctx ? { num_ctx: Math.max(512, Math.min(262144, Number(options.num_ctx) || 4096)) } : {}),
+          ...(options?.max_tokens ? { num_predict: Math.max(8, Math.min(512, Number(options.max_tokens) || 64)) } : {}),
         },
         ...(toolDefs.length ? { tools: toolDefs } : {}),
       };
@@ -1459,6 +1466,15 @@ class LocalAiRuntime {
           prompt_tokens: Number(payload?.prompt_eval_count || 0),
           completion_tokens: Number(payload?.eval_count || 0),
         },
+        performance: {
+          tokens_per_second: Number(payload?.eval_count || 0) && Number(payload?.eval_duration || 0)
+            ? +(Number(payload.eval_count) / (Number(payload.eval_duration) / 1e9)).toFixed(2)
+            : null,
+          prompt_tokens_per_second: Number(payload?.prompt_eval_count || 0) && Number(payload?.prompt_eval_duration || 0)
+            ? +(Number(payload.prompt_eval_count) / (Number(payload.prompt_eval_duration) / 1e9)).toFixed(2)
+            : null,
+          load_ms: Number(payload?.load_duration || 0) ? +(Number(payload.load_duration) / 1e6).toFixed(1) : null,
+        },
       };
       this.scheduleIdleUnload('ollama', modelName);
       return result;
@@ -1471,6 +1487,7 @@ class LocalAiRuntime {
       messages: normalized,
       stream,
       temperature,
+      ...(options?.max_tokens ? { max_tokens: Math.max(8, Math.min(512, Number(options.max_tokens) || 64)) } : {}),
       ...(toolDefs.length ? { tools: toolDefs, tool_choice: toolChoice === 'none' ? 'none' : 'auto' } : {}),
     };
     const url = `${LEMONADE_BASE}/v1/chat/completions`;
@@ -1490,6 +1507,10 @@ class LocalAiRuntime {
         model: modelName,
         runtime: 'lemonade',
         usage: payload?.usage,
+        performance: payload?.timings ? {
+          tokens_per_second: Number(payload.timings.predicted_per_second || payload.timings.tokens_per_second || 0) || null,
+          prompt_tokens_per_second: Number(payload.timings.prompt_per_second || 0) || null,
+        } : null,
       };
     }
     this.scheduleIdleUnload('lemonade', modelName);
@@ -1497,6 +1518,72 @@ class LocalAiRuntime {
     } finally {
       this.chatControllers.delete(id);
     }
+  }
+
+  benchmarkResults() {
+    this.assertEnabled();
+    try {
+      const saved = JSON.parse(fs.readFileSync(this.benchmarksFile, 'utf8'));
+      const rows = saved?.version === 1 && Array.isArray(saved.benchmarks) ? saved.benchmarks : [];
+      return { benchmarks: rows };
+    } catch {
+      return { benchmarks: [] };
+    }
+  }
+
+  async benchmarkModel(model, runtimeHint = '') {
+    this.assertEnabled();
+    const modelName = validModelName(model);
+    const runtime = String(runtimeHint || (await this.detect())?.kind || '');
+    if (!runtime) throw new Error('No supported local AI runtime is available.');
+
+    const started = Date.now();
+    const result = await this.chat({
+      model: modelName,
+      runtime,
+      request_id: 'benchmark-' + crypto.randomUUID(),
+      messages: [{
+        role: 'user',
+        content: 'Write one concise paragraph of about 60 words describing why local AI latency matters. Do not use a list.',
+      }],
+      options: { temperature: 0, max_tokens: 96, num_ctx: 4096, keep_alive: '10m' },
+    });
+    const wallMs = Math.max(1, Date.now() - started);
+    const completionTokens = Number(result?.usage?.completion_tokens || result?.usage?.completionTokens || 0);
+    const promptTokens = Number(result?.usage?.prompt_tokens || result?.usage?.promptTokens || 0);
+    const nativeTps = Number(result?.performance?.tokens_per_second || 0);
+    const tokensPerSecond = nativeTps > 0
+      ? +nativeTps.toFixed(2)
+      : completionTokens > 0
+        ? +(completionTokens / (wallMs / 1000)).toFixed(2)
+        : null;
+
+    const hardware = await Promise.resolve(this.detectHardware()).catch(() => ({}));
+    const row = {
+      model: modelName,
+      runtime,
+      measuredAt: new Date().toISOString(),
+      wallMs,
+      promptTokens,
+      completionTokens,
+      tokensPerSecond,
+      source: nativeTps > 0 ? 'runtime' : completionTokens > 0 ? 'wall-clock' : 'wall-clock-only',
+      hardware: {
+        cpu: hardware?.cpu || null,
+        ramGb: Number(hardware?.ramGb || 0) || null,
+        gpu: [...(hardware?.nvidia || []), ...(hardware?.amd || []), ...(hardware?.intel || [])][0]?.name || null,
+      },
+    };
+
+    const current = this.benchmarkResults().benchmarks.filter(
+      (item) => !(String(item?.model) === modelName && String(item?.runtime) === runtime),
+    );
+    current.unshift(row);
+    fs.mkdirSync(this.dataDir, { recursive: true });
+    const tmp = this.benchmarksFile + '.' + process.pid + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify({ version: 1, benchmarks: current.slice(0, 100) }, null, 2) + '\n', { mode: 0o600 });
+    fs.renameSync(tmp, this.benchmarksFile);
+    return row;
   }
 
   cancelChat(id) {

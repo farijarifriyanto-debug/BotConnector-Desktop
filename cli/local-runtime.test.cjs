@@ -580,3 +580,32 @@ test('status reports loaded models from secondary runtimes even when managed lla
   );
   assert.deepEqual(status.runtimes[1].loadedModels, ['Qwen3-0.6B-GGUF']);
 });
+
+
+test('benchmark stores measured local throughput and reuses runtime token timing when available', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bc-benchmark-'));
+  try {
+    const runtime = new LocalAiRuntime({
+      enabled: true,
+      dataDir: root,
+      detectHardware: async () => ({ cpu: 'Test CPU', ramGb: 16, nvidia: [{ name: 'Test GPU' }], amd: [], intel: [] }),
+    });
+    runtime.chat = async () => ({
+      content: 'benchmark result',
+      usage: { prompt_tokens: 12, completion_tokens: 48 },
+      performance: { tokens_per_second: 24.5 },
+    });
+    const result = await runtime.benchmarkModel('model-1', 'ollama');
+    assert.equal(result.tokensPerSecond, 24.5);
+    assert.equal(result.source, 'runtime');
+    assert.equal(result.completionTokens, 48);
+    assert.equal(result.hardware.gpu, 'Test GPU');
+
+    const saved = runtime.benchmarkResults().benchmarks;
+    assert.equal(saved.length, 1);
+    assert.equal(saved[0].model, 'model-1');
+    assert.equal(saved[0].runtime, 'ollama');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
