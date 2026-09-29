@@ -473,6 +473,8 @@ async function startOfflineServer({
           query: url.searchParams.get('q') || '',
           cursor: url.searchParams.get('cursor') || '',
           limit: Number(url.searchParams.get('limit') || 40),
+          sort: url.searchParams.get('sort') || '',
+          hardware: await detectHardware(),
         });
         sendJson(res, 200, payload);
         return;
