@@ -1674,7 +1674,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
   function hardwareValue(h, key) {
     const gpu = [...(h.nvidia || []), ...(h.amd || []), ...(h.intel || [])][0] || null;
     if (key === 'cpu') return String(h.cpu || 'Unknown');
-    if (key === 'ram') return h.ramGb ? Number(h.ramGb).toFixed(1) + ' GB total' + (h.freeRamGb ? ' · ' + Number(h.freeRamGb).toFixed(1) + ' GB available' : '') : 'Unknown';
+    if (key === 'ram') return h.ramGb ? Number(h.ramGb).toFixed(1) + ' GB total' : 'Unknown';
     if (key === 'gpu') return gpu?.name || 'No GPU detected';
     if (key === 'vram') {
       const value = gpu?.vramGb ?? gpu?.vram_gb ?? gpu?.memoryGb ?? gpu?.memory_gb;
@@ -1703,6 +1703,9 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       fitBackend: hardwareValue(h, 'backend'),
     };
     for (const [id, value] of Object.entries(fields)) $(id).textContent = value;
+    $('fitRamAvailable').textContent = h.freeRamGb
+      ? Number(h.freeRamGb).toFixed(1) + ' GB available now'
+      : 'Available memory not reported';
   }
 
   function fitUseCaseMatches(model, useCase) {
@@ -1805,12 +1808,171 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     return fitState.benchmarks[benchmarkKey(local.id, local.runtime)] || null;
   }
 
+  function formatGb(value) {
+    const n = Number(value || 0);
+    if (!n) return '';
+    return n >= 10 ? n.toFixed(1) : n.toFixed(1);
+  }
+
+  function formatBytes(value) {
+    const n = Number(value || 0);
+    if (!n) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let size = n;
+    let index = 0;
+    while (size >= 1024 && index < units.length - 1) {
+      size /= 1024;
+      index += 1;
+    }
+    const digits = index >= 3 ? 1 : index === 2 ? 0 : 1;
+    return size.toFixed(digits) + ' ' + units[index];
+  }
+
+  function fitModelData(model) {
+    if (!model) return model;
+    const id = String(model?.id || model?.name || '');
+    const details = fitState.details[id];
+    if (!details) return model;
+    return {
+      ...model,
+      ...details,
+      _local: model._local,
+      _installed: model._installed,
+      capabilities: details.capabilities || model.capabilities,
+      compatibility: details.compatibility || model.compatibility,
+    };
+  }
+
+  function catalogDisplayName(model) {
+    const m = fitModelData(model) || {};
+    const raw = String(m.id || m.name || 'Local model');
+    const leaf = raw.includes('/') ? raw.slice(raw.lastIndexOf('/') + 1) : raw;
+    const clean = leaf
+      .replace(/\.gguf$/i, '')
+      .replace(/[-_.]?GGUF$/i, '')
+      .replace(/[-_.](?:IQ\d(?:_[A-Z0-9]+)?|Q\d(?:_[A-Z0-9]+){0,3}|F16|BF16|F32)(?=$|[-_.])/gi, '-');
+    const params = Number(m?.compatibility?.paramsB || 0) ||
+      Number((clean.match(/(?:^|[-_.])(\d+(?:\.\d+)?)B(?:$|[-_.])/i) || [])[1] || 0);
+    const paramLabel = params ? String(params).replace(/\.0$/, '') + 'B' : '';
+    const rules = [
+      [/qwen[-_. ]*(\d+(?:\.\d+)?)/i, 'Qwen'],
+      [/gemma[-_. ]*(\d+(?:\.\d+)?)/i, 'Gemma'],
+      [/llama[-_. ]*(\d+(?:\.\d+)?)/i, 'Llama'],
+      [/mistral[-_. ]*(\d+(?:\.\d+)?)/i, 'Mistral'],
+      [/phi[-_. ]*(\d+(?:\.\d+)?)/i, 'Phi'],
+      [/glm[-_. ]*(\d+(?:\.\d+)?)/i, 'GLM'],
+    ];
+    for (const [pattern, family] of rules) {
+      const hit = clean.match(pattern);
+      if (!hit) continue;
+      let name = family + ' ' + hit[1];
+      if (/coder/i.test(clean) && !/coder/i.test(name)) name += ' Coder';
+      else if (/(?:^|[-_.])vl(?:$|[-_.])|vision/i.test(clean)) name += ' VL';
+      else if (/flash/i.test(clean)) name += ' Flash';
+      if (paramLabel && !name.toLowerCase().includes(paramLabel.toLowerCase())) name += ' ' + paramLabel;
+      return name.replace(/\s+/g, ' ').trim();
+    }
+    if (/deepseek/i.test(clean)) {
+      return ('DeepSeek' + (/coder/i.test(clean) ? ' Coder' : '') + (paramLabel ? ' ' + paramLabel : '')).trim();
+    }
+    const words = clean.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim().split(' ');
+    const paramIndex = words.findIndex((word) => /^\d+(?:\.\d+)?B$/i.test(word));
+    const endAt = paramIndex >= 0 ? Math.min(words.length, paramIndex + 1) : Math.min(words.length, 5);
+    const fallback = words.slice(0, endAt).join(' ');
+    return fallback || friendlyModelName(m);
+  }
+
+  function fitPublisher(model) {
+    const m = fitModelData(model) || {};
+    return String(m.author || String(m.id || '').split('/')[0] || 'Local');
+  }
+
+  function fitLicenseLabel(model) {
+    const value = String(fitModelData(model)?.license || '').trim();
+    if (!value) return 'License not listed';
+    return value.split('-').map((part, index) => index === 0 ? part.charAt(0).toUpperCase() + part.slice(1) : part.toUpperCase()).join('-');
+  }
+
+  function fitPreferredQuant(model) {
+    const m = fitModelData(model) || {};
+    if (m.preferredDownload?.quant) return String(m.preferredDownload.quant);
+    if (m.quant) return String(m.quant);
+    const raw = String(m.id || m.name || '');
+    const hit = raw.toUpperCase().match(/(?:^|[-_.])(IQ\d(?:_[A-Z0-9]+)?|Q\d(?:_[A-Z0-9]+){0,3}|F16|BF16|F32)(?:$|[-_.])/);
+    return hit?.[1] || '';
+  }
+
+  function fitDownloadGb(model) {
+    const m = fitModelData(model) || {};
+    const bytes = Number(m.preferredDownload?.size || 0);
+    if (bytes > 0) return { gb: bytes / 1024 ** 3, estimated: false };
+    const estimated = Number(m.estimatedDownloadGb || m?.compatibility?.estimatedQ4Gb || 0);
+    return estimated > 0 ? { gb: estimated, estimated: true } : { gb: 0, estimated: true };
+  }
+
+  function fitRecommendedRamGb(model) {
+    const download = fitDownloadGb(model).gb;
+    if (!download) return 0;
+    return Math.ceil(download * 1.25 * 10) / 10;
+  }
+
+  function fitHeadroomGb(model) {
+    const free = Number(hardwareState?.freeRamGb || 0);
+    const ram = fitRecommendedRamGb(model);
+    return free && ram ? +(free - ram).toFixed(1) : null;
+  }
+
+  function fitContextLabel(model) {
+    const n = Number(fitModelData(model)?.contextLength || 0);
+    if (!n) return '';
+    if (n >= 1024 * 1024) return (n / (1024 * 1024)).toFixed(n % (1024 * 1024) ? 1 : 0) + 'M';
+    if (n >= 1024) return (n / 1024).toFixed(n % 1024 ? 1 : 0) + 'K';
+    return String(n);
+  }
+
   function fitResourceSummary(model) {
-    const c = model?.compatibility || {};
+    const m = fitModelData(model) || {};
+    const c = m.compatibility || {};
     const bits = [];
-    if (c.estimatedQ4Gb) bits.push('Est. Q4 weights ' + Number(c.estimatedQ4Gb).toFixed(1) + ' GB');
     if (c.paramsB) bits.push(Number(c.paramsB).toFixed(1).replace(/\.0$/, '') + 'B parameters');
+    const context = fitContextLabel(m);
+    if (context) bits.push('Context ' + context);
     return bits.join(' · ');
+  }
+
+  function fitDownloadSummary(model) {
+    const download = fitDownloadGb(model);
+    const ram = fitRecommendedRamGb(model);
+    const headroom = fitHeadroomGb(model);
+    const bits = [];
+    if (download.gb) bits.push((download.estimated ? '~' : '') + formatGb(download.gb) + ' GB download' + (download.estimated ? ' est.' : ''));
+    if (ram) bits.push('~' + formatGb(ram) + ' GB RAM recommended');
+    if (headroom != null) {
+      if (headroom >= 0) bits.push('~' + formatGb(headroom) + ' GB headroom after load');
+      else bits.push(formatGb(Number(hardwareState?.freeRamGb || 0)) + ' GB RAM available now');
+    }
+    return bits.join(' · ');
+  }
+
+  function fitIdentitySummary(model) {
+    const m = fitModelData(model) || {};
+    const quant = fitPreferredQuant(m);
+    return [fitPublisher(m), 'GGUF', quant || 'quant resolves on download'].filter(Boolean).join(' · ');
+  }
+
+  function fitTrustSummary(model) {
+    const m = fitModelData(model) || {};
+    const parts = [];
+    parts.push(m.publisherType === 'official' ? 'Official publisher' : 'Community');
+    parts.push(fitLicenseLabel(m));
+    parts.push(m.source || 'Hugging Face');
+    return parts;
+  }
+
+  function fitBenchmarkForModel(model) {
+    const local = model?._local || installedMatch(model);
+    const bench = modelBenchmark(local);
+    return bench && benchmarkMatchesHardware(bench) ? bench : null;
   }
 
   function fitBenchmarkSummary(model) {
@@ -1820,9 +1982,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     const bits = [];
     const current = benchmarkMatchesHardware(bench);
     if (bench.promptTokensPerSecond) bits.push('Prompt <strong>' + Number(bench.promptTokensPerSecond).toFixed(1) + ' tok/s</strong>');
-    if (bench.tokensPerSecond) {
-      bits.push((bench.source === 'runtime' ? 'Generate ' : 'Overall ~') + '<strong>' + Number(bench.tokensPerSecond).toFixed(1) + ' tok/s</strong>');
-    }
+    if (bench.tokensPerSecond) bits.push((bench.source === 'runtime' ? 'Generate ' : 'Overall ~') + '<strong>' + Number(bench.tokensPerSecond).toFixed(1) + ' tok/s</strong>');
     if (bench.loadMs) bits.push('Load ' + (Number(bench.loadMs) / 1000).toFixed(2) + ' s');
     if (bench.wallMs) bits.push('End-to-end ' + (Number(bench.wallMs) / 1000).toFixed(2) + ' s');
     if (bench.contextTokens) bits.push('Context ' + Math.round(Number(bench.contextTokens) / 1024) + 'K');
@@ -1830,24 +1990,49 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     return bits.join(' · ');
   }
 
+  function fitStatusText(model, local, loaded) {
+    const m = fitModelData(model) || {};
+    const level = String(m?.compatibility?.level || (loaded ? 'loaded' : local ? 'installed' : 'unknown'));
+    const bench = fitBenchmarkForModel(m);
+    const base = fitStatusLabel(level);
+    return bench?.tokensPerSecond ? base + ' · ' + Number(bench.tokensPerSecond).toFixed(1) + ' tok/s' : base + ' · Estimated';
+  }
+
   function fitReasonText(model) {
-    const c = model?.compatibility || {};
+    const m = fitModelData(model) || {};
+    const c = m.compatibility || {};
     const reasons = [];
     const level = String(c.level || 'unknown');
     if (level === 'great') reasons.push('Fits comfortably on the detected hardware.');
     else if (level === 'ok') reasons.push('Fits the detected hardware with moderate headroom.');
     else if (level === 'warn') reasons.push('Expected to run, but memory or speed headroom may be limited.');
-    if (c.estimatedQ4Gb) reasons.push('Q4 model weights are estimated at about ' + Number(c.estimatedQ4Gb).toFixed(1) + ' GB before runtime overhead.');
+    const download = fitDownloadGb(m);
+    if (download.gb) reasons.push((download.estimated ? 'Estimated' : 'Selected') + ' model download is about ' + formatGb(download.gb) + ' GB.');
+    const ram = fitRecommendedRamGb(m);
+    if (ram) reasons.push('Recommended memory budget is about ' + formatGb(ram) + ' GB including runtime overhead.');
     const useCases = fitSpecificUseCases().filter((item) => item !== 'general');
     if (useCases.length) reasons.push('Matches selected capability: ' + useCases.join(', ') + '.');
-    const p = fitParams(model);
+    const p = fitParams(m);
     if (p) reasons.push('The ' + fitState.preference + ' preference ranks this ' + p + 'B model against the other compatible choices.');
-    const local = model?._local || installedMatch(model);
-    const bench = modelBenchmark(local);
-    if (bench?.tokensPerSecond && benchmarkMatchesHardware(bench)) {
-      reasons.push('Measured on this device at ' + Number(bench.tokensPerSecond).toFixed(1) + ' tok/s; this measured speed contributes to the ranking.');
-    }
+    const bench = fitBenchmarkForModel(m);
+    if (bench?.tokensPerSecond) reasons.push('Measured on this device at ' + Number(bench.tokensPerSecond).toFixed(1) + ' tok/s; this measured speed contributes to the ranking.');
+    else reasons.push('Performance is estimated until this model is installed and benchmarked on this device.');
     return reasons.join(' ');
+  }
+
+  function fitRecommendationSummary(model) {
+    const m = fitModelData(model) || {};
+    const bits = [];
+    const ram = fitRecommendedRamGb(m);
+    const free = Number(hardwareState?.freeRamGb || 0);
+    if (ram && free && ram <= free * 0.45) bits.push('Low memory footprint');
+    else if (fitHeadroomGb(m) != null && fitHeadroomGb(m) >= 4) bits.push('Comfortable memory headroom');
+    const selected = fitSpecificUseCases().filter((item) => item !== 'general');
+    if (selected.length) bits.push('Matches ' + selected.join(' + '));
+    const bench = fitBenchmarkForModel(m);
+    if (bench?.tokensPerSecond) bits.push(Number(bench.tokensPerSecond).toFixed(1) + ' tok/s measured');
+    else if (String(m?.compatibility?.level) === 'great') bits.push('Great estimated fit');
+    return bits.slice(0, 3).join(' · ') || 'Best current match for this device and profile';
   }
 
   async function benchmarkOne(local) {
@@ -1891,17 +2076,9 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     for (let i = 0; i < rows.length; i++) {
       if (fitState.benchmarkStop) break;
       const local = rows[i];
-      fitState.benchmarkProgress = {
-        ...fitState.benchmarkProgress,
-        current: i + 1,
-        model: friendlyModelName(local),
-      };
+      fitState.benchmarkProgress = { ...fitState.benchmarkProgress, current: i + 1, model: friendlyModelName(local) };
       renderDeviceFitModels();
-      try {
-        await benchmarkOne(local);
-      } catch {
-        fitState.benchmarkProgress.failed += 1;
-      }
+      try { await benchmarkOne(local); } catch { fitState.benchmarkProgress.failed += 1; }
       renderDeviceFitModels();
     }
 
@@ -1909,11 +2086,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     fitState.benchmarkRunning = false;
     fitState.benchmarkStop = false;
     const progress = fitState.benchmarkProgress || { current: 0, total: rows.length, failed: 0 };
-    fitState.benchmarkProgress = {
-      ...progress,
-      done: true,
-      stopped,
-    };
+    fitState.benchmarkProgress = { ...progress, done: true, stopped };
     await refresh().catch(() => {});
     renderDeviceFitModels();
   }
@@ -1922,22 +2095,43 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     const id = String(candidate?.id || candidate?.name || '').toLowerCase();
     const leaf = id.split('/').pop().replace(/[-_.]?gguf$/i, '');
     return models.find((local) => {
-      const hay = [local?.id, local?.name, local?.path].filter(Boolean).join(' ').toLowerCase();
+      const hay = [local?.id, local?.name, local?.repoId, local?.path].filter(Boolean).join(' ').toLowerCase();
       return (id && hay.includes(id)) || (leaf && leaf.length > 5 && hay.includes(leaf));
     }) || null;
+  }
+
+  function fitModelPassesFilters(model) {
+    const m = fitModelData(model) || {};
+    const f = fitState.filters;
+    if (f.maxSizeGb) {
+      const size = fitDownloadGb(m).gb;
+      if (!size || size > Number(f.maxSizeGb)) return false;
+    }
+    if (f.minContext) {
+      if (Number(m.contextLength || 0) < Number(f.minContext)) return false;
+    }
+    if (f.quant && fitPreferredQuant(m).toUpperCase() !== String(f.quant).toUpperCase()) return false;
+    if (f.publisher && String(m.publisherType || 'community') !== f.publisher) return false;
+    const local = m._local || installedMatch(m);
+    if (f.installedOnly && !local) return false;
+    if (f.benchmarkedOnly && !fitBenchmarkForModel({ ...m, _local: local })) return false;
+    return true;
   }
 
   function compatibleFiltered() {
     const query = fitState.query.trim().toLowerCase();
     return fitState.compatible
+      .map(fitModelData)
       .filter((model) => model?.compatibility?.level !== 'no' && catalogCapabilities(model).chat !== false)
       .filter((model) => fitSpecificUseCases().every((useCase) => fitUseCaseMatches(model, useCase)))
+      .filter(fitModelPassesFilters)
       .filter((model) => !query || normalizedFitSearch(model).includes(query));
   }
 
   function recommendedFiltered() {
     const pool = new Map();
-    for (const model of [...fitState.recommended, ...fitState.compatible]) {
+    for (const base of [...fitState.recommended, ...fitState.compatible]) {
+      const model = fitModelData(base);
       const id = String(model?.id || model?.name || '');
       if (id && !pool.has(id)) pool.set(id, model);
     }
@@ -1945,38 +2139,45 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     return [...pool.values()]
       .filter((model) => model?.compatibility?.level !== 'no' && catalogCapabilities(model).chat !== false)
       .filter((model) => fitSpecificUseCases().every((useCase) => fitUseCaseMatches(model, useCase)))
+      .filter(fitModelPassesFilters)
       .filter((model) => !query || normalizedFitSearch(model).includes(query))
       .sort((a, b) => fitScore(b) - fitScore(a))
       .slice(0, 12);
   }
 
   function installedFitModels() {
-    const candidates = [...fitState.recommended, ...fitState.compatible];
+    const candidates = [...fitState.recommended, ...fitState.compatible].map(fitModelData);
     return models.map((local) => {
-      const hay = [local?.id, local?.name, local?.path].filter(Boolean).join(' ').toLowerCase();
+      const hay = [local?.id, local?.name, local?.repoId, local?.path].filter(Boolean).join(' ').toLowerCase();
       const matched = candidates.find((candidate) => {
         const id = String(candidate?.id || '').toLowerCase();
         const leaf = id.split('/').pop().replace(/[-_.]?gguf$/i, '');
         return (id && hay.includes(id)) || (leaf && leaf.length > 5 && hay.includes(leaf));
       });
-      return {
-        id: local.name || local.id,
-        name: local.name || local.id,
+      const row = {
+        ...(matched || {}),
+        id: matched?.id || local.repoId || local.name || local.id,
+        name: local.name || matched?.name || local.id,
+        author: matched?.author || (local.repoId ? String(local.repoId).split('/')[0] : null),
         capabilities: matched?.capabilities || local.capabilities || null,
         compatibility: matched?.compatibility || { level: modelIsLoaded(local) ? 'loaded' : 'installed' },
         downloads: matched?.downloads || 0,
         _local: local,
         _installed: true,
       };
+      return row;
+    }).filter(fitModelPassesFilters).filter((model) => {
+      const query = fitState.query.trim().toLowerCase();
+      return !query || normalizedFitSearch(model).includes(query);
     });
   }
 
   function sortFitModels(list) {
     const rows = [...list];
     const sort = fitState.sort;
-    if (sort === 'smallest') return rows.sort((a, b) => (fitParams(a) || 999) - (fitParams(b) || 999) || String(a.id || '').localeCompare(String(b.id || '')));
+    if (sort === 'smallest') return rows.sort((a, b) => (fitDownloadGb(a).gb || 999) - (fitDownloadGb(b).gb || 999) || String(a.id || '').localeCompare(String(b.id || '')));
     if (sort === 'popular') return rows.sort((a, b) => Number(b.downloads || 0) - Number(a.downloads || 0));
-    if (sort === 'name') return rows.sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')));
+    if (sort === 'name') return rows.sort((a, b) => catalogDisplayName(a).localeCompare(catalogDisplayName(b)));
     return rows.sort((a, b) => fitScore(b) - fitScore(a));
   }
 
@@ -2006,67 +2207,371 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     $('fitPreferenceDescription').textContent = fitPreferenceCopy(fitState.preference);
   }
 
+  function activeFitFilterCount() {
+    const f = fitState.filters;
+    return [f.maxSizeGb, f.minContext, f.quant, f.publisher, f.installedOnly, f.benchmarkedOnly].filter(Boolean).length;
+  }
+
+  function renderFitFilters() {
+    $('fitFilterSize').value = fitState.filters.maxSizeGb;
+    $('fitFilterContext').value = fitState.filters.minContext;
+    $('fitFilterQuant').value = fitState.filters.quant;
+    $('fitFilterPublisher').value = fitState.filters.publisher;
+    $('fitFilterInstalled').checked = fitState.filters.installedOnly;
+    $('fitFilterBenchmarked').checked = fitState.filters.benchmarkedOnly;
+    $('fitFilterMenu').hidden = !fitState.filtersOpen;
+    const count = activeFitFilterCount();
+    $('fitFilterCount').hidden = count === 0;
+    $('fitFilterCount').textContent = String(count);
+    $('fitFiltersBtn').classList.toggle('active', count > 0);
+  }
+
+  async function ensureFitDetails(model) {
+    const id = String(model?.id || '');
+    if (!id.includes('/') || fitState.details[id] || fitState.detailLoading[id]) return;
+    fitState.detailLoading[id] = true;
+    try {
+      fitState.details[id] = await api('/api/catalog/details', {
+        method: 'POST',
+        body: JSON.stringify({ id }),
+      });
+      renderDeviceFitModels();
+    } catch {
+      // Estimated metadata remains usable if a detail lookup is unavailable or rate-limited.
+    } finally {
+      delete fitState.detailLoading[id];
+    }
+  }
+
+  function fitDownloadState(model) {
+    return fitState.downloads[String(model?.id || '')] || null;
+  }
+
+  function fitDownloadStatusText(job) {
+    if (!job) return '';
+    const percent = Number(job.percent || 0);
+    const completed = Number(job.completed || 0);
+    const total = Number(job.total || 0);
+    const speed = Number(job.bytesPerSecond || 0);
+    if (job.status === 'verifying' || String(job.detail || '').toLowerCase().includes('verifying')) return 'Verifying downloaded model…';
+    if (job.status === 'rate-limited') {
+      const seconds = Math.max(1, Math.ceil(Number(job.retryAfterMs || 0) / 1000));
+      return 'Hugging Face rate limit · retrying automatically in ' + seconds + 's';
+    }
+    if (job.status === 'retrying') return job.detail || 'Connection interrupted · resuming automatically';
+    if (job.status === 'failed') return 'Download failed · ' + (job.error || 'Retry available');
+    if (job.status === 'cancelled') return 'Download cancelled';
+    if (job.status === 'completed') return 'Installed';
+    const bits = ['Downloading ' + percent + '%'];
+    if (total) bits.push(formatBytes(completed) + ' / ' + formatBytes(total));
+    if (speed) bits.push(formatBytes(speed) + '/s');
+    return bits.join(' · ');
+  }
+
+  async function downloadFitModel(model) {
+    const m = fitModelData(model);
+    const id = String(m?.id || '');
+    if (!id) return;
+    const active = Object.values(fitState.downloads).filter((job) => ['queued','resolving','downloading','verifying','retrying','rate-limited'].includes(String(job?.status || ''))).length;
+    if (active >= 2 && !fitState.downloads[id]) {
+      alert('Two model downloads are already active. Wait for one to finish or cancel it first.');
+      return;
+    }
+    fitState.downloads[id] = { model: id, status: 'resolving', percent: 0, completed: 0, total: 0 };
+    renderDeviceFitModels();
+    try {
+      const status = await api('/api/status');
+      if (!status.runtime?.available) await prepareRuntime();
+      const start = await api('/api/models/pull', { method: 'POST', body: JSON.stringify({ model: id }) });
+      fitState.downloads[id] = { ...start, model: id };
+      renderDeviceFitModels();
+      for (;;) {
+        const job = await api('/api/models/pull/status', { method: 'POST', body: JSON.stringify({ id: start.id }) });
+        fitState.downloads[id] = { ...job, model: id };
+        renderDeviceFitModels();
+        if (job.status === 'completed') {
+          await refresh();
+          await loadDeviceFit(false);
+          return;
+        }
+        if (job.status === 'failed' || job.status === 'cancelled') return;
+        await new Promise((resolve) => setTimeout(resolve, 650));
+      }
+    } catch (error) {
+      fitState.downloads[id] = { ...(fitState.downloads[id] || {}), model: id, status: 'failed', error: String(error.message || error) };
+      renderDeviceFitModels();
+    }
+  }
+
+  async function cancelFitDownload(model) {
+    const id = String(model?.id || '');
+    const job = fitState.downloads[id];
+    if (!job?.id) return;
+    try {
+      const state = await api('/api/models/pull/cancel', { method: 'POST', body: JSON.stringify({ id: job.id }) });
+      fitState.downloads[id] = { ...state, model: id };
+    } catch (error) {
+      fitState.downloads[id] = { ...job, status: 'failed', error: String(error.message || error) };
+    }
+    renderDeviceFitModels();
+  }
+
+  function useFitModel(local) {
+    if (!local?.path) return;
+    const option = [...$('modelSelect').options].find((item) => item.value === local.path);
+    if (!option) return;
+    $('modelSelect').value = local.path;
+    settings.model = local.path;
+    $('modelSelect').title = modelDetail(local);
+    persistSettings();
+    renderModelActions();
+    close();
+    $('prompt').focus();
+  }
+
+  function fitCompareId(model) {
+    return String(model?.id || model?.name || '');
+  }
+
+  function toggleFitCompare(model) {
+    const id = fitCompareId(model);
+    if (!id) return;
+    if (fitState.compare.includes(id)) fitState.compare = fitState.compare.filter((item) => item !== id);
+    else {
+      if (fitState.compare.length >= 3) {
+        alert('Compare supports up to 3 models at a time.');
+        return;
+      }
+      fitState.compare.push(id);
+    }
+    if (fitState.compare.length < 2) fitState.compareOpen = false;
+    renderDeviceFitModels();
+  }
+
+  function knownFitModels() {
+    const map = new Map();
+    for (const model of [...fitState.recommended, ...fitState.compatible, ...installedFitModels()]) {
+      const m = fitModelData(model);
+      const id = fitCompareId(m);
+      if (id && !map.has(id)) map.set(id, m);
+    }
+    return map;
+  }
+
+  function renderFitCompare() {
+    const map = knownFitModels();
+    fitState.compare = fitState.compare.filter((id) => map.has(id));
+    const selected = fitState.compare.map((id) => map.get(id)).filter(Boolean);
+    const tray = $('fitCompareTray');
+    tray.hidden = selected.length === 0;
+    $('fitCompareTitle').textContent = selected.length + ' model' + (selected.length === 1 ? '' : 's') + ' selected';
+    $('fitCompareNames').textContent = selected.map(catalogDisplayName).join(' · ');
+    $('fitCompareOpen').disabled = selected.length < 2;
+    $('fitCompareOpen').textContent = fitState.compareOpen ? 'Hide comparison' : 'Compare';
+
+    const panel = $('fitComparePanel');
+    panel.hidden = !fitState.compareOpen || selected.length < 2;
+    if (panel.hidden) return;
+
+    const cell = (value) => '<td>' + esc(value || '—') + '</td>';
+    const row = (label, values) => '<tr><td>' + esc(label) + '</td>' + values.map(cell).join('') + '</tr>';
+    const header = '<tr><th>Compare</th>' + selected.map((m) => '<th title="' + esc(m.id || '') + '">' + esc(catalogDisplayName(m)) + '</th>').join('') + '</tr>';
+    const capabilities = (m) => Object.entries(catalogCapabilities(m)).filter(([, value]) => value === true).map(([key]) => key === 'chat' ? 'Text' : key.charAt(0).toUpperCase() + key.slice(1)).join(', ');
+    panel.innerHTML =
+      '<div class="row" style="margin-bottom:8px"><strong class="grow">Model comparison</strong><button class="btn small" type="button" id="fitCompareClose">Close</button></div>' +
+      '<table class="fitCompareTable"><thead>' + header + '</thead><tbody>' +
+      row('Fit', selected.map((m) => fitStatusText(m, m._local || installedMatch(m), Boolean((m._local || installedMatch(m)) && modelIsLoaded(m._local || installedMatch(m)))))) +
+      row('Parameters', selected.map((m) => m?.compatibility?.paramsB ? Number(m.compatibility.paramsB).toFixed(1).replace(/\.0$/, '') + 'B' : '—')) +
+      row('RAM recommended', selected.map((m) => fitRecommendedRamGb(m) ? '~' + formatGb(fitRecommendedRamGb(m)) + ' GB' : '—')) +
+      row('Measured speed', selected.map((m) => fitBenchmarkForModel(m)?.tokensPerSecond ? Number(fitBenchmarkForModel(m).tokensPerSecond).toFixed(1) + ' tok/s' : 'Not benchmarked')) +
+      row('Context', selected.map((m) => fitContextLabel(m) || 'Not listed')) +
+      row('Capabilities', selected.map(capabilities)) +
+      row('Publisher', selected.map((m) => fitPublisher(m) + ' · ' + (m.publisherType === 'official' ? 'Official' : 'Community'))) +
+      row('License', selected.map(fitLicenseLabel)) +
+      '</tbody></table>';
+    $('fitCompareClose').onclick = () => { fitState.compareOpen = false; renderFitCompare(); };
+  }
+
+  function renderFitSkeleton(label = 'Finding compatible models…') {
+    $('fitModels').innerHTML =
+      '<div class="fitStateBox" style="min-height:70px;padding-bottom:4px"><strong>' + esc(label) + '</strong></div>' +
+      '<div class="fitSkeletonList">' +
+      Array.from({ length: 4 }, () => '<div class="fitSkeleton"><div class="fitSkeletonLine"></div><div class="fitSkeletonLine mid"></div><div class="fitSkeletonLine short"></div></div>').join('') +
+      '</div>';
+  }
+
+  function renderFitError(error) {
+    const box = $('fitModels');
+    box.innerHTML = '<div class="fitStateBox"><strong>Catalog unavailable</strong><span>' + esc(error || 'Could not load compatible models.') + '</span><button class="btn small" type="button">Retry</button></div>';
+    box.querySelector('button').onclick = () => loadDeviceFit(true);
+  }
+
   function renderFitCatalog(list) {
     const box = $('fitModels');
-    box.innerHTML = list.length ? '' : '<div class="muted">No models match these filters.</div>';
-    for (const m of list) {
+    if (!list.length) {
+      const useCases = fitSpecificUseCases().filter((item) => item !== 'general');
+      const label = useCases.length
+        ? 'No ' + useCases.map((item) => item.charAt(0).toUpperCase() + item.slice(1)).join(' + ') + ' models fit this profile'
+        : 'No models match these filters';
+      box.innerHTML = '<div class="fitStateBox"><strong>' + esc(label) + '</strong><span>Try another profile, clear filters, or scan the device again.</span><button class="btn small" type="button">Clear filters</button></div>';
+      box.querySelector('button').onclick = () => {
+        fitState.filters = { maxSizeGb: '', minContext: '', quant: '', publisher: '', installedOnly: false, benchmarkedOnly: false };
+        fitState.query = '';
+        $('fitSearch').value = '';
+        renderDeviceFitModels();
+      };
+      renderFitCompare();
+      return;
+    }
+
+    box.innerHTML = '';
+    list.forEach((base, index) => {
+      const m = fitModelData(base);
       const local = m._local || installedMatch(m);
       const loaded = local ? modelIsLoaded(local) : false;
-      const level = local ? (loaded ? 'loaded' : 'installed') : (m.compatibility?.level || 'unknown');
+      const level = String(m?.compatibility?.level || (loaded ? 'loaded' : local ? 'installed' : 'unknown'));
+      const bench = fitBenchmarkForModel({ ...m, _local: local });
+      const downloadJob = fitDownloadState(m);
+      const selectedCompare = fitState.compare.includes(fitCompareId(m));
       const row = document.createElement('div');
-      row.className = 'model fitModelCard';
-      row.innerHTML = '<div class="modelInfo"><span class="name"></span><div class="capabilities"></div><div class="fitMeta"></div><div class="fitBenchmarkMetrics"></div><button class="fitWhy" type="button">Why this model?</button><div class="fitReason" hidden></div></div><span class="fit ' + esc(level) + '">' + esc(fitStatusLabel(level)) + '</span><div class="modelActions"><button class="btn small primary"></button><button class="btn small benchmark" type="button" hidden>Benchmark</button></div>';
-      const size = m.compatibility?.paramsB ? ' · ' + m.compatibility.paramsB + 'B' : '';
-      row.querySelector('.name').textContent = (m.id || m.name || 'Local model') + size;
-      row.querySelector('.name').title = m.id || m.name || '';
+      row.className = 'model fitModelCard' + (fitState.view === 'recommended' && index === 0 ? ' fitTopRecommendation' : '');
+      row.innerHTML =
+        '<div class="modelInfo">' +
+          '<span class="name"></span>' +
+          '<div class="fitIdentityMeta"></div>' +
+          '<div class="fitRecommendationHint" hidden><strong>Recommended for this device</strong><span></span></div>' +
+          '<div class="capabilities"></div>' +
+          '<div class="fitMeta"></div>' +
+          '<div class="fitTrustMeta"></div>' +
+          '<div class="fitDownloadMeta"></div>' +
+          '<div class="fitBenchmarkMetrics"></div>' +
+          '<div class="fitDownloadProgress" hidden><div class="fitDownloadProgressTop"><span class="fitDownloadProgressText"></span><span class="fitDownloadProgressPct"></span></div><div class="fitProgressTrack"><div class="fitProgressBar"></div></div></div>' +
+          '<button class="fitWhy" type="button">Why this model?</button>' +
+          '<div class="fitReason" hidden></div>' +
+          '<label class="fitCompareChoice"><input type="checkbox"> Compare</label>' +
+        '</div>' +
+        '<span class="fit ' + esc(level) + '"></span>' +
+        '<div class="modelActions"><button class="btn small primary"></button><button class="btn small secondary" type="button" hidden></button><button class="btn small benchmark" type="button" hidden>Benchmark</button><button class="btn small cancelDownload" type="button" hidden>Cancel</button></div>';
+
+      const name = row.querySelector('.name');
+      name.textContent = catalogDisplayName(m);
+      name.title = m.id || m.name || '';
+
+      row.querySelector('.fitIdentityMeta').textContent = fitIdentitySummary(m);
+      const recommendedHint = row.querySelector('.fitRecommendationHint');
+      if (fitState.view === 'recommended' && index === 0) {
+        recommendedHint.hidden = false;
+        recommendedHint.querySelector('span').textContent = fitRecommendationSummary(m);
+      }
+
       const badges = modelCapabilityBadges(catalogCapabilities(m));
       const capabilityBox = row.querySelector('.capabilities');
       capabilityBox.innerHTML = badges;
       capabilityBox.hidden = !badges;
+
       const meta = row.querySelector('.fitMeta');
       meta.textContent = fitResourceSummary(m);
       meta.hidden = !meta.textContent;
+
+      const trust = row.querySelector('.fitTrustMeta');
+      const trustParts = fitTrustSummary(m);
+      trust.innerHTML =
+        '<span class="fitTrustBadge ' + (m.publisherType === 'official' ? 'official' : '') + '">' + esc(trustParts[0]) + '</span>' +
+        '<span>' + esc(trustParts[1]) + '</span><span>·</span><span>' + esc(trustParts[2]) + '</span>' +
+        '<span class="fitConfidence ' + (bench ? 'measured' : '') + '">' + (bench ? 'Measured' : 'Estimated') + '</span>';
+
+      const downloadMeta = row.querySelector('.fitDownloadMeta');
+      downloadMeta.textContent = fitDownloadSummary(m);
+      downloadMeta.hidden = !downloadMeta.textContent;
+
       const perf = row.querySelector('.fitBenchmarkMetrics');
-      perf.innerHTML = fitBenchmarkSummary(m);
+      perf.innerHTML = fitBenchmarkSummary({ ...m, _local: local });
       perf.hidden = !perf.textContent;
+
+      const status = row.querySelector('.fit');
+      status.textContent = fitStatusText({ ...m, _local: local }, local, loaded);
+
       const why = row.querySelector('.fitWhy');
       const reason = row.querySelector('.fitReason');
-      reason.textContent = fitReasonText(m);
+      reason.textContent = fitReasonText({ ...m, _local: local });
       why.hidden = fitState.view !== 'recommended' || !reason.textContent;
       why.onclick = () => {
         reason.hidden = !reason.hidden;
         why.classList.toggle('expanded', !reason.hidden);
         why.textContent = reason.hidden ? 'Why this model?' : 'Hide details';
       };
-      const button = row.querySelector('.primary');
+
+      const compare = row.querySelector('.fitCompareChoice input');
+      compare.checked = selectedCompare;
+      compare.onchange = () => toggleFitCompare(m);
+
+      const primary = row.querySelector('.primary');
+      const secondary = row.querySelector('.secondary');
       const benchmark = row.querySelector('.benchmark');
-      if (local) {
+      const cancel = row.querySelector('.cancelDownload');
+      const progressBox = row.querySelector('.fitDownloadProgress');
+
+      if (downloadJob && !['completed'].includes(downloadJob.status)) {
+        const active = ['queued','resolving','downloading','verifying','retrying','rate-limited'].includes(String(downloadJob.status || ''));
+        const text = fitDownloadStatusText(downloadJob);
+        progressBox.hidden = false;
+        progressBox.querySelector('.fitDownloadProgressText').textContent = text;
+        progressBox.querySelector('.fitDownloadProgressPct').textContent = Number(downloadJob.percent || 0) + '%';
+        progressBox.querySelector('.fitProgressBar').style.width = Math.max(0, Math.min(100, Number(downloadJob.percent || 0))) + '%';
+        if (active) {
+          primary.disabled = true;
+          primary.textContent = downloadJob.status === 'verifying' ? 'Verifying…' : 'Downloading…';
+          cancel.hidden = false;
+          cancel.onclick = () => cancelFitDownload(m);
+        } else {
+          primary.textContent = 'Retry download';
+          primary.onclick = () => downloadFitModel(m);
+        }
+      } else if (local) {
         benchmark.hidden = catalogCapabilities(m).chat === false;
         benchmark.disabled = fitState.benchmarkRunning;
         benchmark.onclick = () => benchmarkLocalModel(local, benchmark);
-        button.disabled = fitState.benchmarkRunning;
-        button.textContent = loaded ? 'Unload' : 'Load';
-        button.onclick = async () => {
-          button.disabled = true;
-          try {
-            await api('/api/models/' + (loaded ? 'unload' : 'load'), {
-              method: 'POST',
-              body: JSON.stringify({ model: local.id, runtime: local.runtime }),
-            });
-            await refresh();
-            renderDeviceFitModels();
-          } catch (error) {
-            alert(error.message || error);
-          } finally {
-            button.disabled = false;
-          }
-        };
+        if (loaded) {
+          primary.textContent = 'Use model';
+          primary.onclick = () => useFitModel(local);
+          secondary.hidden = false;
+          secondary.textContent = 'Unload';
+          secondary.onclick = async () => {
+            secondary.disabled = true;
+            try {
+              await api('/api/models/unload', { method: 'POST', body: JSON.stringify({ model: local.id, runtime: local.runtime }) });
+              await refresh();
+              renderDeviceFitModels();
+            } catch (error) { alert(error.message || error); }
+          };
+        } else {
+          primary.textContent = 'Load';
+          primary.disabled = fitState.benchmarkRunning;
+          primary.onclick = async () => {
+            primary.disabled = true;
+            primary.textContent = 'Loading…';
+            try {
+              await api('/api/models/load', { method: 'POST', body: JSON.stringify({ model: local.id, runtime: local.runtime }) });
+              await refresh();
+              renderDeviceFitModels();
+            } catch (error) {
+              alert(error.message || error);
+              primary.disabled = false;
+              primary.textContent = 'Load';
+            }
+          };
+        }
       } else {
-        button.textContent = 'Download';
-        button.onclick = () => download(m.id).then(() => loadDeviceFit(false));
+        primary.textContent = 'Download';
+        primary.onclick = () => downloadFitModel(m);
       }
+
+      row.onmouseenter = () => ensureFitDetails(m);
+      row.onfocusin = () => ensureFitDetails(m);
       box.appendChild(row);
-    }
+    });
+
+    renderFitCompare();
   }
 
   function renderDeviceFitModels() {
@@ -2082,6 +2587,7 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
       tab.setAttribute('aria-selected', active ? 'true' : 'false');
     }
     renderFitPreference();
+    renderFitFilters();
     $('fitSort').value = fitState.sort;
     const lead = fitState.view === 'recommended'
       ? 'Ranked for this hardware, selected capabilities, preference, and measured performance when available.'
@@ -2104,6 +2610,14 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
           : progress.done
             ? 'Benchmark complete · ' + progress.total + ' models' + (progress.failed ? ' · ' + progress.failed + ' failed' : '')
             : '';
+    if (fitState.loading) {
+      renderFitSkeleton('Finding compatible models…');
+      return;
+    }
+    if (fitState.error) {
+      renderFitError(fitState.error);
+      return;
+    }
     const source = fitState.view === 'recommended' ? recommended : fitState.view === 'installed' ? installed : compatible;
     renderFitCatalog(fitState.view === 'installed' ? source : sortFitModels(source));
   }
