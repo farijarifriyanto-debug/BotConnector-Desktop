@@ -574,6 +574,27 @@ svg{display:block}
 }
 .model:first-of-type{border-top:0}
 .model .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.modelInfo{flex:1;min-width:0;display:grid;gap:5px}
+.modelInfo .name{display:block}
+.capabilities{display:flex;flex-wrap:wrap;gap:4px;min-height:17px}
+.capability{
+  display:inline-flex;
+  align-items:center;
+  min-height:18px;
+  border:1px solid var(--line);
+  border-radius:999px;
+  padding:0 6px;
+  font-size:9px;
+  font-weight:650;
+  line-height:1;
+  color:var(--muted);
+  background:var(--surface-2);
+  white-space:nowrap;
+}
+.capability.text{color:var(--text)}
+.capability.vision{color:var(--ok)}
+.capability.tools{color:var(--accent)}
+.capability.reasoning{color:var(--warn)}
 .fit,.tag{
   font-size:9.5px;
   border-radius:999px;
@@ -1269,16 +1290,37 @@ function app(TOKEN, renderMarkdown, mergeChatStates) {
     }
   }
 
+  function modelCapabilityBadges(capabilities) {
+    const c = capabilities || {};
+    const items = [
+      ['chat', 'Text', 'text'],
+      ['vision', 'Vision', 'vision'],
+      ['tools', 'Tools', 'tools'],
+      ['coding', 'Coding', 'coding'],
+      ['reasoning', 'Reasoning', 'reasoning'],
+      ['embeddings', 'Embedding', 'embedding'],
+      ['audio', 'Audio', 'audio'],
+    ];
+    return items
+      .filter(([key]) => c[key] === true)
+      .map(([, label, cls]) => '<span class="capability ' + cls + '">' + label + '</span>')
+      .join('');
+  }
+
   function renderCatalog(box, list) {
     box.innerHTML = list.length ? '' : '<div class="muted">Nothing found.</div>';
     for (const m of list) {
       const level = m.compatibility?.level || 'unknown';
       const row = document.createElement('div');
       row.className = 'model';
-      row.innerHTML = '<span class="name"></span><span class="fit ' + esc(level) + '">' + esc(level) + '</span><button class="btn small">Download</button>';
+      row.innerHTML = '<div class="modelInfo"><span class="name"></span><div class="capabilities"></div></div><span class="fit ' + esc(level) + '">' + esc(level) + '</span><button class="btn small">Download</button>';
       const size = m.compatibility?.paramsB ? ' · ' + m.compatibility.paramsB + 'B' : '';
       row.querySelector('.name').textContent = m.id + size;
       row.querySelector('.name').title = m.id;
+      const badges = modelCapabilityBadges(m.capabilities);
+      const capabilityBox = row.querySelector('.capabilities');
+      capabilityBox.innerHTML = badges;
+      capabilityBox.hidden = !badges;
       row.querySelector('button').onclick = () => download(m.id);
       box.appendChild(row);
     }
