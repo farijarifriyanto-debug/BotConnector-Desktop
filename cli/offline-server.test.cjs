@@ -70,6 +70,11 @@ test('offline UI serves localhost HTML and protects local API with a session tok
   assert.match(html, /id="unloadActive"/);
   assert.match(html, /Model unload could not be verified/);
   assert.match(html, /Active model unload could not be verified/);
+  assert.match(html, /modelCapabilityBadges/);
+  assert.match(html, /\['chat', 'Text', 'text'\]/);
+  assert.match(html, /\['vision', 'Vision', 'vision'\]/);
+  assert.match(html, /\['tools', 'Tools', 'tools'\]/);
+  assert.match(html, /\['reasoning', 'Reasoning', 'reasoning'\]/);
 
   const anonymous = await fetch(server.url + '/api/status');
   assert.equal(anonymous.status, 401);
