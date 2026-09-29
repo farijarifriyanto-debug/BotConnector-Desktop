@@ -1,6 +1,7 @@
 const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
+const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const { spawn } = require('node:child_process');
 const { RuntimeManager } = require('../desktop/local/runtime-manager.cjs');
