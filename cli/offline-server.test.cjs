@@ -50,6 +50,19 @@ test('offline UI serves localhost HTML and protects local API with a session tok
   assert.match(html, /Connect Web App/);
   assert.match(html, /How can I help on this device\?/);
   assert.match(html, /id="openTools"/);
+  assert.match(html, /id="workspaceTrigger"/);
+  assert.match(html, /id="workspaceMenu"/);
+  assert.match(html, /id="modeTrigger"/);
+  assert.match(html, /data-agent-mode="standard"/);
+  assert.match(html, /data-agent-mode="ptc"/);
+  assert.match(html, /data-agent-mode="minimal"/);
+  assert.match(html, /data-agent-mode="creator"/);
+  assert.match(html, /id="permissionPreset"/);
+  assert.match(html, /Workspace Write/);
+  assert.match(html, /id="workspacePanel"/);
+  assert.match(html, /workspace_id: sessionContext\.workspaceId/);
+  assert.match(html, /agent_mode: sessionContext\.agentMode/);
+  assert.match(html, /permission_preset: sessionContext\.permissionPreset/);
   assert.match(html, /On-device AI workspace/);
   assert.match(html, /\[hidden\]\{display:none!important\}/);
   assert.match(html, /friendlyModelName/);
@@ -688,4 +701,62 @@ test('Local UI benchmark endpoint returns and lists persisted measurements', asy
   const list = await fetch(server.url + '/api/models/benchmarks', { headers });
   assert.equal(list.status, 200);
   assert.equal((await list.json()).benchmarks[0].model, 'model-1');
+});
+
+
+test('offline workspace API persists a real folder and injects workspace context into local chat', async (t) => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bc-offline-workspace-data-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bc-offline-workspace-root-'));
+  fs.writeFileSync(path.join(root, 'AGENTS.md'), 'Use the workspace instructions from disk.\n');
+  const server = await startOfflineServer({
+    localAi: runtimeFixture(),
+    detectHardware: async () => ({ cpu: 'Test CPU', ramGb: 16 }),
+    dataDir,
+    port: 0,
+    open: false,
+  });
+  t.after(async () => {
+    await server.close();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  const headers = {
+    origin: server.url,
+    'content-type': 'application/json',
+    'x-botconnector-local-token': server.token,
+  };
+  const addedResponse = await fetch(server.url + '/api/workspaces/add', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ root, name: 'Fixture Workspace' }),
+  });
+  assert.equal(addedResponse.status, 201);
+  const added = await addedResponse.json();
+  assert.equal(added.workspace.name, 'Fixture Workspace');
+  assert.equal(path.resolve(added.workspace.root), path.resolve(root));
+
+  const listResponse = await fetch(server.url + '/api/workspaces', { headers });
+  assert.equal(listResponse.status, 200);
+  const listed = await listResponse.json();
+  assert.equal(listed.workspaces.length, 1);
+
+  const chatResponse = await fetch(server.url + '/api/chat', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      model: 'model-1',
+      runtime: 'test',
+      workspace_id: added.workspace.id,
+      agent_mode: 'minimal',
+      permission_preset: 'read-only',
+      tool_mode: 'none',
+      messages: [{ role: 'user', content: 'hello' }],
+    }),
+  });
+  assert.equal(chatResponse.status, 200);
+  const chat = await chatResponse.json();
+  assert.match(chat.content, /BotConnector Local workspace context/);
+  assert.match(chat.content, /Fixture Workspace/);
+  assert.match(chat.content, /Use the workspace instructions from disk/);
 });
