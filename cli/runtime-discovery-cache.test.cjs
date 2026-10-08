@@ -84,4 +84,3 @@ test('changed host configuration bypasses cached discovery', async (t) => {
   process.env.BOTCONNECTOR_OLLAMA_BASE_URL = 'http://127.0.0.1:19434';
   assert.equal(await f.runtime.findOllamaBase(), 'http://127.0.0.1:19434');
 });
-
