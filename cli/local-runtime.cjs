@@ -474,6 +474,8 @@ class LocalAiRuntime {
     this.externalRoots = localModelRoots(this.dataDir);
     this.externalScanCache = { at: 0, models: [] };
     this.ollamaBaseUrl = null;
+    this.ollamaDiscoveryCache = null;
+    this.ollamaDiscoveryPending = null;
     this.idleMs = Math.max(
       60_000,
       Number(process.env.BOTCONNECTOR_LOCAL_AI_IDLE_MS || 5 * 60 * 1000),
@@ -563,27 +565,47 @@ class LocalAiRuntime {
   }
 
   async findOllamaBase({ refresh = false } = {}) {
-    const candidates = [];
-    const add = (value) => {
-      const base = normalizeRuntimeBase(value, 11434);
-      if (base && !candidates.includes(base)) candidates.push(base);
-    };
+    const candidates = ollamaBaseCandidates();
+    const key = JSON.stringify(candidates);
+    const cache = this.ollamaDiscoveryCache;
 
-    if (!refresh) add(this.ollamaBaseUrl);
-    for (const base of ollamaBaseCandidates()) add(base);
-
-    for (const base of candidates) {
-      try {
-        const payload = await this.fetchJson(base + '/api/tags', { method: 'GET' }, 1200);
-        if (Array.isArray(payload?.models)) {
-          this.ollamaBaseUrl = base;
-          return base;
-        }
-      } catch {}
+    // Share in-flight probes even when a caller explicitly requests fresh data.
+    if (this.ollamaDiscoveryPending?.key === key) {
+      return this.ollamaDiscoveryPending.promise;
+    }
+    if (!refresh && cache?.key === key && Date.now() < cache.expiresAt) {
+      return cache.base;
     }
 
-    this.ollamaBaseUrl = null;
-    return null;
+    if (!refresh && cache?.key === key && cache.base) {
+      candidates.splice(candidates.indexOf(cache.base), 1);
+      candidates.unshift(cache.base);
+    }
+    const pending = { key, promise: null };
+    this.ollamaDiscoveryPending = pending;
+    pending.promise = (async () => {
+      let base = null;
+      for (const candidate of candidates) {
+        try {
+          const payload = await this.fetchJson(candidate + '/api/tags', { method: 'GET' }, 1200);
+          if (Array.isArray(payload?.models)) {
+            base = candidate;
+            break;
+          }
+        } catch {}
+      }
+      if (this.ollamaDiscoveryPending === pending) {
+        this.ollamaBaseUrl = base;
+        // Retry stopped runtimes sooner; never extend expiry on cache reads.
+        this.ollamaDiscoveryCache = {
+          key, base, expiresAt: Date.now() + (base ? 10_000 : 5_000),
+        };
+      }
+      return base;
+    })().finally(() => {
+      if (this.ollamaDiscoveryPending === pending) this.ollamaDiscoveryPending = null;
+    });
+    return pending.promise;
   }
 
   async detect() {
