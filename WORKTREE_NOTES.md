@@ -468,3 +468,18 @@ Untuk setiap perubahan pada source, UI, konfigurasi, dependency, dokumentasi, at
   - Web Search fallback regression covers DuckDuckGo Lite result links with href/class attributes in either order; Run Code and MCP executor smoke tests PASS.
 - Release/deployment: candidate only. No `device-v0.4.13` release and no `app.botconnector.id` manifest/deployment performed in this task yet.
 
+
+## 2026-10-08 — Local Ollama discovery cache
+
+- Area: device CLI runtime discovery. `cli/local-runtime.cjs` caches successful discovery for 10 seconds and absence for 5 seconds, shares concurrent scans, honors explicit refresh, and invalidates reuse when configured hosts or network addresses change. Reads do not extend the cache lifetime.
+- Files: `cli/local-runtime.cjs`, `cli/runtime-discovery-cache.test.cjs`, `package.json`, this file. Both check commands include the new regression tests.
+- Verification: five new regression tests failed for missing behavior before the fix (four failures, one existing refresh behavior passed), then all five passed. `npm run check:device` and `npm run check` each passed 101 tests with one Linux-only test skipped, using an isolated temporary home/device directory and clearing host settings for the test process. Initial baseline on the real user profile failed four existing tests because installed runtimes/model files contaminated their fixtures; these failures disappeared under isolation. `git diff --check` and installed-module syntax check passed. Independent reviewer found no blocking defects; rare A-to-B-to-A configuration changes during multiple overlapping probes can perform an extra scan.
+- Local verification after restarting the idle device bridge: web pairing CONNECTED; initial `/api/status` 5633 ms, cached `/api/status` 1601 ms (previously 7415–7420 ms); `/api/models` 92 and 74 ms (previously 3679–3689 ms). The first scan and fresh Windows hardware detection still take time; the screenshot timeout itself has not been reproduced through the authenticated cloud UI.
+- Applied only to the installed local module at `C:/Users/farij/AppData/Local/npm-cache/_npx/aaefceae18da2e10/node_modules/botconnector-device/cli/local-runtime.cjs`, then restarted the local bridge on port 18765 with the existing pairing. No server publication, push, or release.
+- Artifacts: `artifacts/botconnector-device-0.4.18.tgz` is a locally modified package, not a published release. Original installed module backup: `artifacts/local-runtime.v0.4.18.original.cjs`. Re-fetching the public unmodified package may replace the local hotfix; source and local tarball preserve it.
+
+## 2026-10-08 — Publish runtime discovery cache as Device CLI v0.4.19
+
+- User authorized publication of the verified runtime discovery fix. Package and lockfile bumped to 0.4.19; launcher remains 1.0.2 and obtains the current package through `/device-cli.json`.
+- Publication plan: commit source, tests, package metadata, and notes; verify GitHub checks; publish immutable GitHub artifact; install the same versioned artifact on `/var/www/botconnector-device`; update the no-store manifest and stable package link after verifying the public package hash. Keep the 0.4.18 artifact and manifest backup for rollback.
+- Versioned source is based on current upstream main; the installed local fix was already reviewed and verified. Publication and public download verification are pending at this entry.
