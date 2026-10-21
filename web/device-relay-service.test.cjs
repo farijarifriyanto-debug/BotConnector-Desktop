@@ -446,8 +446,20 @@ test('agent stream capacity is limited per account and globally', async () => {
     const globalPayload = await third2.json();
     assert.equal(globalPayload.error.code, 'AGENT_CAPACITY');
 
-    // Releasing a stream frees its slot exactly once.
+    // Releasing ONE of USER_A's two streams must decrement USER_A from 2 -> 1 (not 2 -> 0).
     first.controller.abort();
+    assert.equal(
+      await waitFor(() => state.agentStreamsTotal() === 2),
+      true,
+      'closing one of two streams must leave 2 total active streams (1 for A, 1 for B)',
+    );
+    assert.equal(
+      state.agentStreams.get(USER_A),
+      1,
+      'closing one of two streams must leave per-account count at 1, not 0',
+    );
+
+    // Releasing the remaining streams frees all slots.
     second.controller.abort();
     other.controller.abort();
     assert.equal(await waitFor(() => state.agentStreamsTotal() === 0), true, 'all agent stream slots must be released');
@@ -595,6 +607,59 @@ test('the relay refuses to let a client bypass the ask-mode and approval limits'
     assert.equal(grantAll.status, 400);
     const grantPayload = await grantAll.json();
     assert.equal(grantPayload.error.code, 'AGENT_INVALID_PARAMS');
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test('an older device that does not advertise agent.* capabilities gets 403 DEVICE_METHOD_NOT_ALLOWED', async () => {
+  const { server, base } = await startRelay();
+  try {
+    const pairRes = await internal(base, '/internal/pair', {
+      method: 'POST',
+      body: JSON.stringify({ user_id: USER_A }),
+    });
+    const pair = await pairRes.json();
+
+    const exchangeRes = await fetch(base + '/api/devices/pair/exchange', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code: pair.code, device_name: 'Old Laptop' }),
+    });
+    const device = await exchangeRes.json();
+
+    const WebSocket = require('ws');
+    const ws = new WebSocket(base.replace('http://', 'ws://') + '/api/devices/socket');
+    await new Promise((resolve, reject) => {
+      ws.once('open', resolve);
+      ws.once('error', reject);
+    });
+    ws.send(
+      JSON.stringify({
+        type: 'device.hello',
+        token: device.device_token,
+        deviceId: device.device_id,
+        deviceName: 'Old Laptop',
+        capabilities: ['hardware.get'], // no agent.* advertised
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    try {
+      const res = await internal(base, `/internal/devices/${device.device_id}/request`, {
+        method: 'POST',
+        body: JSON.stringify({
+          user_id: USER_A,
+          method: 'agent.capabilities',
+          params: {},
+        }),
+      });
+      assert.equal(res.status, 403);
+      const body = await res.json();
+      assert.equal(body.error.code, 'DEVICE_METHOD_NOT_ALLOWED');
+    } finally {
+      ws.close();
+    }
   } finally {
     await closeServer(server);
   }

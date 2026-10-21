@@ -156,7 +156,7 @@ sudo nginx -t && sudo systemctl reload nginx
 #### Step B.3.1 — Extract, backup, and patch `/app/device-routes.mjs`
 1. Copy `/app/device-routes.mjs` out of the live container into `"$BDIR/device-routes.mjs.orig"`.
 2. Add the 9 `agent.*` methods (`agent.capabilities`, `agent.workspaces`, `agent.sessions`, `agent.session`, `agent.start`, `agent.prompt`, `agent.approve`, `agent.cancel`, `agent.stream`) to `MOBILE_DEVICE_METHODS`.
-3. Update the stream gate from `action === 'stream' && method !== 'chat.completions'` to allow both `'chat.completions'` and `'agent.stream'`, and include `method.startsWith('agent.')` in the long-timeout (`slow`) set.
+3. Update the stream gate from `action === 'stream' && method !== 'chat.completions'` to allow both `'chat.completions'` and `'agent.stream'`, include `method.startsWith('agent.')` in the long-timeout (`slow`) set, and raise the `/stream` `relayCall` `timeoutMs` from `15 * 60 * 1000` to `60 * 60 * 1000` (matching Nginx's `3600s` read timeout).
 4. Build a candidate image layered on the currently running image and deploy via `bin/deploy-service.sh`:
 ```bash
 cd /home/botadmin/newbotconnector/production-candidate

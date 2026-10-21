@@ -501,8 +501,7 @@ class AgentBridge {
   }
 
   async requestServe(pathname, init = {}) {
-    const attempt = async () => {
-      const { port, token } = await this.ensureServe();
+    const doFetch = async ({ port, token }) => {
       const headers = {
         authorization: `Bearer ${token}`,
         accept: 'application/json',
@@ -515,13 +514,15 @@ class AgentBridge {
       });
     };
 
+    const firstServe = await this.ensureServe();
     let response;
     try {
-      response = await attempt();
+      response = await doFetch(firstServe);
     } catch {
       this.killServe();
       try {
-        response = await attempt();
+        const restartedServe = await this.ensureServe();
+        response = await doFetch(restartedServe);
       } catch (retryError) {
         throw retryError instanceof AgentError
           ? retryError

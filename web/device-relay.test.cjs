@@ -321,3 +321,90 @@ test('a device that drops its socket settles its pending requests instead of lea
     relay.close();
   }
 });
+
+test('replacing a device connection settles old requests without killing requests on the new socket', async () => {
+  const { EventEmitter } = require('node:events');
+  const relay = new DeviceRelay({ appOrigin: 'http://127.0.0.1:8080', requestTimeoutMs: 5000 });
+  const pair = relay.createPairCode('user-a');
+  const paired = relay.exchange({ code: pair.code, device_name: 'Laptop A' });
+
+  function makeRelaySocket({ delayCloseMs = 0, onRequest } = {}) {
+    const emitter = new EventEmitter();
+    emitter.readyState = 1;
+    emitter.send = (raw) => {
+      const msg = JSON.parse(raw);
+      if (msg.type === 'device.request' && typeof onRequest === 'function') {
+        onRequest(msg);
+      }
+    };
+    emitter.close = () => {
+      emitter.readyState = 3;
+      if (delayCloseMs > 0) {
+        setTimeout(() => emitter.emit('close'), delayCloseMs);
+      } else {
+        setImmediate(() => emitter.emit('close'));
+      }
+    };
+    return emitter;
+  }
+
+  // First socket closes asynchronously (e.g. TCP FIN takes 30ms) when replaced
+  const sock1 = makeRelaySocket({ delayCloseMs: 30 });
+  relay.acceptSocket(sock1);
+  sock1.emit(
+    'message',
+    Buffer.from(
+      JSON.stringify({
+        type: 'device.hello',
+        token: paired.device_token,
+        deviceId: paired.device_id,
+        deviceName: 'Laptop A',
+        capabilities: ['agent.capabilities'],
+      }),
+    ),
+  );
+
+  // Start a request on sock1 that never answers
+  const oldReq = relay.request('user-a', paired.device_id, 'agent.capabilities', {}, {});
+  const oldOutcome = oldReq.then(
+    (v) => ({ ok: true, v }),
+    (e) => ({ ok: false, e }),
+  );
+
+  // Second socket connects and replaces sock1; sock1's 'close' event has NOT fired yet
+  const sock2 = makeRelaySocket({
+    onRequest(msg) {
+      // Answer after sock1's delayed close event has fired (at 50ms > 30ms)
+      setTimeout(() => {
+        relay.resolveResponse(paired.device_id, {
+          type: 'device.response',
+          id: msg.id,
+          ok: true,
+          result: { supported: true, from: 'sock2' },
+        });
+      }, 50);
+    },
+  });
+  relay.acceptSocket(sock2);
+  sock2.emit(
+    'message',
+    Buffer.from(
+      JSON.stringify({
+        type: 'device.hello',
+        token: paired.device_token,
+        deviceId: paired.device_id,
+        deviceName: 'Laptop A',
+        capabilities: ['agent.capabilities'],
+      }),
+    ),
+  );
+
+  // Fire a request on sock2 BEFORE sock1's delayed 'close' event fires at 30ms
+  const newResult = await relay.request('user-a', paired.device_id, 'agent.capabilities', {}, {});
+  assert.deepEqual(newResult, { supported: true, from: 'sock2' });
+
+  const settledOld = await oldOutcome;
+  assert.equal(settledOld.ok, false, 'old socket request must be rejected on replacement');
+  assert.equal(settledOld.e.code, 'device_offline');
+  relay.close();
+});

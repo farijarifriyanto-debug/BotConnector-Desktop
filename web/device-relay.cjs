@@ -195,6 +195,7 @@ class DeviceRelay {
         authenticated = true;
         clearTimeout(helloTimer);
         if (device.socket && device.socket !== socket) {
+          this.rejectPendingForDevice(device.id);
           try { device.socket.close(1008, 'Replaced by newer connection'); } catch {}
         }
         device.socket = socket;
@@ -216,10 +217,10 @@ class DeviceRelay {
         device.socket = null;
         device.lastSeen = new Date().toISOString();
         this.persistState();
+        // A device that drops its socket must not leave requests pending forever: agent streams have
+        // no timeout, so an unsettled waiter would hold its capacity slot for good.
+        this.rejectPendingForDevice(socket.deviceId);
       }
-      // A device that drops its socket must not leave requests pending forever: agent streams have
-      // no timeout, so an unsettled waiter would hold its capacity slot for good.
-      this.rejectPendingForDevice(socket.deviceId);
     });
   }
 

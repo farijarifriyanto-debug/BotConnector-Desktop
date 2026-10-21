@@ -238,10 +238,10 @@ function createDeviceRelayServer(options = {}) {
             }
             agentStreams.set(userId, perAccount + 1);
           }
-          // Releasing a slot is idempotent: the map value is the only source of truth, so a
-          // double release cannot drift the counter and the global cap stays honest.
+          let slotReleased = false;
           const releaseSlot = () => {
-            if (!isAgentStream) return;
+            if (!isAgentStream || slotReleased) return;
+            slotReleased = true;
             const current = agentStreams.get(userId) || 0;
             if (current <= 0) return;
             if (current <= 1) agentStreams.delete(userId);
