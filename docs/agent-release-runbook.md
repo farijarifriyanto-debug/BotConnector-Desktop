@@ -256,3 +256,34 @@ Cache-Control: public, max-age=31536000, immutable
 === 3. Local CLI --version ===
 0.4.20
 ```
+
+## Executed Release Evidence (2026-10-22, v0.4.20)
+
+The pipeline above was executed for real on 2026-10-22:
+
+```text
+=== Release created by CI on main (40f002d, run 39653593391) ===
+device-v0.4.20 assets: device-cli.tgz, device-cli-launcher.tgz, device-cli.json
+
+=== Installed artifact ===
+/var/www/botconnector-device/device-cli-v0.4.20.tgz  115035 bytes
+sha256 = dcc816b22e315357bc9cc8bfc32f793bafdc9286ce50368a86098b47cd7c412a
+device-cli.tgz -> device-cli-v0.4.20.tgz
+
+=== Public manifest ===
+{"url":"https://app.botconnector.id/device-cli-v0.4.20.tgz","version":"0.4.20","sha256":"dcc816b22e315357bc9cc8bfc32f793bafdc9286ce50368a86098b47cd7c412a"}
+
+=== Versioned TGZ HEAD ===
+HTTP/1.1 200 OK
+Content-Type: application/gzip
+Content-Length: 115035
+Cache-Control: public, max-age=31536000, immutable
+
+=== Fresh install of the published package ===
+botconnector-device --version  ->  0.4.20
+desktop/local/agent-bridge.cjs present, MIN_BCCLI = 0.4.9
+
+=== Launcher (origin/pathname/sha256 locks) ===
+npx https://app.botconnector.id/device-cli-launcher-v1.0.2.tgz --version  ->  0.4.20
+```
+
