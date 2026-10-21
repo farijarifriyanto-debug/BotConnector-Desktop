@@ -146,7 +146,7 @@ jobs:
       - name: Smoke test Windows Local tools
         shell: pwsh
         run: |
-          node --test desktop/local/tools.test.cjs desktop/local/device-bridge.test.cjs
+          node --test desktop/local/tools.test.cjs desktop/local/device-bridge.test.cjs desktop/local/agent-bridge.test.cjs
 
       - name: Smoke test Windows offline browser UI
         shell: pwsh

@@ -6,6 +6,9 @@ const PAIR_TTL_MS = 5 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 20_000;
 const LOCAL_AI_REQUEST_TIMEOUT_MS = 15 * 60 * 1000;
 const LONG_LOCAL_AI_METHODS = new Set(['chat.completions', 'model.load', 'model.unload']);
+// Agent streams stay open for as long as the session runs; they are aborted explicitly, never timed out.
+const AGENT_STREAM_METHOD = 'agent.stream';
+const AGENT_METHOD_PREFIX = 'agent.';
 
 function hashToken(value) {
   return crypto.createHash('sha256').update(String(value || '')).digest('hex');
@@ -192,6 +195,7 @@ class DeviceRelay {
         authenticated = true;
         clearTimeout(helloTimer);
         if (device.socket && device.socket !== socket) {
+          this.rejectPendingForDevice(device.id);
           try { device.socket.close(1008, 'Replaced by newer connection'); } catch {}
         }
         device.socket = socket;
@@ -213,8 +217,29 @@ class DeviceRelay {
         device.socket = null;
         device.lastSeen = new Date().toISOString();
         this.persistState();
+        // A device that drops its socket must not leave requests pending forever: agent streams have
+        // no timeout, so an unsettled waiter would hold its capacity slot for good.
+        this.rejectPendingForDevice(socket.deviceId);
       }
     });
+  }
+
+  rejectPendingForDevice(deviceId, error) {
+    const failure = error || (() => {
+      const err = new Error('Perangkat terputus koneksi.');
+      err.status = 409;
+      err.code = 'device_offline';
+      return err;
+    })();
+    for (const [key, waiter] of [...this.pending.entries()]) {
+      if (waiter.deviceId !== deviceId) continue;
+      clearTimeout(waiter.timer);
+      if (waiter.abortCleanup) waiter.abortCleanup();
+      this.pending.delete(key);
+      try {
+        waiter.reject(failure);
+      } catch {}
+    }
   }
 
   forwardEvent(deviceId, message) {
@@ -231,9 +256,13 @@ class DeviceRelay {
     const waiter = this.pending.get(key);
     if (!waiter || waiter.deviceId !== deviceId) return;
     clearTimeout(waiter.timer);
+    if (waiter.abortCleanup) waiter.abortCleanup();
     this.pending.delete(key);
-    if (message.ok === false) waiter.reject(new Error(message.error?.message || 'Perangkat menolak permintaan.'));
-    else {
+    if (message.ok === false) {
+      const error = new Error(message.error?.message || 'Perangkat menolak permintaan.');
+      if (typeof message.error?.code === 'string' && message.error.code) error.code = message.error.code;
+      waiter.reject(error);
+    } else {
       if (waiter.method === 'hardware.get' && message.result && typeof message.result === 'object') {
         const device = this.devices.get(deviceId);
         if (device) {
@@ -261,29 +290,68 @@ class DeviceRelay {
     if (!device.capabilities.includes(String(method))) {
       const error = new Error('Kemampuan tersebut tidak tersedia pada perangkat.');
       error.status = 403;
+      error.code = 'device_method_not_allowed';
       throw error;
     }
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
-      const timeoutMs = LONG_LOCAL_AI_METHODS.has(String(method))
-        ? Math.max(this.requestTimeoutMs, LOCAL_AI_REQUEST_TIMEOUT_MS)
-        : this.requestTimeoutMs;
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(Object.assign(new Error('Device request timed out.'), { status: 504 }));
-      }, timeoutMs);
-      this.pending.set(id, {
+      const methodName = String(method);
+      const isAgentStream = methodName === AGENT_STREAM_METHOD;
+      const isAgentMethod = methodName.startsWith(AGENT_METHOD_PREFIX);
+      const timeoutMs = isAgentStream
+        ? 0 // agent streams are aborted explicitly, never timed out
+        : isAgentMethod
+          ? Math.max(this.requestTimeoutMs, LOCAL_AI_REQUEST_TIMEOUT_MS)
+          : LONG_LOCAL_AI_METHODS.has(methodName)
+            ? Math.max(this.requestTimeoutMs, LOCAL_AI_REQUEST_TIMEOUT_MS)
+            : this.requestTimeoutMs;
+      const timer = timeoutMs > 0
+        ? setTimeout(() => {
+          this.pending.delete(id);
+          reject(Object.assign(new Error('Device request timed out.'), { status: 504 }));
+        }, timeoutMs)
+        : null;
+      const waiter = {
         deviceId: device.id,
-        method: String(method),
+        method: methodName,
         resolve,
         reject,
         timer,
         onEvent: typeof options?.onEvent === 'function' ? options.onEvent : null,
-      });
+        abortCleanup: null,
+      };
+      this.pending.set(id, waiter);
+
+      // The caller went away (phone dropped the stream): stop the device work and free the slot.
+      const signal = options?.signal;
+      if (signal && typeof signal.addEventListener === 'function') {
+        const onAbort = () => {
+          const current = this.pending.get(id);
+          if (!current) return;
+          clearTimeout(current.timer);
+          this.pending.delete(id);
+          try {
+            if (device.socket && device.socket.readyState === 1) {
+              device.socket.send(JSON.stringify({ type: 'device.cancel', id }));
+            }
+          } catch {}
+          const error = new Error('Permintaan perangkat dibatalkan.');
+          error.code = 'aborted';
+          current.reject(error);
+        };
+        if (signal.aborted) {
+          onAbort();
+          return;
+        }
+        waiter.abortCleanup = () => signal.removeEventListener('abort', onAbort);
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
+
       try {
-        device.socket.send(JSON.stringify({ type: 'device.request', id, method: String(method), params: params && typeof params === 'object' ? params : {} }));
+        device.socket.send(JSON.stringify({ type: 'device.request', id, method: methodName, params: params && typeof params === 'object' ? params : {} }));
       } catch (error) {
         clearTimeout(timer);
+        if (waiter.abortCleanup) waiter.abortCleanup();
         this.pending.delete(id);
         reject(error);
       }
