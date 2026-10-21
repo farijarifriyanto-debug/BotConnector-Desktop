@@ -2,6 +2,7 @@ const os = require('node:os');
 const crypto = require('node:crypto');
 const defaultCatalog = require('./catalog.cjs');
 const { MAX_TOOL_CALLS_PER_TURN } = require('./tools.cjs');
+const { AgentBridge, AGENT_METHODS } = require('./agent-bridge.cjs');
 
 function defaultDeviceName() {
   return os.hostname() || 'BotConnector device';
@@ -345,12 +346,13 @@ async function runToolAgent({ localAi, tools, params = {}, onEvent = () => {} } 
 }
 
 class DeviceBridge {
-  constructor({ settings, detectHardware, tools, launcher, localAi = null, catalog = defaultCatalog, emit = () => {}, seal = value => value, open = value => value, cloudBase = 'https://app.botconnector.id', WebSocketImpl = globalThis.WebSocket } = {}) {
+  constructor({ settings, detectHardware, tools, launcher, localAi = null, agentBridge = null, catalog = defaultCatalog, emit = () => {}, seal = value => value, open = value => value, cloudBase = 'https://app.botconnector.id', WebSocketImpl = globalThis.WebSocket } = {}) {
     this.settings = settings;
     this.detectHardware = detectHardware;
     this.tools = tools;
     this.launcher = launcher;
     this.localAi = localAi;
+    this.agentBridge = agentBridge || new AgentBridge();
     this.catalog = catalog;
     this.emit = emit;
     this.seal = seal;
@@ -432,6 +434,7 @@ class DeviceBridge {
           'launcher.start',
           'launcher.stop',
           'tools.list',
+          ...AGENT_METHODS,
           ...(this.localAi?.enabled
             ? [
                 'runtime.status',
@@ -486,7 +489,11 @@ class DeviceBridge {
       result = await this.execute(message.method, message.params || {}, streamEvent);
       this.reply(message.id, { ok: true, result });
     } catch (error) {
-      this.reply(message.id, { ok: false, error: { message: error.message || String(error) } });
+      const errObj = { message: error.message || String(error) };
+      if (typeof error?.code === 'string' && error.code) {
+        errObj.code = error.code;
+      }
+      this.reply(message.id, { ok: false, error: errObj });
     }
   }
   async withDeviceContext(params = {}) {
@@ -563,6 +570,9 @@ class DeviceBridge {
       return visibleResult;
     }
     if (method === 'chat.cancel') return this.localAi.cancelChat(params.id);
+    if (typeof method === 'string' && method.startsWith('agent.')) {
+      return this.agentBridge.handle(method, params, onStreamEvent);
+    }
     throw new Error('Remote capability is not allowed.');
   }
 
@@ -581,6 +591,9 @@ class DeviceBridge {
     clearTimeout(this.reconnectTimer);
     this.socket?.close();
     this.socket = null;
+    try {
+      this.agentBridge?.close?.();
+    } catch {}
   }
 }
 

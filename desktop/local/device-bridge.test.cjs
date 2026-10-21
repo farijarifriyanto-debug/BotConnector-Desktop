@@ -516,3 +516,144 @@ test('Minimal mode limits the model-facing tool set to run_code', async () => {
   assert.deepEqual(selectedArgs[0], ['run_code']);
   assert.match(calls[0].messages[0].content + calls[0].messages[1].content, /Minimal|workspace/i);
 });
+
+// --- Task 4: agent.* hello capabilities, dispatch, and error code forwarding ---
+
+test('device.hello advertises all agent.* capabilities unconditionally even when localAi is disabled', async () => {
+  const sent = [];
+  let openHandler = null;
+  class FakeWebSocket {
+    constructor() {
+      this.readyState = 1;
+    }
+    addEventListener(event, handler) {
+      if (event === 'open') openHandler = handler;
+    }
+    send(raw) {
+      sent.push(JSON.parse(raw));
+    }
+    close() {}
+  }
+
+  const bridge = new DeviceBridge({
+    settings: {
+      get: (key) =>
+        key === 'devicePairing'
+          ? {
+              deviceId: 'dev-1',
+              deviceName: 'Laptop',
+              token: 'tok-1',
+              wsUrl: 'wss://app.botconnector.id/api/devices/socket',
+            }
+          : null,
+      set: async () => {},
+    },
+    detectHardware: async () => ({ cpu: 'Test CPU', ramGb: 16 }),
+    tools: { list: () => [] },
+    launcher: { list: () => [] },
+    localAi: { enabled: false },
+    WebSocketImpl: FakeWebSocket,
+  });
+
+  await bridge.connect();
+  assert.equal(typeof openHandler, 'function');
+  await openHandler();
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].type, 'device.hello');
+  for (const cap of [
+    'agent.capabilities',
+    'agent.workspaces',
+    'agent.sessions',
+    'agent.session',
+    'agent.start',
+    'agent.prompt',
+    'agent.approve',
+    'agent.cancel',
+    'agent.stream',
+  ]) {
+    assert.equal(sent[0].capabilities.includes(cap), true, `missing capability ${cap}`);
+  }
+});
+
+test('DeviceBridge routes agent.* requests to AgentBridge, preserves error.code, and rejects unknown agent.foo', async () => {
+  const { AgentError } = require('./agent-bridge.cjs');
+  const sent = [];
+  let failBusy = false;
+  const fakeAgentBridge = {
+    async handle(method, params) {
+      if (method === 'agent.prompt') {
+        if (failBusy) {
+          throw new AgentError('agent_busy', 'Sesi sedang sibuk.');
+        }
+        return { turnId: 'turn-77', echoedSession: params.sessionId };
+      }
+      throw new Error(`Unsupported agent method: ${method}`);
+    },
+    async close() {},
+  };
+
+  const bridge = new DeviceBridge({
+    settings: { get: () => null, set: async () => {} },
+    detectHardware: async () => ({}),
+    tools: { list: () => [] },
+    launcher: { list: () => [] },
+    localAi: { enabled: false },
+    agentBridge: fakeAgentBridge,
+    WebSocketImpl: null,
+  });
+  bridge.socket = {
+    readyState: 1,
+    send(raw) {
+      sent.push(JSON.parse(raw));
+    },
+  };
+
+  await bridge.handleMessage(
+    JSON.stringify({
+      type: 'device.request',
+      id: 'req-ok',
+      method: 'agent.prompt',
+      params: { sessionId: 's-1', prompt: 'hi' },
+    }),
+  );
+  assert.deepEqual(sent[0], {
+    type: 'device.response',
+    id: 'req-ok',
+    ok: true,
+    result: { turnId: 'turn-77', echoedSession: 's-1' },
+  });
+
+  failBusy = true;
+  await bridge.handleMessage(
+    JSON.stringify({
+      type: 'device.request',
+      id: 'req-busy',
+      method: 'agent.prompt',
+      params: { sessionId: 's-1', prompt: 'hi' },
+    }),
+  );
+  assert.deepEqual(sent[1], {
+    type: 'device.response',
+    id: 'req-busy',
+    ok: false,
+    error: {
+      message: 'Sesi sedang sibuk.',
+      code: 'agent_busy',
+    },
+  });
+
+  await bridge.handleMessage(
+    JSON.stringify({
+      type: 'device.request',
+      id: 'req-unknown',
+      method: 'agent.foo',
+      params: {},
+    }),
+  );
+  assert.equal(sent[2].type, 'device.response');
+  assert.equal(sent[2].id, 'req-unknown');
+  assert.equal(sent[2].ok, false);
+  assert.match(sent[2].error.message, /Unsupported agent method|not allowed/i);
+});
+

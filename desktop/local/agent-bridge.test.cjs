@@ -439,3 +439,289 @@ test('child exit clears state so the next ensureServe respawns', async () => {
     await bridge.close();
   }
 });
+
+// --- Task 4: agent.* RPC handlers ---
+
+function createReadyBridge({ onFetch, workspaces = null, version = '0.4.9' } = {}) {
+  const fetches = [];
+  const spawnImpl = (cmd, args) => {
+    if (args[0] === '--version') {
+      return makeFakeChild({
+        onSpawn(child) {
+          child.stdout.emit('data', Buffer.from(`${version}\n`));
+          child.exitCode = 0;
+          child.emit('exit', 0, null);
+        },
+      });
+    }
+    return makeFakeChild({
+      onSpawn(child) {
+        child.stderr.emit('data', Buffer.from('bccli serve http://127.0.0.1:55000\n'));
+      },
+    });
+  };
+
+  const fetchImpl = async (url, init = {}) => {
+    const parsedBody = init.body ? JSON.parse(init.body) : undefined;
+    fetches.push({
+      url: String(url),
+      method: init.method || 'GET',
+      headers: init.headers || {},
+      body: parsedBody,
+    });
+    if (String(url).endsWith('/health')) {
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return { ok: true, version };
+        },
+      };
+    }
+    if (String(url).endsWith('/v1/models')) {
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return [{ id: 'glm-5.3-flash' }];
+        },
+      };
+    }
+    if (typeof onFetch === 'function') {
+      return onFetch(String(url), init, parsedBody);
+    }
+    throw new Error('Unhandled fetch URL: ' + url);
+  };
+
+  const bridge = new AgentBridge({
+    env: { BOTCONNECTOR_BCCLI_PATH: '/usr/local/bin/bccli' },
+    spawnImpl,
+    fetchImpl,
+    workspaces,
+  });
+
+  return { bridge, fetches };
+}
+
+test('agent.start posts permissionMode ask and rejects any caller-supplied permissionMode before fetching', async () => {
+  const { bridge, fetches } = createReadyBridge({
+    onFetch(url, init, body) {
+      if (url.endsWith('/v1/sessions') && init.method === 'POST') {
+        assert.deepEqual(body, { cwd: '/repo/demo', permissionMode: 'ask', model: 'glm-5.3-flash' });
+        return {
+          ok: true,
+          status: 201,
+          async json() {
+            return { id: 'sess-123' };
+          },
+        };
+      }
+      throw new Error('Unexpected fetch: ' + url);
+    },
+  });
+
+  try {
+    await assert.rejects(
+      () =>
+        bridge.handle('agent.start', {
+          cwd: '/repo/demo',
+          permissionMode: 'bypassPermissions',
+        }),
+      /permissionMode is fixed to ask/i,
+    );
+    assert.equal(fetches.length, 0, 'must not call fetch when permissionMode is supplied');
+
+    const started = await bridge.handle('agent.start', {
+      cwd: '/repo/demo',
+      model: 'glm-5.3-flash',
+    });
+    assert.deepEqual(started, { sessionId: 'sess-123' });
+  } finally {
+    await bridge.close();
+  }
+});
+
+test('agent.prompt returns turnId on 202 and throws AgentError(agent_busy) on 409', async () => {
+  let busy = false;
+  const { bridge } = createReadyBridge({
+    onFetch(url, init, body) {
+      if (url.endsWith('/v1/sessions/sess-1/messages') && init.method === 'POST') {
+        assert.deepEqual(body, { prompt: 'fix tests' });
+        if (busy) {
+          return {
+            ok: false,
+            status: 409,
+            async json() {
+              return { error: 'Session is busy' };
+            },
+          };
+        }
+        return {
+          ok: true,
+          status: 202,
+          async json() {
+            return { turnId: 'turn-42' };
+          },
+        };
+      }
+      throw new Error('Unexpected fetch: ' + url);
+    },
+  });
+
+  try {
+    const first = await bridge.handle('agent.prompt', {
+      sessionId: 'sess-1',
+      prompt: 'fix tests',
+    });
+    assert.deepEqual(first, { turnId: 'turn-42' });
+
+    busy = true;
+    await assert.rejects(
+      () =>
+        bridge.handle('agent.prompt', {
+          sessionId: 'sess-1',
+          prompt: 'fix tests',
+        }),
+      (err) => {
+        assert.equal(err instanceof AgentError, true);
+        assert.equal(err.code, 'agent_busy');
+        return true;
+      },
+    );
+  } finally {
+    await bridge.close();
+  }
+});
+
+test('agent.approve rejects answer "all" and posts yes|no|session to /approvals', async () => {
+  const { bridge, fetches } = createReadyBridge({
+    onFetch(url, init, body) {
+      if (url.endsWith('/v1/sessions/sess-1/approvals') && init.method === 'POST') {
+        assert.deepEqual(body, { requestId: 'req-9', answer: 'session' });
+        return {
+          ok: true,
+          status: 200,
+          async json() {
+            return { ok: true };
+          },
+        };
+      }
+      throw new Error('Unexpected fetch: ' + url);
+    },
+  });
+
+  try {
+    await assert.rejects(
+      () =>
+        bridge.handle('agent.approve', {
+          sessionId: 'sess-1',
+          requestId: 'req-9',
+          answer: 'all',
+        }),
+      /answer must be yes\|no\|session/i,
+    );
+    assert.equal(fetches.length, 0, 'must not call fetch when answer is invalid');
+
+    const res = await bridge.handle('agent.approve', {
+      sessionId: 'sess-1',
+      requestId: 'req-9',
+      answer: 'session',
+    });
+    assert.deepEqual(res, { ok: true });
+  } finally {
+    await bridge.close();
+  }
+});
+
+test('agent.session truncates oldest whole messages when messages JSON exceeds 200 KB while keeping newest', async () => {
+  const allMessages = Array.from({ length: 30 }, (_, idx) => ({
+    id: `msg-${idx}`,
+    role: idx % 2 === 0 ? 'user' : 'assistant',
+    content: `message-${idx}-` + 'x'.repeat(10_240),
+  }));
+
+  const { bridge } = createReadyBridge({
+    onFetch(url, init) {
+      if (url.includes('/v1/sessions/sess-big') && init.method === 'GET') {
+        return {
+          ok: true,
+          status: 200,
+          async json() {
+            return {
+              id: 'sess-big',
+              cwd: '/repo/demo',
+              permissionMode: 'ask',
+              messages: allMessages,
+            };
+          },
+        };
+      }
+      throw new Error('Unexpected fetch: ' + url);
+    },
+  });
+
+  try {
+    const result = await bridge.handle('agent.session', { id: 'sess-big' });
+    const bytes = Buffer.byteLength(JSON.stringify(result.messages), 'utf8');
+    assert.ok(bytes <= 200_000, `expected messages <= 200000 bytes, got ${bytes}`);
+    assert.equal(result.truncated, true);
+    assert.equal(result.omittedCount + result.messages.length, allMessages.length);
+    assert.ok(result.omittedCount >= 10);
+    assert.equal(result.messages[result.messages.length - 1].id, 'msg-29');
+    assert.equal(result.messages[0].id, `msg-${result.omittedCount}`);
+  } finally {
+    await bridge.close();
+  }
+});
+
+test('agent.workspaces caps at 20 sorted most recent first and agent.capabilities never spawns serve', async () => {
+  const items = Array.from({ length: 25 }, (_, idx) => ({
+    id: `ws-${idx}`,
+    name: `Project ${idx}`,
+    path: `/work/p-${idx}`,
+    updatedAt: new Date(Date.UTC(2026, 9, 1, 0, idx, 0)).toISOString(),
+  }));
+
+  let serveSpawned = false;
+  const spawnImpl = (cmd, args) => {
+    if (args[0] === '--version') {
+      return makeFakeChild({
+        onSpawn(child) {
+          child.stdout.emit('data', Buffer.from('0.4.9\n'));
+          child.exitCode = 0;
+          child.emit('exit', 0, null);
+        },
+      });
+    }
+    serveSpawned = true;
+    throw new Error('serve must not be spawned by capabilities or workspaces');
+  };
+
+  const bridge = new AgentBridge({
+    env: { BOTCONNECTOR_BCCLI_PATH: '/usr/local/bin/bccli' },
+    spawnImpl,
+    fetchImpl: async () => {
+      throw new Error('fetch must not be called');
+    },
+    workspaces: {
+      list: () => items,
+    },
+  });
+
+  try {
+    const caps = await bridge.handle('agent.capabilities', {});
+    assert.equal(caps.supported, true);
+    assert.equal(caps.bccliVersion, '0.4.9');
+    assert.equal(typeof caps.deviceCliVersion, 'string');
+    assert.equal(serveSpawned, false);
+
+    const list = await bridge.handle('agent.workspaces', {});
+    assert.equal(list.length, 20);
+    assert.equal(list[0].path, '/work/p-24');
+    assert.equal(list[0].name, 'Project 24');
+    assert.equal(list[19].path, '/work/p-5');
+  } finally {
+    await bridge.close();
+  }
+});
+

@@ -3,6 +3,8 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { WorkspaceStore } = require('./workspaces.cjs');
+const { version: PACKAGE_VERSION } = require('../../package.json');
 
 const MIN_BCCLI = '0.4.9';
 const DEFAULT_HEARTBEAT_MS = 25_000;
@@ -10,7 +12,21 @@ const DEFAULT_IDLE_KILL_MS = 30 * 60 * 1000;
 const DEFAULT_BANNER_TIMEOUT_MS = 15_000;
 const DEFAULT_HEALTH_TIMEOUT_MS = 10_000;
 const DEFAULT_HEALTH_POLL_MS = 500;
+const SESSION_MESSAGES_MAX_BYTES = 200_000;
+const WORKSPACES_LIMIT = 20;
 const BANNER_REGEX = /bccli serve http:\/\/127\.0\.0\.1:(\d+)/;
+
+const AGENT_METHODS = [
+  'agent.capabilities',
+  'agent.workspaces',
+  'agent.sessions',
+  'agent.session',
+  'agent.start',
+  'agent.prompt',
+  'agent.approve',
+  'agent.cancel',
+  'agent.stream',
+];
 
 const AGENT_ERROR_CODES = new Set([
   'agent_runtime_missing',
@@ -59,6 +75,8 @@ class AgentBridge {
     homeDir = null,
     env = process.env,
     platform = process.platform,
+    workspaces = null,
+    deviceCliVersion = PACKAGE_VERSION,
   } = {}) {
     this.fetch = fetchImpl;
     this.spawn = spawnImpl;
@@ -75,6 +93,8 @@ class AgentBridge {
       dataDir ||
       this.env.BOTCONNECTOR_DEVICE_DATA_DIR ||
       path.join(this.homeDir, '.botconnector-device');
+    this.workspaces = workspaces;
+    this.deviceCliVersion = String(deviceCliVersion || PACKAGE_VERSION);
 
     this.serveState = null;
     this.ensureServePromise = null;
@@ -424,6 +444,254 @@ class AgentBridge {
     return { bccliVersion: version };
   }
 
+  getWorkspaces() {
+    if (!this.workspaces) {
+      this.workspaces = new WorkspaceStore({
+        dataDir: this.dataDir,
+        defaultPath: this.homeDir,
+      });
+    }
+    return this.workspaces;
+  }
+
+  async requestServe(pathname, init = {}) {
+    const attempt = async () => {
+      const { port, token } = await this.ensureServe();
+      const headers = {
+        authorization: `Bearer ${token}`,
+        accept: 'application/json',
+        ...(init.body ? { 'content-type': 'application/json' } : {}),
+        ...(init.headers || {}),
+      };
+      return this.fetch(`http://127.0.0.1:${port}${pathname}`, {
+        ...init,
+        headers,
+      });
+    };
+
+    let response;
+    try {
+      response = await attempt();
+    } catch {
+      this.killServe();
+      try {
+        response = await attempt();
+      } catch (retryError) {
+        throw retryError instanceof AgentError
+          ? retryError
+          : new AgentError(
+              'agent_runtime_missing',
+              `bccli serve request failed: ${retryError?.message || retryError}`,
+            );
+      }
+    }
+
+    this.touch();
+    return response;
+  }
+
+  async capabilities() {
+    // Quick probe only; never spawns bccli serve and never throws when bccli is missing.
+    let bccliVersion = this.serveState?.version || this.lastDiscoveredVersion || null;
+    if (!bccliVersion) {
+      try {
+        await this.discoverBccli();
+        bccliVersion = this.lastDiscoveredVersion || null;
+      } catch {
+        bccliVersion = null;
+      }
+    }
+    return {
+      supported: true,
+      deviceCliVersion: this.deviceCliVersion,
+      bccliVersion,
+    };
+  }
+
+  async listWorkspaces() {
+    const raw = this.getWorkspaces().list();
+    const list = Array.isArray(raw) ? raw.slice() : [];
+    list.sort((a, b) => {
+      const ta = Date.parse(a?.lastUsed || a?.updatedAt || a?.createdAt || '') || 0;
+      const tb = Date.parse(b?.lastUsed || b?.updatedAt || b?.createdAt || '') || 0;
+      return tb - ta;
+    });
+    return list.slice(0, WORKSPACES_LIMIT).map((item) => {
+      const entry = { path: String(item?.path || '') };
+      if (item?.name) entry.name = String(item.name);
+      const lastUsed = item?.lastUsed || item?.updatedAt || item?.createdAt;
+      if (lastUsed) entry.lastUsed = String(lastUsed);
+      return entry;
+    });
+  }
+
+  async listSessions(params = {}) {
+    const cwd = params?.cwd ? String(params.cwd).trim() : '';
+    const query = cwd ? `?cwd=${encodeURIComponent(cwd)}` : '';
+    const response = await this.requestServe(`/v1/sessions${query}`, { method: 'GET' });
+    if (!response.ok) {
+      throw new AgentError(
+        'agent_runtime_missing',
+        `bccli GET /v1/sessions returned HTTP ${response.status}.`,
+      );
+    }
+    const data = await response.json().catch(() => []);
+    return Array.isArray(data) ? data : [];
+  }
+
+  async getSession(params = {}) {
+    const id = String(params?.id || params?.sessionId || '').trim();
+    if (!id) throw new Error('session id is required.');
+    const cwd = params?.cwd ? String(params.cwd).trim() : '';
+    const query = cwd ? `?cwd=${encodeURIComponent(cwd)}` : '';
+    const response = await this.requestServe(
+      `/v1/sessions/${encodeURIComponent(id)}${query}`,
+      { method: 'GET' },
+    );
+    if (!response.ok) {
+      throw new AgentError(
+        'agent_runtime_missing',
+        `bccli GET /v1/sessions/${id} returned HTTP ${response.status}.`,
+      );
+    }
+    const session = (await response.json().catch(() => ({}))) || {};
+    const allMessages = Array.isArray(session.messages) ? session.messages : [];
+    const kept = allMessages.slice();
+    let omittedCount = 0;
+    while (
+      kept.length > 0 &&
+      Buffer.byteLength(JSON.stringify(kept), 'utf8') > SESSION_MESSAGES_MAX_BYTES
+    ) {
+      kept.shift();
+      omittedCount += 1;
+    }
+    const baseline = {
+      ...session,
+      messages: kept,
+    };
+    if (omittedCount > 0) {
+      baseline.truncated = true;
+      baseline.omittedCount = omittedCount;
+    }
+    return baseline;
+  }
+
+  async startSession(params = {}) {
+    if (params && params.permissionMode !== undefined) {
+      throw new Error('permissionMode is fixed to ask');
+    }
+    const cwd = String(params?.cwd || '').trim();
+    if (!cwd) throw new Error('cwd is required.');
+    await this.preflight();
+    const payload = {
+      cwd,
+      permissionMode: 'ask',
+      ...(params?.model ? { model: String(params.model) } : {}),
+    };
+    const response = await this.requestServe('/v1/sessions', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      throw new AgentError(
+        'agent_runtime_missing',
+        `bccli POST /v1/sessions returned HTTP ${response.status}.`,
+      );
+    }
+    const data = (await response.json().catch(() => ({}))) || {};
+    const sessionId = data.sessionId || data.id;
+    if (!sessionId) {
+      throw new AgentError('agent_runtime_missing', 'bccli did not return a sessionId.');
+    }
+    return { sessionId: String(sessionId) };
+  }
+
+  async sendPrompt(params = {}) {
+    const sessionId = String(params?.sessionId || '').trim();
+    const prompt = String(params?.prompt ?? '');
+    if (!sessionId || !prompt.trim()) {
+      throw new Error('sessionId and prompt are required.');
+    }
+    const response = await this.requestServe(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/messages`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ prompt }),
+      },
+    );
+    if (response.status === 409) {
+      throw new AgentError('agent_busy', 'Agent session is already running a turn.');
+    }
+    if (!response.ok) {
+      throw new AgentError(
+        'agent_runtime_missing',
+        `bccli POST /v1/sessions/${sessionId}/messages returned HTTP ${response.status}.`,
+      );
+    }
+    const data = (await response.json().catch(() => ({}))) || {};
+    return { turnId: data.turnId ? String(data.turnId) : null };
+  }
+
+  async approve(params = {}) {
+    const answer = String(params?.answer || '');
+    if (!['yes', 'no', 'session'].includes(answer)) {
+      throw new Error('answer must be yes|no|session');
+    }
+    const sessionId = String(params?.sessionId || '').trim();
+    const requestId = String(params?.requestId || '').trim();
+    if (!sessionId || !requestId) {
+      throw new Error('sessionId and requestId are required.');
+    }
+    const response = await this.requestServe(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/approvals`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ requestId, answer }),
+      },
+    );
+    if (!response.ok) {
+      throw new AgentError(
+        'agent_runtime_missing',
+        `bccli POST /v1/sessions/${sessionId}/approvals returned HTTP ${response.status}.`,
+      );
+    }
+    return { ok: true };
+  }
+
+  async cancel(params = {}) {
+    const sessionId = String(params?.sessionId || '').trim();
+    if (!sessionId) throw new Error('sessionId is required.');
+    const response = await this.requestServe(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/cancel`,
+      {
+        method: 'POST',
+        body: JSON.stringify({}),
+      },
+    );
+    if (!response.ok) {
+      throw new AgentError(
+        'agent_runtime_missing',
+        `bccli POST /v1/sessions/${sessionId}/cancel returned HTTP ${response.status}.`,
+      );
+    }
+    return { ok: true };
+  }
+
+  async handle(method, params = {}, onEvent = null, signal = null) {
+    if (method === 'agent.capabilities') return this.capabilities();
+    if (method === 'agent.workspaces') return this.listWorkspaces();
+    if (method === 'agent.sessions') return this.listSessions(params);
+    if (method === 'agent.session') return this.getSession(params);
+    if (method === 'agent.start') return this.startSession(params);
+    if (method === 'agent.prompt') return this.sendPrompt(params);
+    if (method === 'agent.approve') return this.approve(params);
+    if (method === 'agent.cancel') return this.cancel(params);
+    if (method === 'agent.stream' && typeof this.stream === 'function') {
+      return this.stream(params?.sessionId, params, onEvent, signal);
+    }
+    throw new Error(`Unsupported agent method: ${method}`);
+  }
+
   clearIdleTimer() {
     if (this.idleTimer) {
       clearTimeout(this.idleTimer);
@@ -477,6 +745,7 @@ module.exports = {
   AgentBridge,
   AgentError,
   AGENT_ERROR_CODES,
+  AGENT_METHODS,
   MIN_BCCLI,
   compareSemver,
 };
