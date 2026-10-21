@@ -56,7 +56,7 @@ Sumber: file **live di dalam container** `botconnector-production-candidate-acco
 
 - account-api (container) → relay lewat **unix socket** `DEVICE_RELAY_SOCKET=/run/botconnector-device/relay.sock` (bind mount `ro` dari `/home/botadmin/.botconnector-device-runtime`), header `x-botconnector-device-internal: <token>`; token dibaca dari `DEVICE_RELAY_TOKEN_FILE=/run/secrets/device_relay_token_account_api`.
 - `DEVICE_RELAY_URL` **tidak** di-set → **socket adalah satu-satunya jalan** container → relay.
-- Dua file secret identik (sha256 `e3e6e555…bce9e1`): `production-candidate/secrets/device_relay_internal_token` (dipakai relay, unit file) dan `…/device_relay_token_account_api` (dipakai container).
+- Dua file secret identik (terverifikasi lewat `cmp -s`): `production-candidate/secrets/device_relay_internal_token` (dipakai relay, unit file) dan `…/device_relay_token_account_api` (dipakai container).
 - Probe dari dalam container: `SOCKET ERR ECONNREFUSED` → relay benar-benar tidak hidup.
 
 ## (d) Deployment relay: cara jalankan & status — VERIFIED
