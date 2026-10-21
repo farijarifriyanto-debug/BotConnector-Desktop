@@ -169,6 +169,65 @@ class AgentBridge {
     return [...new Set(candidates)];
   }
 
+  resolveWin32CmdEntry(candidate) {
+    const dirs = [];
+    if (path.isAbsolute(candidate)) {
+      dirs.push(path.dirname(candidate));
+    } else {
+      const pathRaw = String(this.env?.PATH || this.env?.Path || '');
+      for (const part of pathRaw.split(path.delimiter)) {
+        const trimmed = part.trim();
+        if (trimmed) dirs.push(trimmed);
+      }
+      if (this.env?.APPDATA) {
+        dirs.push(path.join(this.env.APPDATA, 'npm'));
+      }
+    }
+    for (const dir of dirs) {
+      const direct = path.join(dir, 'node_modules', '@botconnector', 'bccli', 'dist', 'cli.js');
+      try {
+        if (fs.existsSync(direct)) return direct;
+      } catch {}
+    }
+    return null;
+  }
+
+  spawnCandidate(candidate, args, options) {
+    try {
+      return this.spawn(candidate, args, options);
+    } catch (error) {
+      if (this.platform === 'win32' && error?.code === 'EINVAL') {
+        const jsEntry = this.resolveWin32CmdEntry(candidate);
+        if (jsEntry) {
+          return this.spawn(process.execPath, [jsEntry, ...args], options);
+        }
+        return this.spawn(candidate, args, { ...options, shell: true });
+      }
+      throw error;
+    }
+  }
+
+  killChild(child) {
+    if (!child) return;
+    try {
+      child.kill();
+    } catch {}
+    if (
+      this.platform === 'win32' &&
+      typeof child.pid === 'number' &&
+      this.spawn === childProcess.spawn
+    ) {
+      try {
+        childProcess
+          .spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+            windowsHide: true,
+            stdio: 'ignore',
+          })
+          .unref?.();
+      } catch {}
+    }
+  }
+
   probeBinary(candidate, timeoutMs = 5_000) {
     // If candidate is an explicit path inside ~/.bccli/bin and not set via env, check fs existence if absolute
     const envOverride = String(this.env?.BOTCONNECTOR_BCCLI_PATH || '').trim();
@@ -191,15 +250,13 @@ class AgentBridge {
         resolve(result);
       };
       const timer = setTimeout(() => {
-        try {
-          child?.kill?.();
-        } catch {}
+        this.killChild(child);
         done(null);
       }, timeoutMs);
       timer.unref?.();
 
       try {
-        child = this.spawn(candidate, ['--version'], {
+        child = this.spawnCandidate(candidate, ['--version'], {
           env: this.env,
           windowsHide: true,
           stdio: ['ignore', 'pipe', 'pipe'],
@@ -300,7 +357,7 @@ class AgentBridge {
 
     let child;
     try {
-      child = this.spawn(binary, ['serve', '--port', '0', '--token', token], {
+      child = this.spawnCandidate(binary, ['serve', '--port', '0', '--token', token], {
         env,
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -358,9 +415,7 @@ class AgentBridge {
         );
       });
     }).catch((error) => {
-      try {
-        child.kill();
-      } catch {}
+      this.killChild(child);
       throw error;
     });
 
@@ -384,9 +439,7 @@ class AgentBridge {
       this.touch();
       return { port, token, version: state.version };
     } catch (error) {
-      try {
-        child.kill();
-      } catch {}
+      this.killChild(child);
       if (this.serveState?.child === child) {
         this.serveState = null;
       }
@@ -971,9 +1024,7 @@ class AgentBridge {
     const current = this.serveState;
     this.serveState = null;
     if (current?.child) {
-      try {
-        current.child.kill();
-      } catch {}
+      this.killChild(current.child);
     }
   }
 

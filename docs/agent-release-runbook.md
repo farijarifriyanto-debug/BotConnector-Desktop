@@ -107,9 +107,9 @@ sudo systemctl restart botconnector-device-relay.service
 
 ---
 
-### B.2 Nginx Unbuffered Location for `/v1/client/devices/` (`botconnector-api.conf`)
+### B.2 Nginx Unbuffered Location for `/v1/client/devices` (`botconnector-api.conf`)
 
-Without a dedicated location block, `/v1/client/devices/{id}/stream` falls into `location /` in `/etc/nginx/sites-available/botconnector-api.conf` with default `proxy_buffering on` and a 60-second read timeout.
+Without a dedicated location block, `/v1/client/devices/{id}/stream` falls into `location /` in `/etc/nginx/sites-available/botconnector-api.conf` with default `proxy_buffering on` and a 60-second read timeout. Note: use `location ^~ /v1/client/devices` **without a trailing slash** — if a trailing slash is added alongside `proxy_pass`, Nginx automatically returns a `301` redirect on `GET /v1/client/devices`.
 
 #### Step B.2.1 — Backup and add location block
 ```bash
@@ -117,17 +117,17 @@ sudo cp -a /etc/nginx/sites-available/botconnector-api.conf "$BDIR/botconnector-
 ```
 Add before `location /` in `/etc/nginx/sites-available/botconnector-api.conf`:
 ```nginx
-    location ^~ /v1/client/devices/ {
+    location ^~ /v1/client/devices {
         limit_req zone=botconnector_account_api burst=20 nodelay;
         limit_req_status 429;
         proxy_http_version 1.1;
-        proxy_set_header Host $http_host;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Host $host;
+        proxy_set_header Authorization $http_authorization;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header Authorization $http_authorization;
         proxy_set_header Connection "";
         proxy_buffering off;
+        proxy_request_buffering off;
         proxy_cache off;
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;

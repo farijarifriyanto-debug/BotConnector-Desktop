@@ -1029,4 +1029,131 @@ test('agent.stream throws agent_runtime_missing when mux closes before ready', a
   }
 });
 
+test('win32 .cmd spawn EINVAL falls back to shell:true so npm global .cmd shims work on Node 22/24', async () => {
+  const calls = [];
+  const spawnImpl = (cmd, args, options) => {
+    calls.push({ cmd, args, options });
+    if (!options.shell) {
+      const err = new Error('spawn EINVAL');
+      err.code = 'EINVAL';
+      throw err;
+    }
+    if (args[0] === '--version') {
+      return makeFakeChild({
+        onSpawn(child) {
+          child.stdout.emit('data', Buffer.from('0.4.9\n'));
+          child.exitCode = 0;
+          child.emit('exit', 0, null);
+        },
+      });
+    }
+    return makeFakeChild({
+      onSpawn(child) {
+        child.stderr.emit('data', Buffer.from('bccli serve http://127.0.0.1:56123\n'));
+      },
+    });
+  };
+
+  const fetchImpl = async (url) => {
+    if (String(url).endsWith('/health')) {
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return { ok: true, version: '0.4.9' };
+        },
+      };
+    }
+    throw new Error('Unexpected fetch: ' + url);
+  };
+
+  const bridge = new AgentBridge({
+    platform: 'win32',
+    env: { BOTCONNECTOR_BCCLI_PATH: 'C:\\Users\\demo\\AppData\\Roaming\\npm\\bccli.cmd' },
+    spawnImpl,
+    fetchImpl,
+  });
+
+  try {
+    const caps = await bridge.handle('agent.capabilities', {});
+    assert.equal(caps.bccliVersion, '0.4.9');
+    const serve = await bridge.ensureServe();
+    assert.equal(serve.port, 56123);
+    assert.equal(calls.some((c) => c.options.shell === true), true);
+  } finally {
+    await bridge.close();
+  }
+});
+
+test('win32 npm .cmd shim resolves adjacent node_modules/@botconnector/bccli/dist/cli.js directly via process.execPath without shell:true', async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bc-win32-shim-'));
+  const cliJs = path.join(tmpDir, 'node_modules', '@botconnector', 'bccli', 'dist', 'cli.js');
+  const cmdShim = path.join(tmpDir, 'bccli.cmd');
+  fs.mkdirSync(path.dirname(cliJs), { recursive: true });
+  fs.writeFileSync(cliJs, '// fake cli.js\n', 'utf8');
+  fs.writeFileSync(cmdShim, '@ECHO off\n"%_prog%" "%dp0%\\node_modules\\@botconnector\\bccli\\dist\\cli.js" %*\n', 'utf8');
+
+  const calls = [];
+  const spawnImpl = (cmd, args, options) => {
+    calls.push({ cmd, args, options });
+    if (cmd.endsWith('.cmd')) {
+      const err = new Error('spawn EINVAL');
+      err.code = 'EINVAL';
+      throw err;
+    }
+    if (args.includes('--version')) {
+      return makeFakeChild({
+        onSpawn(child) {
+          child.stdout.emit('data', Buffer.from('0.4.9\n'));
+          child.exitCode = 0;
+          child.emit('exit', 0, null);
+        },
+      });
+    }
+    return makeFakeChild({
+      onSpawn(child) {
+        child.stderr.emit('data', Buffer.from('bccli serve http://127.0.0.1:56234\n'));
+      },
+    });
+  };
+
+  const fetchImpl = async (url) => {
+    if (String(url).endsWith('/health')) {
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return { ok: true, version: '0.4.9' };
+        },
+      };
+    }
+    throw new Error('Unexpected fetch: ' + url);
+  };
+
+  const bridge = new AgentBridge({
+    platform: 'win32',
+    env: { PATH: tmpDir },
+    homeDir: tmpDir,
+    spawnImpl,
+    fetchImpl,
+  });
+
+  try {
+    const caps = await bridge.handle('agent.capabilities', {});
+    assert.equal(caps.bccliVersion, '0.4.9');
+    const serve = await bridge.ensureServe();
+    assert.equal(serve.port, 56234);
+    const serveCall = calls.filter((c) => c.args.includes('serve')).pop();
+    assert.ok(serveCall);
+    assert.equal(serveCall.cmd, process.execPath);
+    assert.equal(serveCall.args[0], cliJs);
+    assert.equal(Boolean(serveCall.options.shell), false, 'must not use shell:true when cli.js is resolved');
+  } finally {
+    await bridge.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+
+
 
