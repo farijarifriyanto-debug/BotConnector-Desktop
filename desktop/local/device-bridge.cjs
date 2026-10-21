@@ -362,6 +362,7 @@ class DeviceBridge {
     this.socket = null;
     this.reconnectTimer = null;
     this.manualClose = false;
+    this.activeStreams = new Map();
   }
 
   pairing() {
@@ -465,6 +466,7 @@ class DeviceBridge {
     });
     socket.addEventListener('close', () => {
       if (this.socket === socket) this.socket = null;
+      this.abortActiveStreams();
       this.emit('device:changed', this.status());
       if (!this.manualClose && this.pairing()) {
         clearTimeout(this.reconnectTimer);
@@ -475,25 +477,56 @@ class DeviceBridge {
     return this.status();
   }
 
+  abortActiveStreams() {
+    for (const controller of [...this.activeStreams.values()]) {
+      try {
+        controller.abort();
+      } catch {}
+    }
+    this.activeStreams.clear();
+  }
+
   async handleMessage(raw) {
     let message;
     try { message = JSON.parse(typeof raw === 'string' ? raw : Buffer.from(raw).toString('utf8')); }
     catch { return; }
+    if (message?.type === 'device.cancel' && typeof message.id === 'string') {
+      const controller = this.activeStreams.get(message.id);
+      if (controller) {
+        this.activeStreams.delete(message.id);
+        try {
+          controller.abort();
+        } catch {}
+      }
+      return;
+    }
     if (message?.type !== 'device.request' || typeof message.id !== 'string') return;
     let result;
+    const isAgentStream = message.method === 'agent.stream';
+    const isChatStream = message.method === 'chat.completions' && message.params?.stream === true;
+    const controller = isAgentStream ? new AbortController() : null;
+    if (controller) this.activeStreams.set(message.id, controller);
     try {
       const streamEvent =
-        message.method === 'chat.completions' && message.params?.stream === true
+        isChatStream || isAgentStream
           ? (event) => this.event(message.id, event)
           : null;
-      result = await this.execute(message.method, message.params || {}, streamEvent);
+      result = await this.execute(
+        message.method,
+        message.params || {},
+        streamEvent,
+        controller ? controller.signal : null,
+      );
       this.reply(message.id, { ok: true, result });
     } catch (error) {
+      if (error?.code === 'aborted') return;
       const errObj = { message: error.message || String(error) };
       if (typeof error?.code === 'string' && error.code) {
         errObj.code = error.code;
       }
       this.reply(message.id, { ok: false, error: errObj });
+    } finally {
+      if (controller) this.activeStreams.delete(message.id);
     }
   }
   async withDeviceContext(params = {}) {
@@ -518,7 +551,7 @@ class DeviceBridge {
     });
   }
 
-  async execute(method, params, onStreamEvent = null) {
+  async execute(method, params, onStreamEvent = null, signal = null) {
     if (method === 'hardware.get') return this.detectHardware();
     // Read-only public catalog lookup ranked for this device's hardware; no local AI permission needed.
     if (method === 'catalog.recommendations') return defaultCatalog.recommendModels(this.catalog, await this.detectHardware(), params);
@@ -571,7 +604,7 @@ class DeviceBridge {
     }
     if (method === 'chat.cancel') return this.localAi.cancelChat(params.id);
     if (typeof method === 'string' && method.startsWith('agent.')) {
-      return this.agentBridge.handle(method, params, onStreamEvent);
+      return this.agentBridge.handle(method, params, onStreamEvent, signal);
     }
     throw new Error('Remote capability is not allowed.');
   }
@@ -589,6 +622,7 @@ class DeviceBridge {
   close() {
     this.manualClose = true;
     clearTimeout(this.reconnectTimer);
+    this.abortActiveStreams();
     this.socket?.close();
     this.socket = null;
     try {

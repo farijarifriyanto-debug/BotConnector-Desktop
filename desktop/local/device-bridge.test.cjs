@@ -657,3 +657,115 @@ test('DeviceBridge routes agent.* requests to AgentBridge, preserves error.code,
   assert.match(sent[2].error.message, /Unsupported agent method|not allowed/i);
 });
 
+// --- Task 5: DeviceBridge agent.stream events, device.cancel, and socket close abort ---
+
+test('DeviceBridge streams agent.stream events, aborts matching stream on device.cancel, and aborts all streams on socket close', async () => {
+  const sent = [];
+  const signals = new Map();
+  let closeListener = null;
+
+  class FakeWebSocket {
+    constructor() {
+      this.readyState = 1;
+    }
+    addEventListener(event, handler) {
+      if (event === 'close') closeListener = handler;
+    }
+    send(raw) {
+      sent.push(JSON.parse(raw));
+    }
+    close() {
+      this.readyState = 3;
+      if (closeListener) closeListener();
+    }
+  }
+
+  const fakeAgentBridge = {
+    async handle(method, params, onEvent, signal) {
+      assert.equal(method, 'agent.stream');
+      assert.equal(typeof onEvent, 'function', 'agent.stream must receive onEvent without params.stream');
+      signals.set(params.sessionId, signal);
+      onEvent({ item: { type: 'ready', sessionId: params.sessionId } });
+      return new Promise((resolve, reject) => {
+        signal.addEventListener(
+          'abort',
+          () => {
+            const err = new Error('aborted');
+            err.code = 'aborted';
+            reject(err);
+          },
+          { once: true },
+        );
+      });
+    },
+    async close() {},
+  };
+
+  const bridge = new DeviceBridge({
+    settings: {
+      get: (key) =>
+        key === 'devicePairing'
+          ? {
+              deviceId: 'dev-1',
+              deviceName: 'Laptop',
+              token: 'tok-1',
+              wsUrl: 'wss://app.botconnector.id/api/devices/socket',
+            }
+          : null,
+      set: async () => {},
+    },
+    detectHardware: async () => ({}),
+    tools: { list: () => [] },
+    launcher: { list: () => [] },
+    localAi: { enabled: false },
+    agentBridge: fakeAgentBridge,
+    WebSocketImpl: FakeWebSocket,
+  });
+
+  await bridge.connect();
+
+  const s1Promise = bridge.handleMessage(
+    JSON.stringify({
+      type: 'device.request',
+      id: 'stream-req-1',
+      method: 'agent.stream',
+      params: { sessionId: 'sess-1' },
+    }),
+  );
+  const s2Promise = bridge.handleMessage(
+    JSON.stringify({
+      type: 'device.request',
+      id: 'stream-req-2',
+      method: 'agent.stream',
+      params: { sessionId: 'sess-2' },
+    }),
+  );
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(signals.get('sess-1')?.aborted, false);
+  assert.equal(signals.get('sess-2')?.aborted, false);
+  assert.deepEqual(sent[0], {
+    type: 'device.event',
+    id: 'stream-req-1',
+    event: { item: { type: 'ready', sessionId: 'sess-1' } },
+  });
+
+  // Cancel stream 1 via device.cancel frame
+  await bridge.handleMessage(
+    JSON.stringify({
+      type: 'device.cancel',
+      id: 'stream-req-1',
+    }),
+  );
+  await s1Promise;
+  assert.equal(signals.get('sess-1')?.aborted, true, 'device.cancel must abort the matching stream');
+  assert.equal(signals.get('sess-2')?.aborted, false, 'other stream must remain open');
+
+  // Closing the device socket aborts remaining streams
+  bridge.socket.close();
+  await s2Promise;
+  assert.equal(signals.get('sess-2')?.aborted, true, 'socket close must abort all active streams');
+  bridge.close();
+});
+
+

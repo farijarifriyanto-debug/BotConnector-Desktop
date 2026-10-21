@@ -725,3 +725,308 @@ test('agent.workspaces caps at 20 sorted most recent first and agent.capabilitie
   }
 });
 
+// --- Task 5: agent.stream mux mirroring, 32KB output cap, 900KB byte budget, 25s heartbeat, abort ---
+
+async function startStubMuxServer({ token = 'a'.repeat(64), onOpenStream, onUpgrade } = {}) {
+  const http = require('node:http');
+  const { WebSocketServer } = require('ws');
+
+  const server = http.createServer((req, res) => {
+    if (req.url === '/health') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, version: '0.4.9' }));
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+
+  const wss = new WebSocketServer({ noServer: true });
+  const connections = [];
+
+  server.on('upgrade', (req, socket, head) => {
+    if (typeof onUpgrade === 'function' && onUpgrade(req, socket) === false) {
+      return;
+    }
+    if (req.url !== '/v1/mux' || req.headers.authorization !== `Bearer ${token}`) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      connections.push(ws);
+      ws.on('message', (raw) => {
+        const msg = JSON.parse(String(raw));
+        if (msg.type === 'open' && typeof onOpenStream === 'function') {
+          onOpenStream(ws, msg);
+        }
+      });
+    });
+  });
+
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+
+  return {
+    port,
+    token,
+    connections,
+    async close() {
+      for (const ws of connections) {
+        try {
+          ws.close();
+        } catch {}
+      }
+      wss.close();
+      if (server.closeAllConnections) server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    },
+  };
+}
+
+function createBridgeBoundToServer(port, token, extra = {}) {
+  const bridge = new AgentBridge({
+    env: { BOTCONNECTOR_BCCLI_PATH: '/usr/local/bin/bccli' },
+    fetchImpl: globalThis.fetch,
+    ...extra,
+  });
+  bridge.serveState = {
+    port,
+    token,
+    child: { killed: false, exitCode: null, kill() { this.killed = true; } },
+    version: '0.4.9',
+  };
+  return bridge;
+}
+
+test('agent.stream mirrors mux items in order (ready -> text -> tool_use -> tool_result -> result -> end) and resolves', async () => {
+  const frames = [
+    { type: 'ready', sessionId: 'sess-1' },
+    { type: 'text', delta: 'Hello world' },
+    { type: 'tool_use', id: 'tu-1', name: 'edit', input: { path: 'a.js' } },
+    { type: 'tool_result', id: 'tu-1', output: 'ok', display: '@@ -1 +1 @@\n-old\n+new' },
+    { type: 'result', turnId: 'turn-1', stopReason: 'end_turn' },
+  ];
+
+  const mux = await startStubMuxServer({
+    onOpenStream(ws, openFrame) {
+      assert.equal(openFrame.target, 'session:sess-1');
+      assert.match(openFrame.streamId, /^agent-/);
+      for (const value of frames) {
+        ws.send(JSON.stringify({ type: 'item', streamId: openFrame.streamId, value }));
+      }
+      ws.send(JSON.stringify({ type: 'end', streamId: openFrame.streamId }));
+    },
+  });
+
+  const bridge = createBridgeBoundToServer(mux.port, mux.token);
+  const events = [];
+
+  try {
+    const out = await bridge.handle(
+      'agent.stream',
+      { sessionId: 'sess-1' },
+      (ev) => events.push(ev),
+    );
+    assert.deepEqual(out, { ok: true });
+    assert.deepEqual(
+      events,
+      frames.map((item) => ({ item })),
+    );
+  } finally {
+    await bridge.close();
+    await mux.close();
+  }
+});
+
+test('agent.stream caps tool_result.output at 32768 chars + marker while leaving display untouched when under byte budget', async () => {
+  const longOutput = 'A'.repeat(40 * 1024);
+  const display = 'diff --git a/file.js b/file.js\n+line';
+  const mux = await startStubMuxServer({
+    onOpenStream(ws, openFrame) {
+      ws.send(
+        JSON.stringify({
+          type: 'item',
+          streamId: openFrame.streamId,
+          value: { type: 'ready', sessionId: 'sess-cap' },
+        }),
+      );
+      ws.send(
+        JSON.stringify({
+          type: 'item',
+          streamId: openFrame.streamId,
+          value: {
+            type: 'tool_result',
+            id: 'tu-cap',
+            output: longOutput,
+            display,
+          },
+        }),
+      );
+      ws.send(JSON.stringify({ type: 'end', streamId: openFrame.streamId }));
+    },
+  });
+
+  const bridge = createBridgeBoundToServer(mux.port, mux.token);
+  const events = [];
+
+  try {
+    await bridge.handle('agent.stream', { sessionId: 'sess-cap' }, (ev) => events.push(ev));
+    const toolResult = events.find((e) => e.item?.type === 'tool_result').item;
+    assert.equal(toolResult.output.length, 32_768 + '\n[truncated]'.length);
+    assert.equal(toolResult.output.endsWith('\n[truncated]'), true);
+    assert.equal(toolResult.display, display);
+  } finally {
+    await bridge.close();
+    await mux.close();
+  }
+});
+
+test('agent.stream enforces the 900 KB byte budget with UTF-8 safe display shrinking', async () => {
+  const cjk100k = '字'.repeat(100_000); // 300 KB UTF-8
+  const cjk290k = '字'.repeat(290_000); // 870 KB UTF-8 (+ 32 KB output > 900 KB)
+  const output32k = 'B'.repeat(32_768);
+
+  const mux = await startStubMuxServer({
+    onOpenStream(ws, openFrame) {
+      ws.send(
+        JSON.stringify({
+          type: 'item',
+          streamId: openFrame.streamId,
+          value: { type: 'ready', sessionId: 'sess-utf8' },
+        }),
+      );
+      ws.send(
+        JSON.stringify({
+          type: 'item',
+          streamId: openFrame.streamId,
+          value: {
+            type: 'tool_result',
+            id: 'under-budget',
+            output: output32k,
+            display: cjk100k,
+          },
+        }),
+      );
+      ws.send(
+        JSON.stringify({
+          type: 'item',
+          streamId: openFrame.streamId,
+          value: {
+            type: 'tool_result',
+            id: 'over-budget',
+            output: output32k,
+            display: cjk290k,
+          },
+        }),
+      );
+      ws.send(JSON.stringify({ type: 'end', streamId: openFrame.streamId }));
+    },
+  });
+
+  const bridge = createBridgeBoundToServer(mux.port, mux.token);
+  const events = [];
+
+  try {
+    await bridge.handle('agent.stream', { sessionId: 'sess-utf8' }, (ev) => events.push(ev));
+    const underEvent = events.find((e) => e.item?.id === 'under-budget');
+    const overEvent = events.find((e) => e.item?.id === 'over-budget');
+
+    // Case 1: 100k CJK chars (~300 KB) + 32 KB output < 900 KB -> NO shrink
+    assert.equal(underEvent.item.display, cjk100k);
+    assert.ok(Buffer.byteLength(JSON.stringify(underEvent), 'utf8') < 900_000);
+
+    // Case 2: 290k CJK chars (~870 KB) + 32 KB output > 900 KB -> shrunk to <= 900_000 bytes, valid UTF-8, ends with marker
+    const overBytes = Buffer.byteLength(JSON.stringify(overEvent), 'utf8');
+    assert.ok(overBytes <= 900_000, `expected <= 900000 bytes, got ${overBytes}`);
+    const d = overEvent.item.display;
+    assert.equal(d.endsWith('\n[truncated]'), true);
+    assert.equal(Buffer.from(d, 'utf8').toString('utf8'), d);
+    assert.equal(d.includes('\uFFFD'), false, 'must not split a multi-byte UTF-8 character');
+  } finally {
+    await bridge.close();
+    await mux.close();
+  }
+});
+
+test('agent.stream emits periodic heartbeats and abort closes mux WS and clears timer', async () => {
+  let serverSideClosed = false;
+  const mux = await startStubMuxServer({
+    onOpenStream(ws, openFrame) {
+      ws.on('close', () => {
+        serverSideClosed = true;
+      });
+      ws.send(
+        JSON.stringify({
+          type: 'item',
+          streamId: openFrame.streamId,
+          value: { type: 'ready', sessionId: 'sess-hb' },
+        }),
+      );
+    },
+  });
+
+  const bridge = createBridgeBoundToServer(mux.port, mux.token, { heartbeatMs: 20 });
+  const events = [];
+  const controller = new AbortController();
+
+  try {
+    const streamPromise = bridge.handle(
+      'agent.stream',
+      { sessionId: 'sess-hb' },
+      (ev) => events.push(ev),
+      controller.signal,
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 65));
+    const heartbeats = events.filter((e) => e.heartbeat === true);
+    assert.ok(heartbeats.length >= 2, `expected >= 2 heartbeats, got ${heartbeats.length}`);
+
+    controller.abort();
+    await assert.rejects(
+      streamPromise,
+      (err) => {
+        assert.equal(err.code, 'aborted');
+        return true;
+      },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.equal(serverSideClosed, true, 'abort must close the mux WebSocket');
+    const countAfterAbort = events.filter((e) => e.heartbeat === true).length;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(
+      events.filter((e) => e.heartbeat === true).length,
+      countAfterAbort,
+      'heartbeat interval must be cleared on abort',
+    );
+  } finally {
+    await bridge.close();
+    await mux.close();
+  }
+});
+
+test('agent.stream throws agent_runtime_missing when mux closes before ready', async () => {
+  const mux = await startStubMuxServer({
+    onOpenStream(ws) {
+      ws.close(1011, 'internal failure before ready');
+    },
+  });
+
+  const bridge = createBridgeBoundToServer(mux.port, mux.token);
+  try {
+    await assert.rejects(
+      () => bridge.handle('agent.stream', { sessionId: 'sess-fail' }, () => {}),
+      (err) => {
+        assert.equal(err instanceof AgentError, true);
+        assert.equal(err.code, 'agent_runtime_missing');
+        return true;
+      },
+    );
+  } finally {
+    await bridge.close();
+    await mux.close();
+  }
+});
+
+

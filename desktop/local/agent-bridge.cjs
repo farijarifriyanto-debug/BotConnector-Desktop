@@ -3,6 +3,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { WebSocket: DefaultWebSocket } = require('ws');
 const { WorkspaceStore } = require('./workspaces.cjs');
 const { version: PACKAGE_VERSION } = require('../../package.json');
 
@@ -14,6 +15,9 @@ const DEFAULT_HEALTH_TIMEOUT_MS = 10_000;
 const DEFAULT_HEALTH_POLL_MS = 500;
 const SESSION_MESSAGES_MAX_BYTES = 200_000;
 const WORKSPACES_LIMIT = 20;
+const TOOL_OUTPUT_MAX_CHARS = 32 * 1024;
+const EVENT_MAX_BYTES = 900_000;
+const TRUNCATED_MARKER = '\n[truncated]';
 const BANNER_REGEX = /bccli serve http:\/\/127\.0\.0\.1:(\d+)/;
 
 const AGENT_METHODS = [
@@ -61,10 +65,50 @@ function compareSemver(a, b) {
   return 0;
 }
 
+function sliceUtf8Clean(str, maxBytes) {
+  const buf = Buffer.from(str, 'utf8');
+  if (buf.length <= maxBytes) return str;
+  let end = Math.max(0, maxBytes);
+  while (end > 0 && (buf[end] & 0xc0) === 0x80) {
+    end -= 1;
+  }
+  return buf.subarray(0, end).toString('utf8');
+}
+
+function capItem(rawValue) {
+  if (!rawValue || typeof rawValue !== 'object') return rawValue;
+  const v = { ...rawValue };
+  if (
+    v.type === 'tool_result' &&
+    typeof v.output === 'string' &&
+    v.output.length > TOOL_OUTPUT_MAX_CHARS
+  ) {
+    v.output = v.output.slice(0, TOOL_OUTPUT_MAX_CHARS) + TRUNCATED_MARKER;
+  }
+  while (
+    typeof v.display === 'string' &&
+    v.display.length > 0 &&
+    Buffer.byteLength(JSON.stringify({ item: v }), 'utf8') > EVENT_MAX_BYTES
+  ) {
+    const stripped = v.display.endsWith(TRUNCATED_MARKER)
+      ? v.display.slice(0, -TRUNCATED_MARKER.length)
+      : v.display;
+    const currentBytes = Buffer.byteLength(stripped, 'utf8');
+    const nextBytes = Math.floor(currentBytes * 0.9);
+    if (nextBytes <= 0) {
+      v.display = TRUNCATED_MARKER;
+      break;
+    }
+    v.display = sliceUtf8Clean(stripped, nextBytes) + TRUNCATED_MARKER;
+  }
+  return v;
+}
+
 class AgentBridge {
   constructor({
     fetchImpl = globalThis.fetch,
     spawnImpl = childProcess.spawn,
+    WebSocketImpl = DefaultWebSocket,
     now = () => Date.now(),
     heartbeatMs = DEFAULT_HEARTBEAT_MS,
     idleKillMs = DEFAULT_IDLE_KILL_MS,
@@ -80,6 +124,7 @@ class AgentBridge {
   } = {}) {
     this.fetch = fetchImpl;
     this.spawn = spawnImpl;
+    this.WebSocketImpl = WebSocketImpl || DefaultWebSocket;
     this.now = now;
     this.heartbeatMs = heartbeatMs;
     this.idleKillMs = idleKillMs;
@@ -102,6 +147,7 @@ class AgentBridge {
     this.lastActivityAt = 0;
     this.openStreams = 0;
     this.lastDiscoveredVersion = null;
+    this.activeMuxSockets = new Set();
   }
 
   candidatePaths() {
@@ -677,6 +723,200 @@ class AgentBridge {
     return { ok: true };
   }
 
+  async stream(sessionId, params = {}, onEvent = null, signal = null) {
+    const sid = String(sessionId || params?.sessionId || '').trim();
+    if (!sid) throw new Error('sessionId is required.');
+    if (signal?.aborted) {
+      const err = new Error('Agent stream aborted.');
+      err.code = 'aborted';
+      throw err;
+    }
+
+    const { port, token } = await this.ensureServe();
+    if (signal?.aborted) {
+      const err = new Error('Agent stream aborted.');
+      err.code = 'aborted';
+      throw err;
+    }
+
+    this.openStreams += 1;
+    this.touch();
+
+    return new Promise((resolve, reject) => {
+      const streamId = `agent-${crypto.randomUUID()}`;
+      let settled = false;
+      let readySeen = false;
+      let abortHandler = null;
+      let ws;
+
+      try {
+        ws = new this.WebSocketImpl(`ws://127.0.0.1:${port}/v1/mux`, {
+          headers: {
+            authorization: `Bearer ${token}`,
+          },
+        });
+      } catch (err) {
+        this.openStreams = Math.max(0, this.openStreams - 1);
+        this.touch();
+        reject(
+          new AgentError(
+            'agent_runtime_missing',
+            `Failed to open bccli mux WebSocket: ${err?.message || err}`,
+          ),
+        );
+        return;
+      }
+
+      this.activeMuxSockets.add(ws);
+
+      const heartbeatTimer =
+        this.heartbeatMs > 0
+          ? setInterval(() => {
+              this.touch();
+              if (typeof onEvent === 'function') {
+                try {
+                  onEvent({ heartbeat: true });
+                } catch {}
+              }
+            }, this.heartbeatMs)
+          : null;
+      heartbeatTimer?.unref?.();
+
+      const cleanup = () => {
+        if (heartbeatTimer) clearInterval(heartbeatTimer);
+        if (abortHandler && typeof signal?.removeEventListener === 'function') {
+          signal.removeEventListener('abort', abortHandler);
+        }
+        this.activeMuxSockets.delete(ws);
+        this.openStreams = Math.max(0, this.openStreams - 1);
+        this.touch();
+        try {
+          if (ws && (ws.readyState === 0 || ws.readyState === 1)) {
+            ws.close();
+          }
+        } catch {}
+      };
+
+      const finishResolve = (value) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(value);
+      };
+
+      const finishReject = (error) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(error);
+      };
+
+      if (signal && typeof signal.addEventListener === 'function') {
+        abortHandler = () => {
+          const err = new Error('Agent stream aborted.');
+          err.code = 'aborted';
+          finishReject(err);
+        };
+        if (signal.aborted) {
+          abortHandler();
+          return;
+        }
+        signal.addEventListener('abort', abortHandler, { once: true });
+      }
+
+      const attach = (event, fn) => {
+        if (typeof ws.on === 'function') ws.on(event, fn);
+        else if (typeof ws.addEventListener === 'function') {
+          ws.addEventListener(event, (ev) => fn(ev?.data !== undefined ? ev.data : ev));
+        }
+      };
+
+      attach('open', () => {
+        try {
+          ws.send(
+            JSON.stringify({
+              type: 'open',
+              streamId,
+              target: `session:${sid}`,
+            }),
+          );
+        } catch (err) {
+          finishReject(
+            new AgentError(
+              'agent_runtime_missing',
+              `Failed to send mux open frame: ${err?.message || err}`,
+            ),
+          );
+        }
+      });
+
+      attach('message', (raw) => {
+        if (settled) return;
+        let frame;
+        try {
+          frame = JSON.parse(Buffer.isBuffer(raw) ? raw.toString('utf8') : String(raw));
+        } catch {
+          return;
+        }
+        if (frame?.streamId && frame.streamId !== streamId) return;
+        this.touch();
+
+        if (frame?.type === 'item') {
+          readySeen = true;
+          const value = frame.value !== undefined ? frame.value : frame.item;
+          if (typeof onEvent === 'function') {
+            onEvent({ item: capItem(value) });
+          }
+          return;
+        }
+        if (frame?.type === 'ready') {
+          readySeen = true;
+          const value =
+            frame.value && typeof frame.value === 'object'
+              ? { type: 'ready', ...frame.value }
+              : { ...frame };
+          delete value.streamId;
+          if (typeof onEvent === 'function') {
+            onEvent({ item: capItem(value) });
+          }
+          return;
+        }
+        if (frame?.type === 'end') {
+          finishResolve({ ok: true });
+          return;
+        }
+        if (frame?.type === 'error') {
+          finishReject(
+            new AgentError(
+              'agent_runtime_missing',
+              frame?.message || frame?.error?.message || 'bccli mux stream error.',
+            ),
+          );
+        }
+      });
+
+      attach('error', (err) => {
+        finishReject(
+          new AgentError(
+            'agent_runtime_missing',
+            `bccli mux WebSocket error: ${err?.message || err}`,
+          ),
+        );
+      });
+
+      attach('close', () => {
+        if (settled) return;
+        if (readySeen) {
+          finishResolve({ ok: true });
+        } else {
+          finishReject(
+            new AgentError('agent_runtime_missing', 'bccli mux closed before becoming ready.'),
+          );
+        }
+      });
+    });
+  }
+
   async handle(method, params = {}, onEvent = null, signal = null) {
     if (method === 'agent.capabilities') return this.capabilities();
     if (method === 'agent.workspaces') return this.listWorkspaces();
@@ -737,6 +977,12 @@ class AgentBridge {
   }
 
   async close() {
+    for (const ws of [...this.activeMuxSockets]) {
+      try {
+        ws.close();
+      } catch {}
+    }
+    this.activeMuxSockets.clear();
     this.killServe();
   }
 }
@@ -748,4 +994,6 @@ module.exports = {
   AGENT_METHODS,
   MIN_BCCLI,
   compareSemver,
+  capItem,
+  sliceUtf8Clean,
 };
