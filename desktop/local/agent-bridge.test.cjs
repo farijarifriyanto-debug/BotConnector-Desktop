@@ -978,9 +978,14 @@ test('agent.stream emits periodic heartbeats and abort closes mux WS and clears 
       controller.signal,
     );
 
-    await new Promise((resolve) => setTimeout(resolve, 65));
+    // Jendela 65 ms kaku bikin tes flaky di runner lambat (Windows: 1 heartbeat, bukan 2).
+    // Tunggu sampai kondisi benar-benar terpenuhi, dengan batas yang longgar.
+    const heartbeatDeadline = Date.now() + 2000;
+    while (events.filter((e) => e.heartbeat === true).length < 2 && Date.now() < heartbeatDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
     const heartbeats = events.filter((e) => e.heartbeat === true);
-    assert.ok(heartbeats.length >= 2, `expected >= 2 heartbeats, got ${heartbeats.length}`);
+    assert.ok(heartbeats.length >= 2, `expected >= 2 heartbeats within 2s, got ${heartbeats.length}`);
 
     controller.abort();
     await assert.rejects(
